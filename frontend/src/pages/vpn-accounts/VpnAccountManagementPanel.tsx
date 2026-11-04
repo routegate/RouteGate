@@ -17,6 +17,7 @@ import { Section } from '../../shared/ui/Section';
 import { Notice } from '../../shared/ui/Notice';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { getVpnAccountManagementCopy } from './vpnAccountManagementCopy';
+import { getAccountTransfer } from '../../entities/vpnAccount/api/vpnAccountTransferApi';
 
 // Identity/administrative data only. Status changes go through the explicit
 // Activate/Suspend/Revoke actions below (never a status dropdown), and server
@@ -50,6 +51,16 @@ export function VpnAccountManagementPanel({ accountId }: { accountId?: string })
     queryFn: () => getVpnAccountNotes(accountId ?? ''),
     enabled: Boolean(accountId),
   });
+  // Deletion is never a way to shortcut a reserved RG-140 transfer.
+  // Fail closed until the read-only transfer status can be verified.
+  const transferQuery = useQuery({
+    queryKey: ['vpn-account-transfer', accountId],
+    queryFn: () => getAccountTransfer(accountId ?? ''),
+    enabled: Boolean(accountId),
+    refetchInterval: 15000,
+  });
+  const pendingTransfer = Boolean(transferQuery.data?.transfer && !transferQuery.data.transfer.completedAt);
+  const deletionBlocked = transferQuery.isPending || transferQuery.isError || pendingTransfer;
 
   useEffect(() => {
     const account = accountQuery.data;
@@ -150,7 +161,10 @@ export function VpnAccountManagementPanel({ accountId }: { accountId?: string })
       const query = searchParams.toString();
       navigate(`/vpn-accounts${query ? `?${query}` : ''}`, { replace: true });
     },
-    onError: () => setErrorMessage(copy.deleteError),
+    onError: () => {
+      setErrorMessage(copy.deleteError);
+      void transferQuery.refetch();
+    },
   });
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -160,6 +174,7 @@ export function VpnAccountManagementPanel({ accountId }: { accountId?: string })
   }
 
   function handleDelete() {
+    if (deletionBlocked) return;
     const name = accountQuery.data?.displayName ?? accountId ?? '';
     if (window.confirm(copy.deleteConfirm(name))) deleteMutation.mutate();
   }
@@ -282,9 +297,19 @@ export function VpnAccountManagementPanel({ accountId }: { accountId?: string })
       </Section>
 
       <Section title={copy.dangerZone} description={copy.dangerSubtitle} tone="danger">
+        {pendingTransfer && (
+          <Notice tone="warning">
+            <p>{copy.transferDeleteBlocked}</p>
+            <Link to={`/vpn-accounts/${encodeURIComponent(account.id)}/routing`}>
+              {copy.transferOpenRouting}
+            </Link>
+          </Notice>
+        )}
+        {transferQuery.isPending && <Notice tone="warning">{copy.transferCheckPending}</Notice>}
+        {transferQuery.isError && <Notice tone="error">{copy.transferCheckFailed}</Notice>}
         <div className="vpn-account-delete-action">
           <span className="vpn-account-delete-id">{account.id}</span>
-          <button className="danger-button" type="button" disabled={actionPending} onClick={handleDelete}>
+          <button className="danger-button" type="button" disabled={actionPending || deletionBlocked} onClick={handleDelete}>
             {copy.deleteAccount}
           </button>
         </div>
