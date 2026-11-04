@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Approved US Agent binary repair. No config apply, transfer write or VPN restart."""
+import fcntl
 import hashlib
 import os
 import pathlib
@@ -78,7 +79,23 @@ def activate(source):
     os.chmod(temporary, 0o755)
     os.replace(temporary, AGENT)
 
-def repair(candidate, checksum, commit):
+def repair(candidate, checksum, commit, *, inherited=False):
+    lock_path = os.environ.get('RG_UPDATE_LOCK_FILE') or '/run/lock/routegate-update.lock'
+    if inherited:
+        if not os.path.samestat(os.fstat(8), os.stat(lock_path)):
+            raise Stop('invalid_inherited_host_lock')
+        lock = os.fdopen(os.dup(8), 'ab')
+    else:
+        lock = open(lock_path, 'ab')
+    with lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Stop('host_update_lock_unavailable') from None
+        repair_locked(candidate, checksum, commit)
+
+
+def repair_locked(candidate, checksum, commit):
     if commit != COMMIT or not re.fullmatch('[0-9a-f]{64}', checksum):
         raise Stop('unapproved_candidate')
     if candidate.is_symlink() or not candidate.is_file() or digest(candidate) != checksum:
@@ -131,7 +148,12 @@ def repair(candidate, checksum, commit):
 
 if __name__ == '__main__':
     try:
-        repair(pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3])
+        args = sys.argv[1:]
+        inherited = args[:1] == ['--inherit-host-lock']
+        if inherited:
+            args = args[1:]
+        candidate, checksum, commit = args
+        repair(pathlib.Path(candidate), checksum, commit, inherited=inherited)
     except Exception as e:
         print('AGENT_REPAIR_BLOCKED: ' + (str(e) if isinstance(e, Stop) else 'private_details_suppressed'))
         sys.exit(1)

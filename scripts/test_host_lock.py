@@ -251,3 +251,60 @@ class ProductionLikeLockTests(unittest.TestCase):
                         self.assertNotEqual(result.returncode, 0)
                         self.assertIn(b'host update lock unavailable', result.stderr)
                         self.assertEqual(list(directory.iterdir()), [lock])
+
+
+class RollbackCycleLockTests(unittest.TestCase):
+    def test_workflow_holds_lock_across_both_deploys_and_all_validations(self):
+        import os
+        import textwrap
+
+        workflow = (ROOT.parent / '.github/workflows/production-like-ops.yml').read_text()
+        cycle = textwrap.dedent(workflow.split('<<\'CYCLE\'\n', 1)[1].split('\n          CYCLE\n', 1)[0])
+        for scenario in ('complete', 'validation-fails', 'already-busy'):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
+                directory = pathlib.Path(tmp)
+                cycle_file = directory / 'cycle.sh'
+                cycle_file.write_text(cycle)
+                lock = directory / 'update.lock'
+                lock.write_bytes(b'sentinel')
+                trace = directory / 'trace'
+                probe = '''
+if flock -n "$RG_UPDATE_LOCK_FILE" true; then exit 77; fi
+echo "$1" >>"$TRACE"
+'''
+                ops = directory / 'ops'
+                ops.write_text(probe + '[[ $SCENARIO != validation-fails ]]\n')
+                # Run both actual deploy entry points, stopping at the first
+                # host preflight. The deploy EXIT trap deletes its own core.
+                core = (ROOT / 'routegate-update-core.sh').read_text()
+                inputs = []
+                for stage in ('fail', 'redeploy'):
+                    bundle, validator, lib = [directory / (stage + suffix)
+                                              for suffix in ('.tar', '.sh', '-core.sh')]
+                    bundle.touch()
+                    validator.touch()
+                    markers = """
+echo '[rollback-cycle] intentional validation failure reached'
+echo 'Failure at stage=observability_validation; restoring production-like baseline.'
+echo 'database rollback restored backup schema=fixture'
+exit 42
+""" if stage == 'fail' else 'exit 0'
+                    lib.write_text(core + '\nrg_update_require_root() {\nset -- ' + stage +
+                                   '\n' + probe + markers + '\n}\n')
+                    inputs.append((bundle, validator, lib))
+                fail, redeploy = inputs
+                args = ['bash', str(cycle_file), 'fixture', fail[0], redeploy[0], 'unused',
+                        ROOT / 'deploy-production-like-bundle.sh', fail[1], redeploy[1],
+                        fail[2], redeploy[2], ops]
+                if scenario == 'already-busy':
+                    args = ['flock', '-n', str(lock), *args]
+                result = subprocess.run(args, env=dict(os.environ, TRACE=str(trace),
+                                        SCENARIO=scenario, RG_UPDATE_LOCK_FILE=str(lock)),
+                                        capture_output=True, timeout=5)
+                self.assertEqual(result.returncode == 0, scenario == 'complete', result.stderr)
+                expected = {'complete': ['validate', 'fail', 'validate', 'redeploy', 'validate'],
+                            'validation-fails': ['validate'], 'already-busy': []}
+                self.assertEqual(trace.read_text().splitlines() if trace.exists() else [],
+                                 expected[scenario])
+                subprocess.run(['flock', '-n', lock, 'true'], check=True, timeout=5)
+                self.assertEqual(lock.read_bytes(), b'sentinel')
