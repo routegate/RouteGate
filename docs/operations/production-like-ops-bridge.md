@@ -26,8 +26,9 @@ created by the original maintainer. The GitHub Actions job now pins the
 `62504580`, in addition to the full `routegate/RouteGate` repository path,
 exact issue number and title. No arbitrary issue author or triggering actor is
 trusted, and ordinary issues cannot enter this workflow's privileged job.
-The workflow's existing allow-list, environment approval and host-side lock
-remain unchanged.
+The existing mutating-operation allow-list, environment protection and host-side
+lock remain unchanged. Only the fixed read-only `traffic-inspect` operation
+is added to the bridge.
 
 The static gate is checked by `scripts/test_ops_bridge_identity.py` in CI.
 This ownership fix does **not** change the unrelated, previously pinned
