@@ -13,7 +13,7 @@ WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/production-l
 def issue_job_gate():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     match = re.search(
-        r"(?ms)^jobs:\n  operate:\n(?:(?!^    if:).)*^    if: >-\n(?P<expression>(?:      .+\n)+)",
+        r"(?m)^jobs:\n  operate:\n(?:(?!^    if:)[\s\S])*?^    if: >-\n(?P<expression>(?:      [^\r\n]+\n)+)",
         workflow,
     )
     if match is None:
