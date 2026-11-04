@@ -103,3 +103,72 @@ for (const width of [390, 1440]) test(`guided transfer retains source and gates 
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2));
   } finally { await page.close(); }
 });
+
+for (const width of [390, 1440]) test(`account deletion is blocked until an RG-140 transfer is completed (${width}px)`, async () => {
+  const page = await browser.newPage({ viewport: { width, height: 960 } });
+  const errors = [], writes = [];
+  const stamp = new Date().toISOString();
+  let state = 'client_refresh_pending';
+  let transferLookupFails = false;
+  const account = { id: 'canary', displayName: 'fi-test', username: 'fi-test', status: 'active', serverId: 'us', createdAt: stamp, updatedAt: stamp };
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    localStorage.setItem('routegate.locale', 'en');
+    localStorage.setItem('routegate.auth.token', 'fixture');
+  });
+  page.on('dialog', dialog => dialog.accept());
+  await page.route(url => url.pathname.startsWith('/api/'), async route => {
+    const path = new URL(route.request().url()).pathname;
+    const method = route.request().method();
+    const json = (value, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) });
+    if (method !== 'GET') writes.push({ path, method });
+    if (path === '/api/admin/health') return json({ status: 'ok' });
+    if (path === '/api/admin/me') return json({ user: { id: 'admin', roles: ['super_admin'] } });
+    if (path === '/api/v1/vpn-accounts') return json({ items: [account], total: 1, page: 1, pageSize: 50, totalPages: 1 });
+    if (path === '/api/v1/vpn-accounts/canary') return json(account);
+    if (path === '/api/v1/vpn-accounts/canary/notes') return json({ notes: '', updatedAt: stamp });
+    if (path === '/api/v1/vpn-accounts/canary/transfer') {
+      if (transferLookupFails) return json({ message: 'API unavailable' }, 503);
+      return json({ transfer: state ? {
+        id: 'transfer', accountId: 'canary', state,
+        sourceServerId: 'fi', targetServerId: 'us',
+        lastError: '', updatedAt: stamp, cutoverAt: stamp,
+        completedAt: state === 'complete' ? stamp : null, devices: [],
+      } : null, requiresTransfer: true });
+    }
+    if (path === '/api/v1/servers') return json({ items: [{ id: 'us', name: 'US' }, { id: 'fi', name: 'FI' }] });
+    return json({ message: `Unmocked ${method} ${path}` }, 404);
+  });
+  try {
+    await page.goto(`${origin}/vpn-accounts/canary/settings`);
+    const action = page.getByRole('button', { name: 'Delete account permanently' });
+    await action.waitFor();
+    await page.getByText('The account transfer is not complete.', { exact: false }).waitFor();
+    assert.equal(await action.isDisabled(), true);
+    const link = page.getByRole('link', { name: 'Open transfer steps' });
+    assert.equal(await link.getAttribute('href'), '/vpn-accounts/canary/routing');
+    await action.click({ force: true }).catch(() => {});
+    assert.equal(writes.length, 0, 'disabled delete cannot write or erase an active transfer');
+    assert.deepEqual(errors, []);
+
+    transferLookupFails = true;
+    await page.reload();
+    await page.getByText('Could not verify the transfer state.', { exact: false }).waitFor();
+    assert.equal(await action.isDisabled(), true, 'unknown transfer state must fail closed');
+    assert.equal(writes.length, 0);
+
+    transferLookupFails = false;
+    state = 'complete';
+    await page.reload();
+    await action.waitFor();
+    await page.waitForFunction(() => {
+      const btn = [...document.querySelectorAll('button')].find(x => x.textContent?.includes('Delete account permanently'));
+      return btn && !btn.disabled;
+    });
+    assert.equal(await page.getByText('The account transfer is not complete.', { exact: false }).count(), 0);
+    assert.equal(writes.length, 0, 'terminal transfer does not automatically delete the account');
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
