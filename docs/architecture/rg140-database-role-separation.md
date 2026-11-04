@@ -363,3 +363,19 @@ credential mutation. An empty scan cannot establish these preconditions.
 Processes running solely under another UID, external database clients and
 new launches after enumeration require independent controls. The same-inode
 kernel exclusion and durable pending marker retain their separate roles.
+
+### Process recheck behind durable intent
+
+First publication keeps the early idle-account check to refuse an already
+visible process before creating host state. After creating and fsyncing the
+latch and pending marker it checks the account again, before creating even the
+temporary pin. A live service process that passed the first scan and entered
+database startup prevents publication. A second scan failure retains the
+durable pending marker for explicit recovery. The writer never clears it.
+
+For normal Managers with the startup check from #677 in the same filesystem
+view, the visible latch withholds a later copy before database initialization.
+This does not undo work performed by a transient process before the recheck.
+Older binaries that ignore the latch can still start after enumeration.
+Administrative control of those launch paths and database sessions remains a
+prerequisite for actual credential changes; the writer remains offline and unwired.

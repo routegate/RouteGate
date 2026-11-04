@@ -118,6 +118,10 @@ def _publish_locked(parent_fd, payload):
         # it here: successful file publication is not a completed conversion.
         os.mkdir(PENDING, 0o700, dir_fd=directory_fd)
         os.fsync(directory_fd)
+        # Recheck after intent is durable. A latch-aware copy admitted before
+        # mkdir is now visible to this scan if still live; later starts see
+        # the latch. Refusal or inspection failure must retain pending state.
+        require_idle_manager_account()
         fd = os.open('pending.pin', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                      0o600, dir_fd=directory_fd)
         with os.fdopen(fd, 'wb') as stream:

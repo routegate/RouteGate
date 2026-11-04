@@ -67,6 +67,44 @@ def exercise(root, manager_command, enter_service=None):
                 process.wait(timeout=5)
                 alternate.unlink(missing_ok=True)
 
+    # Launch a distinct inode immediately after the real preflight returns.
+    # Keep its PostgreSQL handshake open across the durable intent boundary.
+    alternate = root / 'late-copy'
+    shutil.copy2(binary, alternate)
+    copy_command = [str(pathlib.Path(manager_command[0]).with_name(alternate.name))]
+    scan = writer.require_idle_manager_account
+    process = connection = None
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        listener.settimeout(10)
+        url = f'postgres://fixture@127.0.0.1:{listener.getsockname()[1]}/fixture?sslmode=disable'
+        def launch_after_scan():
+            nonlocal process, connection
+            scan()
+            if process is None:
+                process = subprocess.Popen(copy_command, env=dict(os.environ, ROUTEGATE_DATABASE_URL=url),
+                                           preexec_fn=enter_service)
+                connection, _ = listener.accept()
+        try:
+            with patch.object(writer, 'require_idle_manager_account', side_effect=launch_after_scan):
+                try:
+                    publish()
+                except PermissionError as err:
+                    assert process is not None and str(err).endswith(f'PID {process.pid}'), err
+                else:
+                    raise AssertionError('published while copy admitted after preflight remained live')
+            assert {p.name for p in latch.iterdir()} == {writer.PENDING}
+        finally:
+            if process is not None:
+                process.kill()
+                process.wait(timeout=5)
+            if connection is not None:
+                connection.close()
+    # Reset only this disposable fixture for the independent success case.
+    (latch / writer.PENDING).rmdir()
+    latch.rmdir()
+
     # Stop at the actual first mkdir, with publication admitted but no visible
     # marker. The kernel must refuse exec on that inode, before main runs.
     mkdir = os.mkdir
@@ -85,7 +123,17 @@ def exercise(root, manager_command, enter_service=None):
             observed.append(name)
         return mkdir(name, *args, **kwargs)
 
-    with patch.object(writer.os, 'mkdir', side_effect=before_mkdir):
+    def launch_after_final_scan():
+        scan()
+        if (latch / writer.PENDING).exists():
+            result = subprocess.run(copy_command, env=dict(os.environ, ROUTEGATE_DATABASE_URL='postgres://%'),
+                                    preexec_fn=enter_service, capture_output=True, timeout=5)
+            assert result.returncode == 1 and b'Manager startup withheld:' in result.stdout, result
+            assert b'cannot parse' not in result.stdout
+            observed.append('late-copy withheld')
+
+    with patch.object(writer.os, 'mkdir', side_effect=before_mkdir), \
+         patch.object(writer, 'require_idle_manager_account', side_effect=launch_after_final_scan):
         # ETXTBSY can briefly survive waitpid during kernel teardown. Only
         # retry this pre-publication refusal; never adopt a partial latch.
         deadline = time.monotonic() + 5
@@ -97,7 +145,7 @@ def exercise(root, manager_command, enter_service=None):
                 if err.errno != errno.ETXTBSY or latch.exists() or time.monotonic() >= deadline:
                     raise
                 time.sleep(0.01)
-    assert observed == [writer.DIRECTORY]
+    assert observed == [writer.DIRECTORY, 'late-copy withheld']
     assert (latch / writer.PENDING).is_dir()
     assert (latch / 'restore.pin').read_bytes() == payload
     assert hashlib.sha256(binary.read_bytes()).digest() == pristine
