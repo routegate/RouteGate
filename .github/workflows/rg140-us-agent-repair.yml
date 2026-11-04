@@ -73,10 +73,12 @@ jobs:
           "${SSH[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST" "sudo -n flock -w 180 /run/lock/routegate-production-like.lock bash -s -- '$remote_prefix' '$AGENT_SHA256' '$AGENT_COMMIT'" <<'REMOTE'
           set -euo pipefail
           set +x
+          exec 8>>"${RG_UPDATE_LOCK_FILE:-/run/lock/routegate-update.lock}"
+          flock -n 8 || { echo 'host update lock unavailable' >&2; exit 1; }
           set -a
           source /etc/routegate/manager.env >/dev/null 2>&1
           set +a
-          exec python3 "$1.py" "$1" "$2" "$3"
+          exec python3 "$1.py" --inherit-host-lock "$1" "$2" "$3"
           REMOTE
       - name: Remove runner credentials
         if: always()

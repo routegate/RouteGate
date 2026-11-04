@@ -112,6 +112,12 @@ if [[ ${1:-} == "--run-down-migration" || ${1:-} == "--run-down-migration-inheri
   exit $?
 fi
 
+deploy_lock_mode=direct
+if [[ ${1:-} == --inherit-host-lock ]]; then
+  deploy_lock_mode=inherited
+  shift
+fi
+
 EXPECTED_COMMIT=${1:?expected commit is required}
 BUNDLE_FILE=${2:?bundle path is required}
 EXPECTED_BUNDLE_SHA=${3:?bundle sha256 is required}
@@ -145,7 +151,7 @@ MAINTENANCE_SERVICE_UNIT=/etc/systemd/system/routegate-maintenance-dispatch@.ser
 RG_UPDATE_LOG_PREFIX='[production-like]'
 # shellcheck source=scripts/routegate-update-core.sh
 source "$UPDATE_CORE"
-rg_update_acquire_production_like_lock
+rg_update_acquire_production_like_lock "$deploy_lock_mode"
 WORK_DIR=$(mktemp -d /tmp/routegate-production-like.XXXXXX)
 
 log() {

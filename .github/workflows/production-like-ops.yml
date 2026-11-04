@@ -328,6 +328,10 @@ jobs:
           core_fail=$8
           core_redeploy=$9
           ops_script=${10}
+          # Keep the shared lock across both deploys and all three validations.
+          # shellcheck disable=SC1090
+          source "$core_fail"
+          rg_update_acquire_production_like_lock direct
           forced_log=$(mktemp /tmp/routegate-forced-rollback.XXXXXX.log)
           trap 'rm -f "$forced_log"' EXIT
 
@@ -335,7 +339,7 @@ jobs:
           bash "$ops_script" validate
 
           set +e
-          bash "$deploy_script" "$target_sha" "$bundle_fail" "$bundle_sha" "$fail_validate" "$core_fail" >"$forced_log" 2>&1
+          bash "$deploy_script" --inherit-host-lock "$target_sha" "$bundle_fail" "$bundle_sha" "$fail_validate" "$core_fail" >"$forced_log" 2>&1
           forced_rc=$?
           set -e
           cat "$forced_log"
@@ -358,7 +362,7 @@ jobs:
           bash "$ops_script" validate
 
           printf '[rollback-cycle] clean redeploy starting\n'
-          bash "$deploy_script" "$target_sha" "$bundle_redeploy" "$bundle_sha" "$validate_script" "$core_redeploy"
+          bash "$deploy_script" --inherit-host-lock "$target_sha" "$bundle_redeploy" "$bundle_sha" "$validate_script" "$core_redeploy"
 
           printf '[rollback-cycle] post-redeploy validation starting\n'
           bash "$ops_script" validate

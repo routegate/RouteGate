@@ -37,8 +37,8 @@ Default shared-lock identity is checked for all three entry points.
 - Production-like deploy, Manager update, repair and operational workflows use
   `/run/lock/routegate-production-like.lock` in their SSH wrappers. Their script
   entry points are not all self-locking. Bundle deploy and both Manager update
-  scripts now acquire the updater lock inside the legacy wrapper. Repair and
-  other operational wrappers still require separate coverage.
+  scripts acquire the updater lock inside the legacy wrapper. The rollback cycle
+  and the pinned US Agent repair also coordinate with it as described below.
 - Agent config application and direct systemd/binary invocation do not acquire
   this administrative lock. The lock does not prevent an Agent apply racing a
   recovery config rollback, or establish a protected startup gate.
@@ -73,5 +73,17 @@ the configured lock inode and attempts exclusive nonblocking flock on that fd
 before preparing SQL. A different open description contends with the parent.
 The legacy SSH wrapper lock stays in place.
 
-This covers these script entry points. It does not serialize the entire
-multi-script deploy cycle, repair workflows, Agent apply or service startup.
+The rollback-cycle runner acquires the host lock before baseline validation
+and holds it through the forced rollback, intermediate validation, clean
+redeploy and final validation. Its two synchronous deploy children take
+`--inherit-host-lock` and check both the configured inode and exclusive flock
+on fd 8. Direct deploys still take a fresh lock.
+
+The pinned US Agent repair wrapper takes the shared lock before reading
+Manager environment settings. The Python repair verifies the inherited fd or,
+when called directly, takes a fresh lock through backup, restart, verification
+and rollback. The existing outer SSH lock is acquired first in both workflows.
+
+Other administrative entry points, including direct runtime restarts and
+port reconciliation, still need individual review. Agent apply, descendant
+cleanup after process death, and service startup admission remain separate.

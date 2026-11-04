@@ -1,7 +1,11 @@
 import contextlib
 import importlib.util
 import io
+import os
+import fcntl
 import pathlib
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -22,7 +26,8 @@ class RepairTests(unittest.TestCase):
             def command(args):
                 calls.append(args)
                 return ''
-            with patch.object(repair, 'AGENT', old), patch.object(repair, 'BACKUPS', root/'backups'), \
+            with patch.dict(os.environ, RG_UPDATE_LOCK_FILE=str(root/'update.lock')), \
+                 patch.object(repair, 'AGENT', old), patch.object(repair, 'BACKUPS', root/'backups'), \
                  patch.object(repair, 'command', side_effect=command), \
                  patch.object(repair, 'scope', side_effect=[None, repair.Stop('agent_work_in_progress')] if failed_scope else None), \
                  patch.object(repair, 'files', side_effect=[{'file':'same'},{'file':'changed' if drift else 'same'}]), \
@@ -36,6 +41,42 @@ class RepairTests(unittest.TestCase):
                 except repair.Stop as caught:
                     error = str(caught)
             return old.read_bytes(), calls, output.getvalue(), error
+
+    def test_host_lock_through_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = pathlib.Path(tmp) / 'update.lock'
+            lock.write_bytes(b'sentinel')
+            env = dict(os.environ, RG_UPDATE_LOCK_FILE=str(lock))
+            for setup, mode, reason in (
+                ('', '', 'unapproved_candidate'),
+                ('exec 8>>"$RG_UPDATE_LOCK_FILE"; flock -n 8; ', '', 'host_update_lock_unavailable'),
+                ('exec 8>>"$RG_UPDATE_LOCK_FILE"; flock -n 8; ', '--inherit-host-lock', 'unapproved_candidate'),
+                ('exec 8>>"$RG_UPDATE_LOCK_FILE.other"; flock -n 8; ', '--inherit-host-lock', 'invalid_inherited_host_lock'),
+                ('exec 7>>"$RG_UPDATE_LOCK_FILE"; flock -n 7; exec 8>>"$RG_UPDATE_LOCK_FILE"; ',
+                 '--inherit-host-lock', 'host_update_lock_unavailable'),
+            ):
+                with self.subTest(mode=mode, setup=setup):
+                    result = subprocess.run(['bash', '-c', setup + '"$@"', 'fixture',
+                                             sys.executable, repair.__file__, *([mode] if mode else []),
+                                             'fixture', 'bad', 'fixture'], env=env,
+                                            capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(reason, result.stdout)
+            self.assertEqual(lock.read_bytes(), b'sentinel')
+
+    def test_direct_repair_holds_lock_until_unwind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'host.lock'
+            with path.open('ab') as contender:
+                def injected_failure(*args):
+                    with self.assertRaises(BlockingIOError):
+                        fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    raise repair.Stop('fixture_failure')
+                with patch.dict(os.environ, RG_UPDATE_LOCK_FILE=str(path)), \
+                     patch.object(repair, 'repair_locked', side_effect=injected_failure), \
+                     self.assertRaisesRegex(repair.Stop, 'fixture_failure'):
+                    repair.repair(None, None, None)
+                fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     def test_success_changes_only_agent_binary_and_service(self):
         binary,calls,output,error = self.run_case()

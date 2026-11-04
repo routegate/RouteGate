@@ -28,7 +28,16 @@ rg_update_log() {
 # Production-like entry points hold fd 8 through rollback. A nested
 # down-migration receives the descriptor across exec.
 rg_update_acquire_production_like_lock() {
-  exec 8>>"${RG_UPDATE_LOCK_FILE:-/run/lock/routegate-update.lock}" || return 1
+  local lock_file=${RG_UPDATE_LOCK_FILE:-/run/lock/routegate-update.lock}
+  case ${1:-direct} in
+    direct) exec 8>>"$lock_file" || return 1 ;;
+    inherited)
+      [[ /proc/self/fd/8 -ef "$lock_file" ]] || {
+        rg_update_die "invalid inherited host update lock"
+        return 1
+      } ;;
+    *) rg_update_die "invalid host update lock mode"; return 1 ;;
+  esac
   flock -n 8 || { rg_update_die "host update lock unavailable"; return 1; }
 }
 

@@ -505,7 +505,7 @@ jobs:
           bash scripts/test-update-bootstrap.sh
           bash scripts/test-update-core.sh
           sudo bash scripts/test-update-role.sh
-          sudo python3 -m unittest scripts/test_restore_mode_record.py scripts/test_pin_writer.py scripts/test_pin_publication_rollback.py scripts/test_host_lock.py
+          sudo python3 -m unittest scripts/test_restore_mode_record.py scripts/test_pin_writer.py scripts/test_pin_publication_rollback.py scripts/test_host_lock.py scripts/test_rg140_repair_us_agent.py
           bash scripts/test-update-toolchain.sh
           bash scripts/test-update-verified.sh
           python3 -m unittest scripts/test_outer_rollback_stop.py scripts/test_maintenance_dispatch.py scripts/test_publish_bootstrap.py scripts/test_remote_node_vpn_e2e.py
