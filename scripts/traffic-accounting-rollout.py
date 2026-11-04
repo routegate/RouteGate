@@ -207,6 +207,60 @@ def inspect():
             raise Stop('statistics_loopback_port_already_in_use') from None
     return values, agent_id, server_id
 
+def pending_transfer_evidence(server_id, expected_count):
+    """Fixed, bounded read-only RG-140 stage evidence without account identifiers.
+
+    An unfinished transfer may reserve the US node and must not be silently
+    treated as an unrelated configuration deployment. No output includes UUIDs,
+    device/subscription material, actors, or free-form failure messages.
+    """
+    raw = sql(
+        "SELECT COALESCE(jsonb_agg(jsonb_build_object("
+        "'state', t.state, "
+        "'is_fi_test', (a.display_name='fi-test' OR a.username='fi-test'), "
+        "'us_node_role', CASE WHEN t.source_server_id='" + server_id + "'::uuid THEN 'source' "
+        "WHEN t.target_server_id='" + server_id + "'::uuid THEN 'target' ELSE 'unrelated' END, "
+        "'placement', CASE WHEN a.server_id=t.source_server_id THEN 'source' "
+        "WHEN a.server_id=t.target_server_id THEN 'target' ELSE 'other' END, "
+        "'cutover_recorded', t.cutover_at IS NOT NULL, "
+        "'cleanup_acknowledged', t.cleanup_acknowledged_at IS NOT NULL, "
+        "'target_job_status', COALESCE(target_job.status,'absent'), "
+        "'cleanup_job_status', COALESCE(cleanup_job.status,'absent'), "
+        "'has_error', t.last_error<>'' "
+        ") ORDER BY t.created_at, t.id), '[]'::jsonb) "
+        "FROM vpn_account_transfers t "
+        "JOIN vpn_accounts a ON a.id=t.vpn_account_id "
+        "LEFT JOIN config_apply_jobs target_job ON target_job.id=t.target_job_id "
+        "LEFT JOIN config_apply_jobs cleanup_job ON cleanup_job.id=t.cleanup_job_id "
+        "WHERE t.completed_at IS NULL"
+    )
+    try:
+        states = json.loads(raw)
+    except (TypeError, ValueError):
+        raise Stop('transfer_evidence_query_invalid') from None
+    if not isinstance(states, list) or len(states) != expected_count or len(states) > 16:
+        raise Stop('transfer_evidence_count_mismatch_or_unbounded')
+    allowed_states = {
+        'preparing', 'target_applying', 'target_ready',
+        'client_refresh_pending', 'source_cleaning', 'target_cleaning',
+    }
+    allowed_jobs = {'absent', 'pending', 'in_progress', 'succeeded', 'failed'}
+    for item in states:
+        if not isinstance(item, dict) or set(item) != {
+            'state', 'is_fi_test', 'us_node_role', 'placement', 'cutover_recorded',
+            'cleanup_acknowledged', 'target_job_status',
+            'cleanup_job_status', 'has_error',
+        }:
+            raise Stop('transfer_evidence_shape_invalid')
+        if item['state'] not in allowed_states or item['us_node_role'] not in ('source', 'target', 'unrelated') or item['placement'] not in ('source', 'target', 'other'):
+            raise Stop('transfer_evidence_value_invalid')
+        if item['target_job_status'] not in allowed_jobs or item['cleanup_job_status'] not in allowed_jobs:
+            raise Stop('transfer_job_status_invalid')
+        if not all(type(item[key]) is bool for key in ('is_fi_test', 'cutover_recorded', 'cleanup_acknowledged', 'has_error')):
+            raise Stop('transfer_evidence_flag_invalid')
+    return states
+
+
 def diagnose():
     """Read-only US accounting evidence. No binary metadata scraping or port binding.
 
@@ -229,10 +283,13 @@ def diagnose():
     if schema not in (OLD_SCHEMA, SCHEMA):
         raise Stop('unexpected_database_schema')
     transfers = int(sql('SELECT count(*) FROM vpn_account_transfers WHERE completed_at IS NULL'))
+    transfer_evidence = pending_transfer_evidence(server_id, transfers)
+    reservations = int(sql('SELECT count(*) FROM vpn_account_transfer_nodes'))
     apply_jobs = int(sql("SELECT count(*) FROM config_apply_jobs WHERE status IN ('pending','in_progress')"))
 
-    # These are deliberately COUNT-only queries. Never print account identities,
-    # connection details, runtime config, bearer tokens, or usage-event payloads.
+    # Only fixed aggregate SQL and allow-listed transfer status evidence.
+    # Never print account identities, connection details, runtime config,
+    # bearer tokens, actors, or usage-event payloads.
     recent_native = int(sql(
         "SELECT count(*) FROM traffic_usage_events "
         "WHERE server_id='" + server_id + "'::uuid "
@@ -268,6 +325,8 @@ def diagnose():
         'schema': schema,
         'schema160_ready': schema == SCHEMA,
         'unfinished_transfers': transfers,
+        'pending_transfer_evidence': transfer_evidence,
+        'transfer_node_reservations': reservations,
         'unfinished_apply_jobs': apply_jobs,
         'runtime_stats_supported': runtime_supported,
         'agent_collection_enabled': values.get('traffic_collection_enabled') == 'true',
