@@ -188,29 +188,42 @@
 }
 
 .traffic-empty-state {
-  background:
-    linear-gradient(rgba(148, 163, 184, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.035) 1px, transparent 1px),
-    radial-gradient(circle at 50% 45%, rgba(37, 99, 235, 0.08), rgba(2, 6, 23, 0.08));
-  background-size: 44px 38px, 44px 38px, auto;
-  border: 1px solid rgba(148, 163, 184, 0.1);
+  align-content: center;
+  background: rgba(2, 6, 23, 0.24);
+  border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 12px;
   color: var(--rg-text-secondary);
   display: grid;
-  gap: 5px;
+  gap: 10px;
+  justify-items: center;
   min-height: 184px;
-  padding: 0 16px;
-  place-content: center;
+  padding: 18px 16px;
   text-align: center;
 }
 
 .traffic-empty-state strong {
   color: var(--rg-text-primary);
-  font-size: 18px;
+  font-size: 15px;
+  line-height: 1.4;
 }
 
-.traffic-empty-state span {
-  font-size: 11px;
+.traffic-empty-state p {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 40ch;
+}
+
+.traffic-empty-state .small-button {
+  display: inline-flex;
+  font-size: 12px;
+  justify-content: center;
+  margin-top: 4px;
+  text-decoration: none;
+}
+
+.traffic-empty-state--error {
+  border-color: rgba(248, 113, 113, 0.3);
 }
 
 .traffic-types-widget {
