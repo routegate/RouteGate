@@ -207,6 +207,81 @@ def inspect():
             raise Stop('statistics_loopback_port_already_in_use') from None
     return values, agent_id, server_id
 
+def diagnose():
+    """Read-only US accounting evidence. No binary metadata scraping or port binding.
+
+    Inspect must work before the statistics-enabled Manager/Agent are installed:
+    missing build tags, unavailable counter config, and empty rollups are
+    diagnostic findings, not reasons to refuse a read-only inspection.
+    """
+    values = config_values(CONFIG.read_bytes())
+    agent_id = str(uuid.UUID(values['agent_id']))
+    server_id = str(uuid.UUID(values['server_id']))
+    binding = sql(
+        "SELECT count(*) FROM agents a JOIN servers s ON s.id=a.server_id "
+        "WHERE a.id='" + agent_id + "'::uuid AND s.id='" + server_id + "'::uuid "
+        "AND (lower(s.hostname)='us.routegate.org' OR lower(s.name)='us.routegate.org')"
+    )
+    if binding != '1':
+        raise Stop('local_agent_us_server_binding_not_verified')
+
+    schema = sql('SELECT max(version) FROM schema_migrations')
+    if schema not in (OLD_SCHEMA, SCHEMA):
+        raise Stop('unexpected_database_schema')
+    transfers = int(sql('SELECT count(*) FROM vpn_account_transfers WHERE completed_at IS NULL'))
+    apply_jobs = int(sql("SELECT count(*) FROM config_apply_jobs WHERE status IN ('pending','in_progress')"))
+
+    # These are deliberately COUNT-only queries. Never print account identities,
+    # connection details, runtime config, bearer tokens, or usage-event payloads.
+    recent_native = int(sql(
+        "SELECT count(*) FROM traffic_usage_events "
+        "WHERE server_id='" + server_id + "'::uuid "
+        "AND metadata->>'source'='sing-box-v2ray-api' "
+        "AND reported_at >= now() - interval '30 days'"
+    ))
+    recent_daily = int(sql(
+        "SELECT count(*) FROM traffic_usage_daily "
+        "WHERE usage_date >= (now() AT TIME ZONE 'UTC')::date - 29 "
+        "AND usage_date <= (now() AT TIME ZONE 'UTC')::date"
+    ))
+
+    runtime_path = values.get('sing_box_path', '/usr/local/bin/sing-box')
+    try:
+        version = run([runtime_path, 'version'])
+    except (Stop, OSError):
+        runtime_supported = None
+    else:
+        runtime_supported = 'with_v2ray_api' in re.split(r'[\s,]+', version)
+
+    active = Path(values.get('active_config_path', '/etc/sing-box/config.json'))
+    try:
+        active_config = json.loads(active.read_bytes())
+        stats = active_config.get('experimental', {}).get('v2ray_api', {})
+        stats_enabled = stats.get('stats', {}).get('enabled') is True
+        stats_loopback = stats.get('listen') == '127.0.0.1:18085'
+    except (OSError, ValueError, AttributeError):
+        stats_enabled = None
+        stats_loopback = None
+
+    report = {
+        'mode': 'read_only',
+        'schema': schema,
+        'schema160_ready': schema == SCHEMA,
+        'unfinished_transfers': transfers,
+        'unfinished_apply_jobs': apply_jobs,
+        'runtime_stats_supported': runtime_supported,
+        'agent_collection_enabled': values.get('traffic_collection_enabled') == 'true',
+        'runtime_stats_enabled': stats_enabled,
+        'runtime_stats_loopback_configured': stats_loopback,
+        'recent_native_reports_30d': recent_native,
+        'dashboard_daily_rows_30d': recent_daily,
+        'dashboard_daily_available_from_database': recent_daily > 0,
+        'live_api_not_checked': True,
+        'no_service_or_config_changes': True,
+    }
+    print(json.dumps(report, sort_keys=True), flush=True)
+    return report
+
 def install_files(files, backup, health=wait_manager, protected=snapshot, command=run, recover_health=wait_manager):
     before = protected()
     old = {path: path.read_bytes() if path.exists() else None for path in files}
@@ -348,7 +423,7 @@ def main():
     if mode != 'inspect':
         raise Stop('install_and_apply_disabled_pending_bootstrap_identity_repair')
     if mode == 'inspect':
-        inspect()
+        diagnose()
     elif mode == 'install' and len(sys.argv) == 4 and re.fullmatch(r'[0-9]+', sys.argv[3]):
         install(Path(sys.argv[2]), sys.argv[3])
     elif mode == 'apply' and len(sys.argv) == 4 and re.fullmatch(r'[0-9]+', sys.argv[3]):
