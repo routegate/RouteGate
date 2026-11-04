@@ -91,7 +91,7 @@ for (const width of [390, 1440]) {
         '<section class="health-pulse health-pulse--healthy">',
         '<svg viewBox="0 0 240 48"><path class="health-pulse-line" d="M0 24 H240"></path></svg>',
         '</section><div class="node-distribution-map"></div>',
-        '<section class="traffic-empty-state"><div class="traffic-empty-wave"><span></span></div></section>',
+        '<section class="traffic-empty-state"><strong>Traffic unavailable</strong></section>',
         '<div class="dashboard-table servers-summary-table">',
         '<div class="dashboard-table-row"><span class="server-online-dot"></span></div>',
         '<div class="dashboard-table-row"><span class="server-offline-dot"></span></div>',
@@ -133,7 +133,6 @@ for (const width of [390, 1440]) {
           offlineAnimation: style(offline).animationName,
           heartbeatDuration: style(select('.health-pulse-line')).animationDuration,
           radarDuration: getComputedStyle(select('.node-distribution-map'), '::after').animationDuration,
-          waveDuration: style(select('.traffic-empty-wave span')).animationDuration,
         };
         if (!serverAnimation || !userAnimation) return { base, missingAnimation: true };
         serverAnimation.pause();
@@ -160,7 +159,6 @@ for (const width of [390, 1440]) {
       assert.equal(result.base.offlineAnimation, 'none');
       assert.equal(result.base.heartbeatDuration, '6s');
       assert.equal(result.base.radarDuration, '14s');
-      assert.equal(result.base.waveDuration, '6s');
       assert.deepEqual(result.full.server, result.full.user, 'At full brightness the dots are identical');
       assert.deepEqual(result.dim.server, result.dim.user, 'At half cycle the dots are identical');
       assert.ok(result.full.server.opacity >= 0.99);
