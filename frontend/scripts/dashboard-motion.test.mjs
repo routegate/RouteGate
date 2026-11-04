@@ -28,8 +28,11 @@ test('continuous dashboard signals use calmer loops', () => {
   assert.ok(seconds('.dashboard-page .health-pulse-line', 'rg-heartbeat') >= 5.5);
   assert.ok(seconds('.dashboard-page .node-distribution-map::after', 'rg-map-sweep') >= 13);
   assert.ok(seconds('.dashboard-page .node-country-marker-ping', 'rg-marker-ping') >= 4.8);
-  assert.ok(seconds('.dashboard-page .traffic-empty-wave span', 'rg-idle-wave') >= 5.5);
   assert.ok(seconds('.dashboard-live-bar--live .dashboard-live-indicator i', 'rg-live-bar-dot') >= 3.4);
+});
+
+test('unknown traffic is not represented by animated synthetic bars', () => {
+  assert.doesNotMatch(stylesheet, /traffic-empty-wave|rg-idle-wave/);
 });
 
 test('server and VPN online dots use one visible, unclipped animation', () => {
