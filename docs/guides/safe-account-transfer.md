@@ -30,7 +30,19 @@ accounts is rejected.
 | Apply failed | Retry failed apply or cancel before cutover | No completion banner or premature subscription switch |
 
 The operation is persisted in PostgreSQL. Reloading or restarting Manager does
-not lose its state or queue duplicate jobs. Repeating Prepare for the same
+not lose its state or queue duplicate jobs.
+
+**A long-lived `client_refresh_pending` record is intentional, not a timed-out
+background copy.** Its source credentials and both node reservations remain
+until a human verifies client connectivity and explicitly finishes cleanup or
+restores the source through the transfer flow. Do not delete the account, edit
+`completed_at` or remove reservations to unblock an unrelated operation.
+Account **Settings → Danger zone** shows the active transfer and links back to
+**Routing → Placement**. Deletion stays disabled while the transfer is active
+or its state cannot be fetched; the PostgreSQL RG-140 guards remain the
+server-side enforcement. Once safely terminal, account deletion remains an
+independent irreversible operation that does *not* prove runtime revocation.
+ Repeating Prepare for the same
 active account/destination returns the existing operation. Tasks still executing
 on Agent cannot be cancelled safely; wait for a terminal result. A pending,
 unclaimed task can be cancelled under a row lock before target cleanup.
