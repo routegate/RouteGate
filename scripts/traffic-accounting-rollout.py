@@ -251,7 +251,7 @@ def diagnose():
     except (Stop, OSError):
         runtime_supported = None
     else:
-        runtime_supported = 'with_v2ray_api' in re.split(r'[\\s,]+', version)
+        runtime_supported = 'with_v2ray_api' in re.split(r'[\s,]+', version)
 
     active = Path(values.get('active_config_path', '/etc/sing-box/config.json'))
     try:
