@@ -3,7 +3,9 @@
 ## Current status
 
 The manual **Traffic accounting scoped US rollout** workflow currently
-supports **only** `mode=inspect`. It is an authenticated, SSH host-key-verified
+supports **only** `mode=inspect`. The fixed Ops Bridge issue #268 also accepts
+exactly `operation=traffic-inspect` to run the same read-only helper from
+trusted main, with the same host-side lock and without accepting caller paths. It is an authenticated, SSH host-key-verified
 US read-only diagnostic under the existing production-like environment and
 deployment lock. **Install and apply are intentionally disabled** in both
 GitHub Actions inputs and the Python runner. Do not circumvent either guard.
