@@ -46,6 +46,11 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Verify unprivileged Manager startup with interrupted credential conversion
+        run: |
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/rg-manager-startup" ./cmd/routegate-manager
+          sudo bash ../scripts/test-manager-startup-latch.sh "$RUNNER_TEMP/rg-manager-startup"
+
       - name: Verify external schema readiness with a non-owner login
         run: go test ./internal/db -run '^TestSchemaReadiness' -count=1 -timeout=120s -v
 
