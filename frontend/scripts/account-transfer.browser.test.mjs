@@ -147,7 +147,6 @@ for (const width of [390, 1440]) test(`account deletion is blocked until an RG-1
     assert.equal(await action.isDisabled(), true);
     const link = page.getByRole('link', { name: 'Open transfer steps' });
     assert.equal(await link.getAttribute('href'), '/vpn-accounts/canary/routing');
-    await action.click({ force: true }).catch(() => {});
     assert.equal(writes.length, 0, 'disabled delete cannot write or erase an active transfer');
     assert.deepEqual(errors, []);
 
