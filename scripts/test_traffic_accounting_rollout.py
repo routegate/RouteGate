@@ -110,13 +110,13 @@ class TrafficRolloutTests(unittest.TestCase):
                 if 'jsonb_agg(jsonb_build_object(' in statement:
                     return json.dumps([
                         {
-                            'state': 'client_refresh_pending', 'us_node_role': 'target',
+                            'state': 'client_refresh_pending', 'is_fi_test': True, 'us_node_role': 'target',
                             'placement': 'target', 'cutover_recorded': True,
                             'cleanup_acknowledged': False, 'target_job_status': 'succeeded',
                             'cleanup_job_status': 'absent', 'has_error': False,
                         },
                         {
-                            'state': 'source_cleaning', 'us_node_role': 'source',
+                            'state': 'source_cleaning', 'is_fi_test': False, 'us_node_role': 'source',
                             'placement': 'target', 'cutover_recorded': True,
                             'cleanup_acknowledged': True, 'target_job_status': 'succeeded',
                             'cleanup_job_status': 'pending', 'has_error': True,
@@ -150,6 +150,7 @@ class TrafficRolloutTests(unittest.TestCase):
             self.assertEqual(report['transfer_node_reservations'], 4)
             self.assertEqual(len(report['pending_transfer_evidence']), 2)
             self.assertEqual(report['pending_transfer_evidence'][0]['state'], 'client_refresh_pending')
+            self.assertTrue(report['pending_transfer_evidence'][0]['is_fi_test'])
             self.assertEqual(report['pending_transfer_evidence'][1]['has_error'], True)
             self.assertEqual(report['unfinished_apply_jobs'], 1)
             self.assertEqual(report['recent_native_reports_30d'], 4)
@@ -159,7 +160,7 @@ class TrafficRolloutTests(unittest.TestCase):
     def test_pending_transfer_evidence_is_bounded_and_strictly_sanitized(self):
         source = '22222222-2222-4222-8222-222222222222'
         valid = {
-            'state': 'client_refresh_pending', 'us_node_role': 'target',
+            'state': 'client_refresh_pending', 'is_fi_test': True, 'us_node_role': 'target',
             'placement': 'target', 'cutover_recorded': True,
             'cleanup_acknowledged': False, 'target_job_status': 'succeeded',
             'cleanup_job_status': 'absent', 'has_error': False,
@@ -173,6 +174,7 @@ class TrafficRolloutTests(unittest.TestCase):
             {**valid, 'account_id': 'private-uuid'},
             {**valid, 'state': 'admin_override'},
             {**valid, 'has_error': 'private error detail'},
+            {**valid, 'is_fi_test': 'fi-test'},
             {**valid, 'target_job_status': 'unknown'},
         ]
         for bad in bad_variants:
