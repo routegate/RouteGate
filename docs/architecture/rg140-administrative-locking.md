@@ -84,6 +84,11 @@ Manager environment settings. The Python repair verifies the inherited fd or,
 when called directly, takes a fresh lock through backup, restart, verification
 and rollback. The existing outer SSH lock is acquired first in both workflows.
 
-Other administrative entry points, including direct runtime restarts and
-port reconciliation, still need individual review. Agent apply, descendant
+The operations script acquires the shared host lock before inspecting or
+restarting sing-box, WireGuard, Hysteria2 or MTProto. MTProto port
+reconciliation holds it from before loading Manager settings through config
+replacement, service checks and the existing rollback path. The SSH wrapper
+still takes the legacy lock first. Read-only validation inside the locked
+deploy cycle does not reacquire it. Control-plane restart and certificate
+renewal delegate locking to the recovery tool. Agent apply, descendant
 cleanup after process death, and service startup admission remain separate.

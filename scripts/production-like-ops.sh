@@ -340,11 +340,19 @@ restart_control_plane() {
   validate_platform
 }
 
+# This standalone script is copied to the host without the update core.
+# Hold the updater's lock through all service checks and rollback steps.
+acquire_runtime_update_lock() {
+  exec 8>>"${RG_UPDATE_LOCK_FILE:-/run/lock/routegate-update.lock}"
+  flock -n 8 || die "host update lock unavailable"
+}
+
 restart_runtime() {
   local label=$1
   local service=$2
   local load_state
 
+  acquire_runtime_update_lock
   load_state=$(systemctl show --property=LoadState --value "$service" 2>/dev/null || true)
   [[ "$load_state" == loaded ]] || die "runtime is not installed or unmanaged: ${label}"
 
@@ -368,6 +376,7 @@ reconcile_mtproto_port_conflict() {
   local config_file=/etc/routegate-mtproto/config.toml
   local backup_file current_line current_port row vless_port shadowsocks_port target_port server_count tmp_file
 
+  acquire_runtime_update_lock
   [[ -r /etc/routegate/manager.env ]] || die "manager environment is unavailable"
   [[ -r "$config_file" ]] || die "managed MTProto config is unavailable"
   command -v psql >/dev/null 2>&1 || die "psql is unavailable"
