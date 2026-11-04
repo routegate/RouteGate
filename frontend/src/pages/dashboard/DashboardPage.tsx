@@ -275,8 +275,10 @@ function TrafficOverviewWidget({
   status: TrafficWidgetStatus;
   onRetry: () => void;
 }) {
-  const maximum = daily.reduce((value, item) => Math.max(value, item.totalBytes), 0);
-  const total = daily.reduce((value, item) => value + item.totalBytes, 0);
+  // Do not process stale or malformed backend rows while the chart is unavailable.
+  const chartDaily = status === 'ready' ? daily : [];
+  const maximum = chartDaily.reduce((value, item) => Math.max(value, item.totalBytes), 0);
+  const total = chartDaily.reduce((value, item) => value + item.totalBytes, 0);
 
   return (
     <WidgetPanel title={t('dashboard.trafficOverview')} subtitle={`(${t('dashboard.last30Days')})`} className="traffic-widget">
@@ -311,9 +313,9 @@ function TrafficOverviewWidget({
             <span>{t('dashboard.total')}</span>
           </div>
           <div className="traffic-overview-bars">
-            {daily.map((item, index) => {
+            {chartDaily.map((item, index) => {
               const percentage = maximum > 0 ? (item.totalBytes / maximum) * 100 : 0;
-              const showLabel = index === 0 || index === daily.length - 1 || index % 7 === 0;
+              const showLabel = index === 0 || index === chartDaily.length - 1 || index % 7 === 0;
               return (
                 <div className="traffic-overview-column" key={item.date} style={{ '--bar-index': index } as CSSProperties} title={`${formatTrafficDate(item.date)} · ${formatBytes(item.totalBytes)}`}>
                   <div className="traffic-overview-bar-track">
