@@ -57,7 +57,11 @@ class TrafficRolloutTests(unittest.TestCase):
                     return '1'
                 if 'max(version)' in statement:
                     return rollout.OLD_SCHEMA
+                if 'jsonb_agg(jsonb_build_object(' in statement:
+                    return '[]'
                 if 'FROM vpn_account_transfers' in statement:
+                    return '0'
+                if 'FROM vpn_account_transfer_nodes' in statement:
                     return '0'
                 if 'FROM config_apply_jobs' in statement:
                     return '0'
@@ -75,7 +79,9 @@ class TrafficRolloutTests(unittest.TestCase):
                 report = rollout.diagnose()
                 self.assertEqual(json.loads(output.getvalue()), report)
 
-            self.assertEqual(len(queries), 6)
+            self.assertEqual(len(queries), 8)
+            self.assertEqual(report['pending_transfer_evidence'], [])
+            self.assertEqual(report['transfer_node_reservations'], 0)
             self.assertEqual(report['mode'], 'read_only')
             self.assertEqual(report['schema'], rollout.OLD_SCHEMA)
             self.assertFalse(report['schema160_ready'])
@@ -101,6 +107,23 @@ class TrafficRolloutTests(unittest.TestCase):
                 'active_config_path: ' + str(root / 'missing-config.json') + '\n'
             )
             def db(statement):
+                if 'jsonb_agg(jsonb_build_object(' in statement:
+                    return json.dumps([
+                        {
+                            'state': 'client_refresh_pending', 'us_node_role': 'target',
+                            'placement': 'target', 'cutover_recorded': True,
+                            'cleanup_acknowledged': False, 'target_job_status': 'succeeded',
+                            'cleanup_job_status': 'absent', 'has_error': False,
+                        },
+                        {
+                            'state': 'source_cleaning', 'us_node_role': 'source',
+                            'placement': 'target', 'cutover_recorded': True,
+                            'cleanup_acknowledged': True, 'target_job_status': 'succeeded',
+                            'cleanup_job_status': 'pending', 'has_error': True,
+                        },
+                    ])
+                if 'FROM vpn_account_transfer_nodes' in statement:
+                    return '4'
                 if 'FROM agents a JOIN servers' in statement:
                     return '1'
                 if 'max(version)' in statement:
@@ -124,10 +147,47 @@ class TrafficRolloutTests(unittest.TestCase):
             self.assertIsNone(report['runtime_stats_enabled'])
             self.assertIsNone(report['runtime_stats_loopback_configured'])
             self.assertEqual(report['unfinished_transfers'], 2)
+            self.assertEqual(report['transfer_node_reservations'], 4)
+            self.assertEqual(len(report['pending_transfer_evidence']), 2)
+            self.assertEqual(report['pending_transfer_evidence'][0]['state'], 'client_refresh_pending')
+            self.assertEqual(report['pending_transfer_evidence'][1]['has_error'], True)
             self.assertEqual(report['unfinished_apply_jobs'], 1)
             self.assertEqual(report['recent_native_reports_30d'], 4)
             self.assertTrue(report['dashboard_daily_available_from_database'])
             self.assertEqual(report['dashboard_daily_rows_30d'], 3)
+
+    def test_pending_transfer_evidence_is_bounded_and_strictly_sanitized(self):
+        source = '22222222-2222-4222-8222-222222222222'
+        valid = {
+            'state': 'client_refresh_pending', 'us_node_role': 'target',
+            'placement': 'target', 'cutover_recorded': True,
+            'cleanup_acknowledged': False, 'target_job_status': 'succeeded',
+            'cleanup_job_status': 'absent', 'has_error': False,
+        }
+        with mock.patch.object(rollout, 'sql', return_value=json.dumps([valid])) as stub:
+            self.assertEqual(rollout.pending_transfer_evidence(source, 1), [valid])
+            self.assertIn("t.completed_at IS NULL", stub.call_args.args[0])
+            self.assertIn("SELECT COALESCE(", stub.call_args.args[0])
+            self.assertNotIn("device_inventory", stub.call_args.args[0])
+        bad_variants = [
+            {**valid, 'account_id': 'private-uuid'},
+            {**valid, 'state': 'admin_override'},
+            {**valid, 'has_error': 'private error detail'},
+            {**valid, 'target_job_status': 'unknown'},
+        ]
+        for bad in bad_variants:
+            with self.subTest(item=bad), mock.patch.object(rollout, 'sql', return_value=json.dumps([bad])):
+                with self.assertRaises(rollout.Stop):
+                    rollout.pending_transfer_evidence(source, 1)
+        with mock.patch.object(rollout, 'sql', return_value='[]'):
+            with self.assertRaisesRegex(rollout.Stop, 'count_mismatch'):
+                rollout.pending_transfer_evidence(source, 1)
+        with mock.patch.object(rollout, 'sql', return_value=json.dumps([valid] * 17)):
+            with self.assertRaisesRegex(rollout.Stop, 'unbounded'):
+                rollout.pending_transfer_evidence(source, 17)
+        with mock.patch.object(rollout, 'sql', return_value='not-json'):
+            with self.assertRaisesRegex(rollout.Stop, 'query_invalid'):
+                rollout.pending_transfer_evidence(source, 1)
 
     def test_diagnosis_does_not_trust_unbound_us_agent(self):
         with tempfile.TemporaryDirectory() as directory:
