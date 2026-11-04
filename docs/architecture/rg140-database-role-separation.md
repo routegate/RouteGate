@@ -379,3 +379,32 @@ This does not undo work performed by a transient process before the recheck.
 Older binaries that ignore the latch can still start after enumeration.
 Administrative control of those launch paths and database sessions remains a
 prerequisite for actual credential changes; the writer remains offline and unwired.
+
+
+### Old-login session rehearsal (disposable PostgreSQL only)
+
+The dedicated CI test `TestCredentialConversionSessionFence` exercises two fresh
+roles, without application grants or changes to an existing role. It checks that
+NOLOGIN must commit before new connections are refused; rollback leaves LOGIN
+available, and already authenticated sessions can continue SQL after the commit.
+The committed prohibition survives replacement of the administrative connection.
+
+The rehearsal selects old-login backends by role OID, without a database filter,
+and uses `pg_terminate_backend(pid, 5000)` with a positive timeout. Every exit must
+be confirmed and a fresh activity read must report zero matching sessions. Both
+old connections must fail further SQL, their transaction advisory lock must be
+released, and the unrelated role must retain both an existing session and fresh
+login. The fixture never automatically restores LOGIN after an error.
+
+A deliberate counterexample grants the other login membership in the NOLOGIN
+role: SET ROLE still succeeds while session_user remains the other login. Thus
+NOLOGIN plus a usesysid scan is not a complete authority fence. Before installer
+activation, inventory alternate credentials, memberships (including indirect
+ones), owner/superuser authority, prepared transactions and connections already
+in authentication. A single empty activity scan does not exclude those paths.
+Administrative concurrency, restart-safe recovery and credential replacement
+remain separate work. This test is not a production conversion command and does
+not connect the pin writer to PostgreSQL. #545 remains open.
+
+PostgreSQL semantics: https://www.postgresql.org/docs/16/functions-admin.html
+and https://www.postgresql.org/docs/16/sql-alterrole.html.
