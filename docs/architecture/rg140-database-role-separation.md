@@ -304,3 +304,23 @@ itself is uncertain; callers must perform no credential/configuration mutations
 before establishing durable intent. Privileged deletion, concurrent host mutation,
 direct startup and old rollback tools remain outside this gate's protection.
 #545 remains open.
+
+### Normal Manager startup and interrupted conversion
+
+The current Manager binary checks the fixed host latch path before its first
+PostgreSQL connection in normal startup. A pending entry of any type (including
+a dangling symlink), an invalid latch directory, an incomplete directory without
+a regular restore pin, or an inspection error withholds startup. Both auto and
+external migration modes use this path. A host without the latch starts as before.
+
+The service runs as `routegate`. For a root-owned 0700 latch it cannot reliably
+determine whether a child exists, so even a pin-only directory with these
+permissions withholds startup. A traversable legacy pin-only layout passes
+this particular check; rollback retains its separate, stricter pin verification.
+A pin is not a completion record. Do not change permissions or delete state to
+clear a startup failure. The writer still has no production activation path.
+
+This check covers the current binary at startup. It assumes trusted host
+ancestors and a stopped Manager during administrative conversion. It does not
+serialize concurrent publication with startup, stop an already running process,
+or fence explicit migration/provisioning commands or older binaries.

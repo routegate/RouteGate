@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,6 +35,9 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 }
 
 func (a *App) Start(ctx context.Context) error {
+	if err := checkStartupLatch("/var/lib/routegate-credential-mode"); err != nil {
+		return fmt.Errorf("Manager startup withheld: %w", err)
+	}
 	a.logger.Info("starting RouteGate Manager", "env", a.cfg.Env, "addr", a.cfg.HTTPAddr)
 
 	pool, err := db.Connect(ctx, a.cfg.DatabaseURL, a.logger)
