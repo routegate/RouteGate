@@ -44,11 +44,18 @@ concurrency:
 
 jobs:
   operate:
+    # GitHub transferred RouteGate from ikaevus to the routegate organization.
+    # repository_owner is now "routegate", while control issue #268 was
+    # originally created by ikaevus. Pin immutable numeric GitHub identities:
+    # repository ID 1224779806 and issue creator ID 62504580.
+    # Do not broaden this to arbitrary issue authors, actors or organizations.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.issue.number == 268 &&
+      (github.repository == 'routegate/RouteGate' &&
+       github.repository_id == '1224779806' &&
+       github.event.issue.number == 268 &&
        github.event.issue.title == 'RouteGate Ops Bridge' &&
-       github.event.issue.user.login == github.repository_owner)
+       github.event.issue.user.id == 62504580)
     runs-on: ubuntu-24.04
     environment: production-like
     timeout-minutes: 45
