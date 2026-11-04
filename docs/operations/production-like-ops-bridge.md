@@ -37,6 +37,7 @@ separate provenance review before any verified host-update migration.
 Supported requests:
 
 - `operation=diagnose`
+- `operation=traffic-inspect` (read-only US traffic accounting state, no runtime changes)
 - `operation=diagnose-sing-box`
 - `operation=validate`
 - `operation=restart-control-plane`
