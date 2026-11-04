@@ -76,6 +76,25 @@ class PinWriterTests(unittest.TestCase):
                                {writer.PENDING, 'pending.pin'},
                                {writer.PENDING, 'restore.pin'}])
 
+    def test_late_scan_error_retains_durable_intent_before_pin_write(self):
+        events = []
+        fsync = os.fsync
+        def record_sync(fd):
+            fsync(fd)
+            events.append('synced')
+        def scan():
+            events.append('scan')
+            if self.directory.exists():
+                raise PermissionError('late inspection failed')
+        with mock.patch.object(writer.os, 'fsync', side_effect=record_sync), \
+             mock.patch.object(writer, 'require_idle_manager_account', side_effect=scan):
+            with self.assertRaisesRegex(PermissionError, 'late inspection failed'):
+                self.publish(self.fd, PAYLOAD)
+        self.assertEqual(events, ['scan', 'synced', 'synced', 'scan'])
+        self.assertEqual({p.name for p in self.directory.iterdir()}, {writer.PENDING})
+        with self.assertRaises(FileExistsError):
+            self.publish(self.fd, PAYLOAD)
+
     def test_invalid_payload_does_not_create_latch(self):
         for payload in (PAYLOAD[:-1], PAYLOAD+b'\0', PAYLOAD+b'\n', b''):
             with self.subTest(payload=payload[:10]), self.assertRaises(ValueError):
