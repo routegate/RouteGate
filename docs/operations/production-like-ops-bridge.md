@@ -17,9 +17,28 @@ workflow runs only when that exact issue is reopened and its body matches one of
 the exact allow-listed requests below, or when an administrator manually uses
 the workflow's typed `workflow_dispatch` choice.
 
+### Repository transfer identity
+
+After moving from `ikaevus/RouteGate` to the `routegate/RouteGate` GitHub
+organization, `github.repository_owner` is `routegate` but issue #268 was
+created by the original maintainer. The GitHub Actions job now pins the
+**immutable** repository ID `1224779806` and original issue creator ID
+`62504580`, in addition to the full `routegate/RouteGate` repository path,
+exact issue number and title. No arbitrary issue author or triggering actor is
+trusted, and ordinary issues cannot enter this workflow's privileged job.
+The existing mutating-operation allow-list, environment protection and host-side
+lock remain unchanged. Only the fixed read-only `traffic-inspect` operation
+is added to the bridge.
+
+The static gate is checked by `scripts/test_ops_bridge_identity.py` in CI.
+This ownership fix does **not** change the unrelated, previously pinned
+`routegate-update-verified.sh` attestation trust roots; those require a
+separate provenance review before any verified host-update migration.
+
 Supported requests:
 
 - `operation=diagnose`
+- `operation=traffic-inspect` (read-only US traffic accounting state, no runtime changes)
 - `operation=diagnose-sing-box`
 - `operation=validate`
 - `operation=restart-control-plane`

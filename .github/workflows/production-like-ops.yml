@@ -13,6 +13,7 @@ on:
         options:
           - diagnose
           - diagnose-sing-box
+          - traffic-inspect
           - diagnose-agent-task
           - validate
           - validate-deploy-rollback-cycle
@@ -44,11 +45,18 @@ concurrency:
 
 jobs:
   operate:
+    # GitHub transferred RouteGate from ikaevus to the routegate organization.
+    # repository_owner is now "routegate", while control issue #268 was
+    # originally created by ikaevus. Pin immutable numeric GitHub identities:
+    # repository ID 1224779806 and issue creator ID 62504580.
+    # Do not broaden this to arbitrary issue authors, actors or organizations.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.issue.number == 268 &&
+      (github.repository == 'routegate/RouteGate' &&
+       github.repository_id == '1224779806' &&
+       github.event.issue.number == 268 &&
        github.event.issue.title == 'RouteGate Ops Bridge' &&
-       github.event.issue.user.login == github.repository_owner)
+       github.event.issue.user.id == 62504580)
     runs-on: ubuntu-24.04
     environment: production-like
     timeout-minutes: 45
@@ -83,6 +91,7 @@ jobs:
             case "$REQUEST_BODY" in
               'operation=diagnose') operation=diagnose ;;
               'operation=diagnose-sing-box') operation=diagnose-sing-box ;;
+              'operation=traffic-inspect') operation=traffic-inspect ;;
               'operation=diagnose-agent-task') operation=diagnose-agent-task ;;
               'operation=validate') operation=validate ;;
               'operation=validate-deploy-rollback-cycle') operation=validate-deploy-rollback-cycle ;;
@@ -103,13 +112,13 @@ jobs:
           fi
 
           case "$operation" in
-            diagnose|diagnose-sing-box|diagnose-agent-task|validate|validate-deploy-rollback-cycle|restart-control-plane|start-manager-only|restart-sing-box|restart-wireguard|restart-hysteria2|restart-mtproto|reconcile-mtproto-port-conflict|renew-certificate|preflight-applied-client-settings-155|update-manager|publish-bootstrap) ;;
+            diagnose|diagnose-sing-box|traffic-inspect|diagnose-agent-task|validate|validate-deploy-rollback-cycle|restart-control-plane|start-manager-only|restart-sing-box|restart-wireguard|restart-hysteria2|restart-mtproto|reconcile-mtproto-port-conflict|renew-certificate|preflight-applied-client-settings-155|update-manager|publish-bootstrap) ;;
             *) exit 2 ;;
           esac
           # The database preflight and the Manager update run with
           # production-like secrets only from the trusted main workflow
           # definition, never a dispatch from another ref.
-          if [[ ( "$operation" == "start-manager-only" || "$operation" == "preflight-applied-client-settings-155" || "$operation" == "update-manager" || "$operation" == "publish-bootstrap" ) && "$EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF" != "refs/heads/main" ]]; then
+          if [[ ( "$operation" == "traffic-inspect" || "$operation" == "start-manager-only" || "$operation" == "preflight-applied-client-settings-155" || "$operation" == "update-manager" || "$operation" == "publish-bootstrap" ) && "$EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF" != "refs/heads/main" ]]; then
             printf 'The %s operation can only be dispatched from main.\n' "$operation" >&2
             exit 2
           fi
@@ -385,6 +394,29 @@ jobs:
             set -e
             "${SSH[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST" \
               "rm -f '$remote_bundle_fail' '$remote_bundle_redeploy' '$remote_deploy' '$remote_fail_validate' '$remote_validate' '$remote_core_fail' '$remote_core_redeploy' '$remote_ops' '$remote_cycle'" || true
+          elif [[ "$OPERATION" == "traffic-inspect" ]]; then
+            # The trusted, inspect-only traffic helper runs under the existing
+            # production host lock. No build payload, installer, apply, reload
+            # or service restart is available from this branch.
+            remote_script="/tmp/routegate-traffic-inspect-${GITHUB_RUN_ID}.py"
+            set +e
+            if "${SCP[@]}" scripts/traffic-accounting-rollout.py "$ROUTEGATE_USER@$ROUTEGATE_HOST:$remote_script"; then
+              "${SSH[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST" \
+                "sudo -n flock -w 600 /run/lock/routegate-production-like.lock bash -s -- '$remote_script'" >"$output_file" 2>&1 <<'TRAFFIC_INSPECT'
+          set -euo pipefail
+          set +x
+          set -a
+          source /etc/routegate/manager.env >/dev/null 2>&1
+          set +a
+          exec python3 "$1" inspect
+          TRAFFIC_INSPECT
+              rc=$?
+            else
+              printf '[routegate-traffic] ERROR: could not copy read-only diagnostic\n' >"$output_file"
+              rc=2
+            fi
+            set -e
+            "${SSH[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST" "rm -f '$remote_script'" || true
           elif [[ "$OPERATION" == "preflight-applied-client-settings-155" ]]; then
             # Fixed files from the trusted main checkout only: the pinned SQL
             # (verified again by SHA-256 on the host) and its read-only runner.

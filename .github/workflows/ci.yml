@@ -52,6 +52,9 @@ jobs:
       - name: Test rollout PostgreSQL connection in read-only mode
         run: python3 -m unittest discover -s ../scripts -p test_traffic_accounting_rollout.py
 
+      - name: Verify Ops Bridge control issue identity
+        run: python3 -m unittest discover -s ../scripts -p test_ops_bridge_identity.py
+
   agent:
     name: Agent tests
     runs-on: ubuntu-latest
