@@ -286,8 +286,9 @@ def diagnose():
     reservations = int(sql('SELECT count(*) FROM vpn_account_transfer_nodes'))
     apply_jobs = int(sql("SELECT count(*) FROM config_apply_jobs WHERE status IN ('pending','in_progress')"))
 
-    # These are deliberately COUNT-only queries. Never print account identities,
-    # connection details, runtime config, bearer tokens, or usage-event payloads.
+    # Only fixed aggregate SQL and allow-listed transfer status evidence.
+    # Never print account identities, connection details, runtime config,
+    # bearer tokens, actors, or usage-event payloads.
     recent_native = int(sql(
         "SELECT count(*) FROM traffic_usage_events "
         "WHERE server_id='" + server_id + "'::uuid "
