@@ -15,6 +15,7 @@ import (
 )
 
 func TestProductionLikeDownMigrationIsAtomicWithHistoryRemoval(t *testing.T) {
+	t.Setenv("RG_UPDATE_LOCK_FILE", filepath.Join(t.TempDir(), "update.lock"))
 	databaseURL := os.Getenv("ROUTEGATE_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("ROUTEGATE_TEST_DATABASE_URL is not set")

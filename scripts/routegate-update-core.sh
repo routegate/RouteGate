@@ -25,6 +25,13 @@ rg_update_log() {
   printf '%s %s\n' "$RG_UPDATE_LOG_PREFIX" "$*"
 }
 
+# Production-like entry points hold fd 8 through rollback. A nested
+# down-migration receives the descriptor across exec.
+rg_update_acquire_production_like_lock() {
+  exec 8>>"${RG_UPDATE_LOCK_FILE:-/run/lock/routegate-update.lock}" || return 1
+  flock -n 8 || { rg_update_die "host update lock unavailable"; return 1; }
+}
+
 rg_update_die() {
   printf '%s ERROR: %s\n' "$RG_UPDATE_LOG_PREFIX" "$*" >&2
   return 1

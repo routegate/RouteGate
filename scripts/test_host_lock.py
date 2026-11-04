@@ -186,3 +186,68 @@ wait
                 parent.stdin.close()
                 parent.stdout.close()
                 parent.stderr.close()
+
+
+class ProductionLikeLockTests(unittest.TestCase):
+    def test_down_migration_entry_points(self):
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = pathlib.Path(tmp)
+            lock = directory / 'update.lock'
+            lock.write_bytes(b'sentinel')
+            inode = lock.stat().st_ino
+            sql = directory / 'fixture.down.sql'
+            sql.write_text('SELECT 1;\n')
+            # At the database boundary an independently opened descriptor must
+            # still be excluded, including on a standalone invocation.
+            psql = directory / 'psql'
+            psql.write_text('#!/bin/bash\nflock -n "$RG_UPDATE_LOCK_FILE" true && exit 21\necho called >> "$TRACE"\n')
+            psql.chmod(0o755)
+            trace = directory / 'calls'
+            env = dict(os.environ, RG_UPDATE_LOCK_FILE=str(lock), TRACE=str(trace),
+                       PATH=tmp + ':' + os.environ['PATH'])
+            runner = str(ROOT / 'deploy-production-like-bundle.sh')
+            command = 'bash "$1" "$2" fixture "$3" version; rc=$?; exit "$rc"'
+            holder = 'source "$4"; rg_update_acquire_production_like_lock || exit 20; '
+            for setup, mode, allowed in (
+                ('', '--run-down-migration', True),
+                (holder, '--run-down-migration-inherited', True),
+                (holder, '--run-down-migration', False),
+                ('exec 8>&-; ', '--run-down-migration-inherited', False),
+                ('exec 8>>"$TRACE.other"; flock -n 8; ', '--run-down-migration-inherited', False),
+                (holder + 'exec 7>&8; exec 8>>"$RG_UPDATE_LOCK_FILE"; ',
+                 '--run-down-migration-inherited', False),
+            ):
+                with self.subTest(setup=setup, mode=mode):
+                    trace.unlink(missing_ok=True)
+                    result = subprocess.run(['bash', '-c', setup + command, 'fixture', runner,
+                                             mode, str(sql), str(ROOT / 'routegate-update-core.sh')],
+                                            env=env, capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode == 0, allowed, result.stderr)
+                    self.assertEqual(trace.exists(), allowed)
+                    self.assertEqual(lock.stat().st_ino, inode)
+                    self.assertEqual(lock.read_bytes(), b'sentinel')
+
+    def test_competing_host_lock_refuses_all_outer_entry_points(self):
+        import fcntl
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = pathlib.Path(tmp)
+            lock = directory / 'update.lock'
+            core = str(ROOT / 'routegate-update-core.sh')
+            role = str(ROOT / 'routegate-update-role.sh')
+            deploy = str(ROOT / 'deploy-production-like-bundle.sh')
+            commit = 'c4137cc43a2385ac38fe71e059f33405535b6618'
+            manager_args = [commit, core, 'fixture', core, role, deploy, core, core]
+            with lock.open('ab') as held:
+                fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                for args in ([deploy, commit, core, 'fixture', core, core],
+                             [ROOT / 'production-like-update-manager.sh', *manager_args],
+                             [ROOT / 'production-like-rg140-manager-main.sh', *manager_args]):
+                    with self.subTest(script=args[0]):
+                        result = subprocess.run(['bash', *args], capture_output=True, timeout=5,
+                                                env=dict(os.environ, RG_UPDATE_LOCK_FILE=str(lock),
+                                                         TMPDIR=str(directory)))
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(b'host update lock unavailable', result.stderr)
+                        self.assertEqual(list(directory.iterdir()), [lock])

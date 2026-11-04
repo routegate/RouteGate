@@ -19,6 +19,7 @@ case "$commit" in
   *) echo 'test candidate must be one of the two approved schema159 commits' >&2; exit 2 ;;
 esac
 work=$(mktemp -d)
+export RG_UPDATE_LOCK_FILE="$work/update.lock"
 trap 'rm -rf "$work"' EXIT
 failures=0
 
@@ -163,7 +164,7 @@ down_runner="$work/down-runner.sh"
 cat >"$down_runner" <<'EOF'
 #!/usr/bin/env bash
 # Stub of deploy-production-like-bundle.sh --run-down-migration.
-[[ "$1" == --run-down-migration && $# -eq 4 ]] || exit 2
+[[ "$1" == --run-down-migration-inherited && $# -eq 4 && /proc/self/fd/8 -ef "$RG_UPDATE_LOCK_FILE" ]] || exit 2
 echo "down $4" >>"$STUB_STATE/down.log"
 [[ "${STUB_DOWN_FAIL:-0}" != 1 ]] || exit 1
 [[ "$(head -n1 "$STUB_STATE/history")" == "$4" ]] || exit 1

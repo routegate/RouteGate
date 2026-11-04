@@ -27,6 +27,7 @@ RG_UPDATE_LOG_PREFIX='[routegate-manager-update]'
 source "$CORE"
 # shellcheck source=scripts/routegate-update-role.sh
 source "$ROLE_LIB"
+rg_update_acquire_production_like_lock
 
 PUBLIC_URL=${ROUTEGATE_PUBLIC_URL_OVERRIDE:-https://us.routegate.org}
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/routegate-manager-update.XXXXXX")
@@ -159,7 +160,7 @@ rollback_database() {
       down_file="$migrations_dir/${version}.down.sql"
       [[ -f "$down_file" && ! -L "$down_file" ]] || { rg_update_die "missing down migration for $version"; return 1; }
       log "database rollback migration=${version}"
-      bash "$DOWN_RUNNER" --run-down-migration "$DB_URL" "$down_file" "$version" || { rg_update_die "down migration failed for $version"; return 1; }
+      bash "$DOWN_RUNNER" --run-down-migration-inherited "$DB_URL" "$down_file" "$version" || { rg_update_die "down migration failed for $version"; return 1; }
     done < <(psql "$DB_URL" -X -v ON_ERROR_STOP=1 -qAtc "SELECT version FROM schema_migrations ORDER BY applied_at DESC, version DESC")
     ((target_seen == 1)) || { rg_update_die "backup schema is not in the migration history"; return 1; }
   fi

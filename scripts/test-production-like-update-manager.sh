@@ -31,6 +31,7 @@ workflow="$repo/.github/workflows/production-like-ops.yml"
 deploy_workflow="$repo/.github/workflows/production-like-deploy.yml"
 commit=0123456789abcdef0123456789abcdef01234567
 work=$(mktemp -d)
+export RG_UPDATE_LOCK_FILE="$work/update.lock"
 trap 'rm -rf "$work"' EXIT
 failures=0
 
@@ -165,7 +166,7 @@ down_runner="$work/down-runner.sh"
 cat >"$down_runner" <<'EOF'
 #!/usr/bin/env bash
 # Stub of deploy-production-like-bundle.sh --run-down-migration.
-[[ "$1" == --run-down-migration && $# -eq 4 ]] || exit 2
+[[ "$1" == --run-down-migration-inherited && $# -eq 4 && /proc/self/fd/8 -ef "$RG_UPDATE_LOCK_FILE" ]] || exit 2
 echo "down $4" >>"$STUB_STATE/down.log"
 [[ "${STUB_DOWN_FAIL:-0}" != 1 ]] || exit 1
 [[ "$(head -n1 "$STUB_STATE/history")" == "$4" ]] || exit 1
@@ -483,6 +484,7 @@ exec "$@"
 EOF
 cat >"$stubs/flock" <<'EOF'
 #!/usr/bin/env bash
+if [[ $1 == -n ]]; then exec /usr/bin/flock "$@"; fi
 shift 3
 exec "$@"
 EOF
