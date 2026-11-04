@@ -374,6 +374,9 @@ jobs:
       - name: Test shared UI semantics
         run: npm run test:ui
 
+      - name: Verify Dashboard traffic state semantics
+        run: npm run test:dashboard-traffic
+
       - name: Verify Dashboard animation safety
         run: node --test scripts/dashboard-motion.test.mjs
 
