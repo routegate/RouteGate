@@ -56,6 +56,34 @@ class OpsBridgeIdentityTests(unittest.TestCase):
         self.assertIn("environment: production-like", source)
         self.assertIn("flock -w 600 /run/lock/routegate-production-like.lock", source)
 
+    def test_remote_shell_step_parses_without_executing(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        step = workflow.index("      - name: Run allow-listed remote operation\n")
+        first = workflow.index("        run: |\n", step) + len("        run: |\n")
+        last = workflow.index("      - name: Upload full preflight result\n", first)
+        lines = workflow[first:last].splitlines()
+        script_lines = []
+        for line in lines:
+            if line.strip() and not line.startswith("          "):
+                self.fail("unexpected YAML indentation in privileged remote script")
+            script_lines.append(line[10:] if line else "")
+        script = "\n".join(script_lines) + "\n"
+        result = subprocess.run(["bash", "-n"], input=script, text=True,
+                                capture_output=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_traffic_inspection_cannot_pass_mutating_subcommands(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        start = source.index('elif [[ "$OPERATION" == "traffic-inspect" ]]; then')
+        end = source.index('elif [[ "$OPERATION" == "preflight-applied-client-settings-155" ]]; then', start)
+        branch = source[start:end]
+        self.assertIn('exec python3 "$1" inspect', branch)
+        self.assertNotIn('exec python3 "$1" install', branch)
+        self.assertNotIn('exec python3 "$1" apply', branch)
+        self.assertIn('flock -w 600 /run/lock/routegate-production-like.lock', branch)
+        self.assertIn('sudo -n', branch)
+        self.assertIn('StrictHostKeyChecking=yes', source)
+
     def test_no_workflow_dispatch_from_untrusted_ref_for_sensitive_ops(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn('"$GITHUB_REF" != "refs/heads/main"', source)
