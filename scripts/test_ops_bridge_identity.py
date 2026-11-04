@@ -5,6 +5,7 @@ GitHub workflow, use secrets, or connect to the production host.
 """
 from pathlib import Path
 import re
+import subprocess
 import unittest
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/production-like-ops.yml"
