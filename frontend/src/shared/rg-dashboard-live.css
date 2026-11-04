@@ -357,35 +357,6 @@
   filter: brightness(1.35) drop-shadow(0 0 6px rgba(56, 189, 248, 0.6));
 }
 
-.dashboard-page .traffic-empty-state {
-  isolation: isolate;
-  overflow: hidden;
-  position: relative;
-}
-
-.dashboard-page .traffic-empty-wave {
-  align-items: end;
-  bottom: 0;
-  display: flex;
-  gap: 5px;
-  height: 58%;
-  left: 14px;
-  opacity: 0.35;
-  position: absolute;
-  right: 14px;
-  z-index: -1;
-}
-
-.dashboard-page .traffic-empty-wave span {
-  animation: rg-idle-wave 6s ease-in-out infinite;
-  animation-delay: calc(var(--bar-index, 0) * -0.32s);
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.32), rgba(59, 130, 246, 0.02));
-  border-radius: 3px 3px 0 0;
-  flex: 1;
-  height: 100%;
-  transform-origin: bottom center;
-}
-
 /* ---- Quick actions: shine on the primary action, nudging arrows ---- */
 
 .dashboard-page .quick-primary-action {
@@ -501,11 +472,6 @@
 @keyframes rg-shimmer {
   0% { transform: translateX(-100%); }
   60%, 100% { transform: translateX(100%); }
-}
-
-@keyframes rg-idle-wave {
-  0%, 100% { transform: scaleY(0.25); }
-  50% { transform: scaleY(0.85); }
 }
 
 @media (prefers-reduced-motion: reduce) {
