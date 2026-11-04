@@ -1,4 +1,6 @@
 import importlib.util
+import io
+import json
 import pathlib
 import tempfile
 import unittest
@@ -37,6 +39,118 @@ class TrafficRolloutTests(unittest.TestCase):
             rollout.bootstrap_metadata(sample.replace(b'https://us.routegate.org', b'https://other.example'))
         with self.assertRaises(rollout.Stop):
             rollout.bootstrap_metadata(b'no metadata')
+    def test_read_only_diagnosis_reports_actual_pipeline_gaps_without_binary_scraping(self):
+        agent_id = '11111111-1111-4111-8111-111111111111'
+        server_id = '22222222-2222-4222-8222-222222222222'
+        with tempfile.TemporaryDirectory() as directory:
+            active = pathlib.Path(directory) / 'config.json'
+            active.write_text('{}')
+            cfg = pathlib.Path(directory) / 'agent.yaml'
+            cfg.write_text('agent_id: "' + agent_id + '"\\nserver_id: "' + server_id +
+                           '"\\ntraffic_collection_enabled: false\\nactive_config_path: ' + str(active) + '\\n')
+            queries = []
+
+            def read_only_sql(statement):
+                queries.append(statement)
+                self.assertTrue(statement.strip().upper().startswith('SELECT'))
+                if 'FROM agents a JOIN servers' in statement:
+                    return '1'
+                if 'max(version)' in statement:
+                    return rollout.OLD_SCHEMA
+                if 'FROM vpn_account_transfers' in statement:
+                    return '0'
+                if 'FROM config_apply_jobs' in statement:
+                    return '0'
+                if 'FROM traffic_usage_events' in statement:
+                    return '0'
+                if 'FROM traffic_usage_daily' in statement:
+                    return '0'
+                self.fail('unexpected SQL statement')
+
+            with mock.patch.object(rollout, 'CONFIG', cfg), \\
+                 mock.patch.object(rollout, 'sql', side_effect=read_only_sql), \\
+                 mock.patch.object(rollout, 'run', return_value='sing-box 1.12.12\\nTags: with_v2ray_api,with_quic'), \\
+                 mock.patch.object(rollout, 'bootstrap_metadata', side_effect=AssertionError('binary metadata scraper must not run')), \\
+                 mock.patch('sys.stdout', new_callable=io.StringIO) as output:
+                report = rollout.diagnose()
+                self.assertEqual(json.loads(output.getvalue()), report)
+
+            self.assertEqual(len(queries), 6)
+            self.assertEqual(report['mode'], 'read_only')
+            self.assertEqual(report['schema'], rollout.OLD_SCHEMA)
+            self.assertFalse(report['schema160_ready'])
+            self.assertTrue(report['runtime_stats_supported'])
+            self.assertFalse(report['agent_collection_enabled'])
+            self.assertFalse(report['runtime_stats_enabled'])
+            self.assertEqual(report['recent_native_reports_30d'], 0)
+            self.assertFalse(report['dashboard_daily_available_from_database'])
+            self.assertTrue(report['no_service_or_config_changes'])
+            self.assertTrue(report['live_api_not_checked'])
+            # Explicit proof of what the report did not expose.
+            self.assertNotIn(agent_id, output.getvalue())
+            self.assertNotIn(server_id, output.getvalue())
+
+    def test_diagnosis_marks_unknown_runtime_probe_and_malformed_active_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            cfg = root / 'agent.yaml'
+            cfg.write_text(
+                'agent_id: 11111111-1111-4111-8111-111111111111\\n'
+                'server_id: 22222222-2222-4222-8222-222222222222\\n'
+                'traffic_collection_enabled: true\\n'
+                'active_config_path: ' + str(root / 'missing-config.json') + '\\n'
+            )
+            def db(statement):
+                if 'FROM agents a JOIN servers' in statement:
+                    return '1'
+                if 'max(version)' in statement:
+                    return rollout.SCHEMA
+                if 'FROM vpn_account_transfers' in statement:
+                    return '2'
+                if 'FROM config_apply_jobs' in statement:
+                    return '1'
+                if 'FROM traffic_usage_events' in statement:
+                    return '4'
+                if 'FROM traffic_usage_daily' in statement:
+                    return '3'
+                self.fail('unknown SQL')
+            with mock.patch.object(rollout, 'CONFIG', cfg), \\
+                 mock.patch.object(rollout, 'sql', side_effect=db), \\
+                 mock.patch.object(rollout, 'run', side_effect=rollout.Stop('runtime_unavailable')), \\
+                 mock.patch('sys.stdout', new_callable=io.StringIO):
+                report = rollout.diagnose()
+            self.assertTrue(report['schema160_ready'])
+            self.assertIsNone(report['runtime_stats_supported'])
+            self.assertIsNone(report['runtime_stats_enabled'])
+            self.assertIsNone(report['runtime_stats_loopback_configured'])
+            self.assertEqual(report['unfinished_transfers'], 2)
+            self.assertEqual(report['unfinished_apply_jobs'], 1)
+            self.assertEqual(report['recent_native_reports_30d'], 4)
+            self.assertTrue(report['dashboard_daily_available_from_database'])
+            self.assertEqual(report['dashboard_daily_rows_30d'], 3)
+
+    def test_diagnosis_does_not_trust_unbound_us_agent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = pathlib.Path(directory) / 'agent.yaml'
+            cfg.write_text(
+                'agent_id: 11111111-1111-4111-8111-111111111111\\n'
+                'server_id: 22222222-2222-4222-8222-222222222222\\n'
+            )
+            with mock.patch.object(rollout, 'CONFIG', cfg), \\
+                 mock.patch.object(rollout, 'sql', return_value='0'):
+                with self.assertRaisesRegex(rollout.Stop, 'local_agent_us_server_binding_not_verified'):
+                    rollout.diagnose()
+
+    def test_non_inspection_modes_still_refuse_before_any_mutation(self):
+        for mode in ('install', 'apply', 'invalid'):
+            with self.subTest(mode=mode), \\
+                 mock.patch.object(rollout.os, 'geteuid', return_value=0), \\
+                 mock.patch.object(rollout.sys, 'argv', ['runner.py', mode, '/tmp/ignored', '7']), \\
+                 mock.patch.object(rollout, 'install', side_effect=AssertionError('no install')), \\
+                 mock.patch.object(rollout, 'apply_metrics', side_effect=AssertionError('no apply')):
+                with self.assertRaisesRegex(rollout.Stop, 'install_and_apply_disabled_pending_bootstrap_identity_repair'):
+                    rollout.main()
+
     def test_enable_only_changes_collection_flag(self):
         old = b'agent_token: "private-token"\ntraffic_collection_enabled: false\nserver_id: "unchanged"\n'
         new = rollout.enabled_config(old)
