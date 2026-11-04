@@ -23,6 +23,12 @@ The helper verifies the registered US Agent/server binding and reads:
 - Database schema: whether migration
   `000160_traffic_report_checkpoints` is present.
 - Active transfer and config-apply job **counts** (safety blockers).
+- Sanitized, bounded pending RG-140 transfer state for each in-progress
+  operation: source/target role relative to US, current source/target
+  placement, cutover/cleanup acknowledgement booleans, job status and
+  presence of an error (never raw error text). Node reservation count
+  identifies whether the transfer guards still hold both nodes. These
+  are read-only observations, **not** permission to complete/cancel a transfer.
 - Installed sing-box `with_v2ray_api` build tag (true, false or unknown).
 - Existing Agent `traffic_collection_enabled` setting.
 - Active sing-box statistics API enabled and configured on
