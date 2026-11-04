@@ -46,4 +46,7 @@ run_case 'credential conversion pending'
 rm -r "$latch"
 ln -s missing "$latch"
 run_case 'invalid credential conversion directory'
+rm "$latch"
+python3 "$(dirname "$0")/exercise-manager-publication-race.py" "$work"
+run_case 'permission denied'
 echo 'Manager startup latch checks passed'

@@ -324,3 +324,23 @@ This check covers the current binary at startup. It assumes trusted host
 ancestors and a stopped Manager during administrative conversion. It does not
 serialize concurrent publication with startup, stop an already running process,
 or fence explicit migration/provisioning commands or older binaries.
+
+### First publication versus native Manager execution
+
+On a native Linux host, the offline first-pin writer pins the approved Manager
+executable inode, verifies root ownership and safe permissions, then opens that
+inode read/write without truncation. The writer reads the binary to verify the
+SHA-256 from the pin payload. It never writes executable bytes. Linux returns
+ETXTBSY if the executable is in use, and refuses exec of the same inode while
+the descriptor is open. This spans the first mkdir through the final fsync and
+exception cleanup. After release, the current Manager checks the durable latch
+as described above. A write-open refusal leaves the latch untouched.
+
+This relies on a local filesystem that enforces Linux executable/write
+exclusion. The approved installed path and inode must remain stable under the
+host transaction lock. A read-only or immutable executable can refuse even
+offline publication. A copied/replaced binary, a different mount view or
+direct SQL access requires separate control. The primitive remains unwired;
+before activation the administrative caller must establish service quiescence
+and validate credentials, effective units, paths and schema. Existing pins
+remain untouched by a refused publication.
