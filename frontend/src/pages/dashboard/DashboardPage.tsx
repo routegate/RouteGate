@@ -23,6 +23,7 @@ import { StatusBadge } from '../../shared/ui/StatusBadge';
 import { AnimatedValue } from './AnimatedValue';
 import { GettingStartedWidget } from './GettingStartedWidget';
 import { LiveStatusBar } from './LiveStatusBar';
+import { resolveTrafficWidgetStatus, type TrafficWidgetStatus } from './trafficOverviewState';
 import './DashboardPage.css';
 
 function formatDate(value?: string | null): string {
@@ -265,22 +266,46 @@ function QuickActionsWidget() {
   );
 }
 
-function TrafficOverviewWidget({ daily, available }: { daily: DashboardDailyTraffic[]; available: boolean }) {
+function TrafficOverviewWidget({
+  daily,
+  status,
+  onRetry,
+}: {
+  daily: DashboardDailyTraffic[];
+  status: TrafficWidgetStatus;
+  onRetry: () => void;
+}) {
   const maximum = daily.reduce((value, item) => Math.max(value, item.totalBytes), 0);
   const total = daily.reduce((value, item) => value + item.totalBytes, 0);
 
   return (
     <WidgetPanel title={t('dashboard.trafficOverview')} subtitle={`(${t('dashboard.last30Days')})`} className="traffic-widget">
-      {!available ? (
-        <div className="traffic-empty-state">
-          <div className="traffic-empty-wave" aria-hidden="true">
-            {Array.from({ length: 18 }, (_, index) => <span key={index} style={{ '--bar-index': index } as CSSProperties} />)}
-          </div>
-          <strong>N/A</strong>
-          <span>{t('dashboard.noTrafficData')}</span>
+      {status !== 'ready' ? (
+        <div className={`traffic-empty-state traffic-empty-state--${status}`} data-traffic-state={status}>
+          <strong>
+            {status === 'loading'
+              ? t('dashboard.trafficLoading')
+              : status === 'error'
+                ? t('dashboard.trafficLoadFailed')
+                : t('dashboard.trafficNoMeasurements')}
+          </strong>
+          {status !== 'loading' && (
+            <>
+              <p>{t(status === 'error' ? 'dashboard.trafficApiHelp' : 'dashboard.trafficCollectionHelp')}</p>
+              {status === 'error' ? (
+                <button className="small-button" type="button" onClick={onRetry}>
+                  {t('dashboard.trafficRetry')}
+                </button>
+              ) : (
+                <Link className="small-button" to="/servers">
+                  {t('dashboard.trafficCheckServers')}
+                </Link>
+              )}
+            </>
+          )}
         </div>
       ) : (
-        <div className="traffic-overview-content">
+        <div className="traffic-overview-content" data-traffic-state="ready">
           <div className="traffic-overview-total">
             <strong>{formatBytes(total)}</strong>
             <span>{t('dashboard.total')}</span>
@@ -519,7 +544,11 @@ export function DashboardPage() {
   const vpnAccountsCount = vpnAccountsCountQuery.isSuccess ? vpnAccountsCountQuery.data.total : '—';
   const trafficApiAvailable = dashboardTrafficQuery.isSuccess;
   const monthlyTrafficAvailable = trafficApiAvailable && dashboardTrafficQuery.data?.monthlyAvailable === true;
-  const dailyTrafficAvailable = trafficApiAvailable && dashboardTrafficQuery.data?.dailyAvailable === true;
+  const trafficWidgetStatus = resolveTrafficWidgetStatus(
+    dashboardTrafficQuery.status,
+    dashboardTrafficQuery.data?.dailyAvailable,
+    dashboardTrafficQuery.data?.daily,
+  );
   const monthlyTraffic = dashboardTrafficQuery.data?.monthly;
   const serverTrafficById = new Map((dashboardTrafficQuery.data?.servers ?? []).map((item) => [item.serverId, item]));
   const serverLoadById = new Map((dashboardNodesQuery.data?.serverLoads ?? []).map((item) => [item.serverId, item]));
@@ -586,7 +615,9 @@ export function DashboardPage() {
           value={monthlyTrafficAvailable && monthlyTraffic ? formatBytes(monthlyTraffic.totalBytes) : 'N/A'}
           meta={monthlyTrafficAvailable && monthlyTraffic
             ? `${t('dashboard.inboundTraffic')}: ${formatBytes(monthlyTraffic.rxBytes)} · ${t('dashboard.outboundTraffic')}: ${formatBytes(monthlyTraffic.txBytes)}`
-            : t('dashboard.noTrafficData')}
+            : t(dashboardTrafficQuery.isPending
+              ? 'dashboard.trafficLoading'
+              : dashboardTrafficQuery.isError ? 'dashboard.trafficLoadFailed' : 'dashboard.trafficNoMeasurements')}
           tone="amber"
           icon="☁"
           live={monthlyTrafficAvailable}
@@ -600,7 +631,11 @@ export function DashboardPage() {
           agentsAvailable={agentsQuery.isSuccess}
         />
         <NodeDistributionWidget distribution={dashboardNodesQuery.data} available={dashboardNodesQuery.isSuccess} />
-        <TrafficOverviewWidget daily={dashboardTrafficQuery.data?.daily ?? []} available={dailyTrafficAvailable} />
+        <TrafficOverviewWidget
+          daily={dashboardTrafficQuery.data?.daily ?? []}
+          status={trafficWidgetStatus}
+          onRetry={() => void dashboardTrafficQuery.refetch()}
+        />
         <QuickActionsWidget />
         <div className="dashboard-activity-grid">
           <ServersSummaryWidget servers={displayServers} pending={serversQuery.isPending} available={serversQuery.isSuccess} />
