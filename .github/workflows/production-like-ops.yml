@@ -331,7 +331,7 @@ jobs:
           # Keep the shared lock across both deploys and all three validations.
           # shellcheck disable=SC1090
           source "$core_fail"
-          rg_update_acquire_production_like_lock
+          rg_update_acquire_production_like_lock direct
           forced_log=$(mktemp /tmp/routegate-forced-rollback.XXXXXX.log)
           trap 'rm -f "$forced_log"' EXIT
 

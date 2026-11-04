@@ -27,7 +27,7 @@ RG_UPDATE_LOG_PREFIX='[routegate-manager-update]'
 source "$CORE"
 # shellcheck source=scripts/routegate-update-role.sh
 source "$ROLE_LIB"
-rg_update_acquire_production_like_lock
+rg_update_acquire_production_like_lock direct
 
 PUBLIC_URL=${ROUTEGATE_PUBLIC_URL_OVERRIDE:-https://us.routegate.org}
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/routegate-manager-update.XXXXXX")
