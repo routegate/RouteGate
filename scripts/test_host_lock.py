@@ -308,3 +308,88 @@ exit 42
                                  expected[scenario])
                 subprocess.run(['flock', '-n', lock, 'true'], check=True, timeout=5)
                 self.assertEqual(lock.read_bytes(), b'sentinel')
+
+
+class RuntimeOpsLockTests(unittest.TestCase):
+    def test_runtime_operations_share_host_lock(self):
+        import os
+
+        operations = ['restart-sing-box', 'restart-wireguard', 'restart-hysteria2',
+                      'restart-mtproto', 'reconcile-mtproto-port-conflict']
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            lock = root / 'host.lock'
+            lock.write_bytes(b'lock sentinel')
+            inode = lock.stat().st_ino
+            trace = root / 'trace'
+            for name in ('routegate', 'routegate-mtproto', 'sing-box'):
+                (root / name).mkdir()
+            (root / 'routegate/manager.env').write_text(
+                'echo manager-env >>"$TRACE"; ROUTEGATE_DATABASE_URL=fixture\n')
+            config = root / 'routegate-mtproto/config.toml'
+            initial = 'bind-to = "0.0.0.0:443"\n'
+            config.write_text(initial)
+            (root / 'sing-box/config.json').write_text('{}')
+            # The remote script normally runs as root on the target. Redirect
+            # its absolute config paths and substitute only the host boundary.
+            ops = root / 'ops.sh'
+            source = (ROOT / 'production-like-ops.sh').read_text()
+            ops.write_text(source.replace('/etc/', tmp + '/').replace('  require_root\n', '  :\n'))
+            stub = """#!/bin/bash
+if flock -n "$RG_UPDATE_LOCK_FILE" true; then echo unlocked >>"$TRACE"; fi
+echo "${0##*/} $*" >>"$TRACE"
+case "${0##*/}" in
+  systemctl)
+    if [[ $1 == show ]]; then echo loaded; fi
+    if [[ $1 == restart && $2 == routegate-mtproto.service && $INJECT == rollback ]]; then
+      exit 1
+    fi ;;
+  psql)
+    case "${*: -1}" in
+      *'count(*) FROM servers'*) echo 1 ;;
+      *'SELECT vless_port'*) echo '443|8443|1443' ;;
+      *) echo fixture ;;
+    esac ;;
+  curl) printf 200 ;;
+esac
+"""
+            (root / 'bin').mkdir()
+            for name in ('systemctl', 'psql', 'curl', 'sing-box'):
+                binary = root / 'bin' / name
+                binary.write_text(stub)
+                binary.chmod(0o755)
+            env = dict(os.environ, PATH=f"{root}/bin:" + os.environ['PATH'],
+                       RG_UPDATE_LOCK_FILE=str(lock), TRACE=str(trace), INJECT='')
+            for op in operations:
+                with self.subTest(busy=op):
+                    result = subprocess.run(['flock', '-n', lock, 'bash', ops, op],
+                                            env=env, capture_output=True, timeout=5)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(b'host update lock unavailable', result.stderr)
+                    self.assertFalse(trace.exists())
+                    self.assertEqual(config.read_text(), initial)
+                    self.assertEqual(list(config.parent.iterdir()), [config])
+
+            # The locked deploy cycle invokes the read-only validator as a child.
+            validated = subprocess.run(['flock', '-n', lock, 'bash', ops, 'validate'],
+                                       env=env, capture_output=True, timeout=5)
+            self.assertEqual(validated.returncode, 0, validated.stderr)
+            self.assertIn(b'validation=passed', validated.stdout)
+
+            for op, inject in [(op, '') for op in operations] + [(operations[-1], 'rollback')]:
+                with self.subTest(operation=op, inject=inject):
+                    config.write_text(initial)
+                    trace.unlink(missing_ok=True)
+                    result = subprocess.run(['bash', ops, op], env=dict(env, INJECT=inject),
+                                            capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode == 0, not inject, result.stderr)
+                    calls = trace.read_text().splitlines()
+                    self.assertNotIn('unlocked', calls)
+                    self.assertTrue(any(c.startswith('systemctl restart ') for c in calls))
+                    if op == operations[-1]:
+                        self.assertEqual(config.read_text(), initial if inject else initial.replace(':443', ':1443'))
+                        if inject:
+                            self.assertEqual(calls.count('systemctl restart routegate-mtproto.service'), 2)
+                    subprocess.run(['flock', '-n', lock, 'true'], check=True, timeout=5)
+            self.assertEqual(lock.stat().st_ino, inode)
+            self.assertEqual(lock.read_bytes(), b'lock sentinel')
