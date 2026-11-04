@@ -217,6 +217,7 @@ def pending_transfer_evidence(server_id, expected_count):
     raw = sql(
         "SELECT COALESCE(jsonb_agg(jsonb_build_object("
         "'state', t.state, "
+        "'is_fi_test', (a.display_name='fi-test' OR a.username='fi-test'), "
         "'us_node_role', CASE WHEN t.source_server_id='" + server_id + "'::uuid THEN 'source' "
         "WHEN t.target_server_id='" + server_id + "'::uuid THEN 'target' ELSE 'unrelated' END, "
         "'placement', CASE WHEN a.server_id=t.source_server_id THEN 'source' "
@@ -246,7 +247,7 @@ def pending_transfer_evidence(server_id, expected_count):
     allowed_jobs = {'absent', 'pending', 'in_progress', 'succeeded', 'failed'}
     for item in states:
         if not isinstance(item, dict) or set(item) != {
-            'state', 'us_node_role', 'placement', 'cutover_recorded',
+            'state', 'is_fi_test', 'us_node_role', 'placement', 'cutover_recorded',
             'cleanup_acknowledged', 'target_job_status',
             'cleanup_job_status', 'has_error',
         }:
@@ -255,7 +256,7 @@ def pending_transfer_evidence(server_id, expected_count):
             raise Stop('transfer_evidence_value_invalid')
         if item['target_job_status'] not in allowed_jobs or item['cleanup_job_status'] not in allowed_jobs:
             raise Stop('transfer_job_status_invalid')
-        if not all(type(item[key]) is bool for key in ('cutover_recorded', 'cleanup_acknowledged', 'has_error')):
+        if not all(type(item[key]) is bool for key in ('is_fi_test', 'cutover_recorded', 'cleanup_acknowledged', 'has_error')):
             raise Stop('transfer_evidence_flag_invalid')
     return states
 
