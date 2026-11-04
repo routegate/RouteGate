@@ -344,3 +344,22 @@ direct SQL access requires separate control. The primitive remains unwired;
 before activation the administrative caller must establish service quiescence
 and validate credentials, effective units, paths and schema. Existing pins
 remain untouched by a refused publication.
+
+### Detecting live Managers after binary replacement
+
+Immediately before creating the latch, the writer resolves the installed
+service account `routegate` and inspects numeric process directories in host
+procfs. Any process leader with that real, effective, saved or filesystem UID
+withholds publication. This catches renamed copies and running executables
+unlinked by a package replacement, without relying on a process name, binary
+digest, command line or database URL. Any other process using the account
+also blocks this offline operation. A missing account, unreadable or malformed
+status, restricted UID mapping or a hidepid mount withholds publication.
+
+This is a point-in-time observation in the host PID and user namespaces.
+A privileged caller must establish that host view, hold the update lock,
+stop the service and exclude new launches from alternate executables before
+credential mutation. An empty scan cannot establish these preconditions.
+Processes running solely under another UID, external database clients and
+new launches after enumeration require independent controls. The same-inode
+kernel exclusion and durable pending marker retain their separate roles.

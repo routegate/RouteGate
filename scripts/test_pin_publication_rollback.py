@@ -16,7 +16,8 @@ ROOT = pathlib.Path(__file__).resolve().parent
 
 
 class PinPublicationRollbackTests(unittest.TestCase):
-    def test_publication_outcomes_at_real_rollback_boundary(self):
+    @mock.patch.object(writer, 'require_idle_manager_account', return_value=None)
+    def test_publication_outcomes_at_real_rollback_boundary(self, _idle):
         self.assertEqual(os.geteuid(), 0, 'run via sudo')
         for filename, handler, stop in (
             ('deploy-production-like-bundle.sh', 'rollback', 'stop agent manager'),

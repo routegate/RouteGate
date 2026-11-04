@@ -16,6 +16,9 @@ PAYLOAD = (b'FORMAT_VERSION=1\nMODE=external\n' +
 class PinWriterTests(unittest.TestCase):
     def setUp(self):
         self.assertEqual(os.geteuid(), 0, 'run via sudo')
+        idle = mock.patch.object(writer, 'require_idle_manager_account')
+        idle.start()
+        self.addCleanup(idle.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = pathlib.Path(self.tmp.name)
@@ -148,3 +151,48 @@ class PinWriterTests(unittest.TestCase):
         self.assertTrue(self.directory.is_dir())
         self.assertFalse((self.directory / 'restore.pin').exists())
         self.assertEqual((self.directory / 'pending.pin').read_bytes(), PAYLOAD)
+
+
+class ManagerAccountTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.proc = pathlib.Path(self.tmp.name)
+        (self.proc / 'self').mkdir()
+        (self.proc / 'self/uid_map').write_text('0 0 4294967295\n')
+        self.mountinfo = self.proc / 'self/mountinfo'
+        self.mountinfo.write_text('10 9 0:3 / /proc rw - proc proc rw\n')
+        (self.proc / '1').mkdir()
+        self.status = self.proc / '1/status'
+        self.status.write_bytes(b'Uid:\t0 0 0 0\n')
+        lookup = mock.patch.object(writer.pwd, 'getpwnam')
+        self.account = lookup.start()
+        self.addCleanup(lookup.stop)
+        self.account.return_value.pw_uid = 1234
+
+    def test_checks_all_uid_fields_and_refuses_incomplete_status(self):
+        writer.require_idle_manager_account(self.proc)
+        for i in range(4):
+            values = ['0'] * 4
+            values[i] = '1234'
+            self.status.write_text('Uid:\t' + ' '.join(values) + '\n')
+            with self.assertRaisesRegex(PermissionError, 'still in use'):
+                writer.require_idle_manager_account(self.proc)
+        self.status.write_bytes(b'Uid:\t0 0 0\n')
+        with self.assertRaises(ValueError):
+            writer.require_idle_manager_account(self.proc)
+        self.status.unlink()
+        with self.assertRaises(FileNotFoundError):
+            writer.require_idle_manager_account(self.proc)
+
+    def test_requires_service_account_and_unrestricted_proc(self):
+        self.account.side_effect = KeyError('routegate')
+        with self.assertRaises(KeyError):
+            writer.require_idle_manager_account(self.proc)
+        self.account.side_effect = None
+        self.mountinfo.write_text('10 9 0:3 / /proc rw - proc proc rw,hidepid=2\n')
+        with self.assertRaisesRegex(PermissionError, 'visibility'):
+            writer.require_idle_manager_account(self.proc)
+        (self.proc / 'self/uid_map').write_text('0 100000 65536\n')
+        with self.assertRaisesRegex(PermissionError, 'mapping'):
+            writer.require_idle_manager_account(self.proc)

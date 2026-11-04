@@ -7,12 +7,61 @@ an isolated directory. No path discovery, credential access or role repair.
 """
 import hashlib
 import os
+from pathlib import Path
+import pwd
 import re
 import stat
 
 DIRECTORY = 'routegate-credential-mode'
 PENDING = 'conversion.pending'
 FORMAT = re.compile(rb'FORMAT_VERSION=1\nMODE=external\nENV_SHA256=[a-f0-9]{64}\nUNIT_SHA256=[a-f0-9]{64}\nBINARY_SHA256=[a-f0-9]{64}\n')
+
+
+def require_idle_manager_account(proc=Path('/proc')):
+    """Conservative host preflight. A snapshot cannot exclude a later launch."""
+    uid = pwd.getpwnam('routegate').pw_uid
+    if uid == 0:
+        raise PermissionError('Manager service account must be unprivileged')
+    if (proc / 'self/uid_map').read_bytes().split() != [b'0', b'0', b'4294967295']:
+        raise PermissionError('host UID mapping required for Manager process inspection')
+    mounts = []
+    for line in (proc / 'self/mountinfo').read_bytes().splitlines():
+        mount, filesystem = line.split(b' - ', 1)
+        fields = mount.split()
+        if fields[4] == b'/proc':
+            mounts.append((fields, filesystem.split()))
+    if len(mounts) != 1:
+        raise PermissionError('expected one host proc mount')
+    fields, filesystem = mounts[0]
+    options = fields[5].split(b',') + filesystem[2].split(b',')
+    if (fields[3] != b'/' or filesystem[0] != b'proc' or
+            any(opt.startswith(b'hidepid=') and opt not in (b'hidepid=0', b'hidepid=off')
+                for opt in options)):
+        raise PermissionError('unrestricted proc visibility required')
+
+    saw_init = False
+    for entry in proc.iterdir():
+        if not entry.name.isascii() or not entry.name.isdecimal():
+            continue
+        try:
+            status = (entry / 'status').read_bytes()
+        except (FileNotFoundError, ProcessLookupError):
+            # Processes can exit after enumeration. A still-present PID with
+            # missing metadata is not evidence that the account is idle.
+            try:
+                entry.stat()
+            except FileNotFoundError:
+                continue
+            raise
+        rows = [line.split()[1:] for line in status.splitlines() if line.startswith(b'Uid:')]
+        if len(rows) != 1 or len(rows[0]) != 4 or not all(v.isdigit() for v in rows[0]):
+            raise ValueError('incomplete process UID information')
+        if entry.name == '1':
+            saw_init = True
+        if uid in map(int, rows[0]):
+            raise PermissionError(f'Manager service account still in use by PID {entry.name}')
+    if not saw_init:
+        raise PermissionError('cannot inspect PID 1 in host process view')
 
 
 def publish_first_pin(parent_fd, payload, *, manager_binary='/usr/local/bin/routegate-manager'):
@@ -51,6 +100,7 @@ def publish_first_pin(parent_fd, payload, *, manager_binary='/usr/local/bin/rout
                 digest.update(chunk)
             if not payload.endswith(b'BINARY_SHA256=' + digest.hexdigest().encode() + b'\n'):
                 raise ValueError('Manager executable differs from pinned bytes')
+            require_idle_manager_account()
             _publish_locked(parent_fd, payload)
     finally:
         os.close(inode)

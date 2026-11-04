@@ -3,10 +3,12 @@ import errno
 import hashlib
 import os
 import pathlib
+import shutil
 import socket
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import rg140_pin_writer as writer
@@ -30,27 +32,40 @@ def exercise(root, manager_command, enter_service=None):
 
     # A real TCP accept is the barrier: the Manager has passed its latch check
     # and is still alive, waiting for the PostgreSQL handshake.
-    with socket.socket() as listener:
-        listener.bind(('127.0.0.1', 0))
-        listener.listen()
-        listener.settimeout(10)
-        url = f'postgres://fixture@127.0.0.1:{listener.getsockname()[1]}/fixture?sslmode=disable'
-        process = subprocess.Popen(manager_command, env=dict(os.environ, ROUTEGATE_DATABASE_URL=url),
-                                   preexec_fn=enter_service)
-        try:
-            connection, _ = listener.accept()
-            with connection:
-                try:
-                    publish()
-                except OSError as err:
-                    if err.errno != errno.ETXTBSY:
-                        raise
-                else:
-                    raise AssertionError('published after Manager began database startup')
-                assert not latch.exists()
-        finally:
-            process.kill()
-            process.wait(timeout=5)
+    for case in ('installed', 'renamed', 'replaced'):
+        alternate = root / 'renamed-worker'
+        command = manager_command
+        if case != 'installed':
+            shutil.copy2(binary, alternate)
+        if case == 'renamed':
+            command = [str(pathlib.Path(manager_command[0]).with_name(alternate.name))]
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            listener.settimeout(10)
+            url = f'postgres://fixture@127.0.0.1:{listener.getsockname()[1]}/fixture?sslmode=disable'
+            process = subprocess.Popen(command, env=dict(os.environ, ROUTEGATE_DATABASE_URL=url),
+                                       preexec_fn=enter_service)
+            try:
+                connection, _ = listener.accept()
+                with connection:
+                    if case == 'replaced':
+                        os.replace(alternate, binary)
+                    try:
+                        publish()
+                    except OSError as err:
+                        if case == 'installed':
+                            assert err.errno == errno.ETXTBSY, err
+                        else:
+                            assert isinstance(err, PermissionError), err
+                            assert str(err) == f'Manager service account still in use by PID {process.pid}', err
+                    else:
+                        raise AssertionError(f'published with live {case} Manager')
+                    assert not latch.exists()
+            finally:
+                process.kill()
+                process.wait(timeout=5)
+                alternate.unlink(missing_ok=True)
 
     # Stop at the actual first mkdir, with publication admitted but no visible
     # marker. The kernel must refuse exec on that inode, before main runs.
@@ -90,11 +105,15 @@ def exercise(root, manager_command, enter_service=None):
 
 if __name__ == '__main__':
     root = pathlib.Path(sys.argv[1])
+    fixture_uid = 62042
     def enter_service():
         os.chroot(root)
         os.chdir('/')
         os.setgroups([])
-        os.setgid(65534)
-        os.setuid(65534)
-    exercise(root, ['/manager'], enter_service)
+        os.setgid(fixture_uid)
+        os.setuid(fixture_uid)
+    # Only account resolution is substituted. The host procfs, UIDs and
+    # service processes are real. No account is created on the runner.
+    with patch.object(writer.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=fixture_uid)):
+        exercise(root, ['/manager'], enter_service)
     print('Manager/publication exclusion passed in both orders')
