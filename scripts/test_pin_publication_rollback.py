@@ -43,6 +43,8 @@ class PinPublicationRollbackTests(unittest.TestCase):
                             target.write_bytes(content)
                             (backup / name).write_bytes(content)
                             payload += f'{key}_SHA256={hashlib.sha256(content).hexdigest()}\n'.encode()
+                        binary = host / 'usr/local/bin/routegate-manager'
+                        binary.chmod(0o755)
                         fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
                         real_fsync = os.fsync
                         calls = 0
@@ -58,12 +60,12 @@ class PinPublicationRollbackTests(unittest.TestCase):
                                 if outcome == 'rename':
                                     with mock.patch.object(writer.os, 'rename', side_effect=OSError('injected rename failure')):
                                         with self.assertRaises(OSError):
-                                            writer.publish_first_pin(fd, payload)
+                                            writer.publish_first_pin(fd, payload, manager_binary=binary)
                                 elif fail_at:
                                     with self.assertRaises(OSError):
-                                        writer.publish_first_pin(fd, payload)
+                                        writer.publish_first_pin(fd, payload, manager_binary=binary)
                                 else:
-                                    writer.publish_first_pin(fd, payload)
+                                    writer.publish_first_pin(fd, payload, manager_binary=binary)
                         finally:
                             os.close(fd)
                         directory = parent / writer.DIRECTORY
@@ -113,6 +115,6 @@ rg_update_restore_management_backup() { printf 'files\n' >> "$trace"; exit 78; }
                         retry_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
                         try:
                             with self.assertRaises(FileExistsError):
-                                writer.publish_first_pin(retry_fd, payload)
+                                writer.publish_first_pin(retry_fd, payload, manager_binary=binary)
                         finally:
                             os.close(retry_fd)

@@ -1,5 +1,6 @@
 """Root-only isolated first-publication and failure tests."""
 import concurrent.futures
+import hashlib
 import os
 import pathlib
 import tempfile
@@ -9,7 +10,7 @@ from scripts import rg140_pin_writer as writer
 
 PAYLOAD = (b'FORMAT_VERSION=1\nMODE=external\n' +
            b'ENV_SHA256=' + b'a'*64 + b'\nUNIT_SHA256=' + b'b'*64 +
-           b'\nBINARY_SHA256=' + b'c'*64 + b'\n')
+           b'\nBINARY_SHA256=' + hashlib.sha256(b'fixture executable').hexdigest().encode() + b'\n')
 
 
 class PinWriterTests(unittest.TestCase):
@@ -18,12 +19,37 @@ class PinWriterTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = pathlib.Path(self.tmp.name)
+        self.binary = self.root / 'manager'
+        self.binary.write_bytes(b'fixture executable')
+        self.binary.chmod(0o755)
         self.fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
         self.addCleanup(os.close, self.fd)
         self.directory = self.root / writer.DIRECTORY
 
+    def publish(self, fd, payload):
+        writer.publish_first_pin(fd, payload, manager_binary=self.binary)
+
+    def test_wrong_executable_refuses_before_publication(self):
+        self.binary.write_bytes(b'different executable')
+        with self.assertRaisesRegex(ValueError, 'differs from pinned bytes'):
+            self.publish(self.fd, PAYLOAD)
+        self.assertFalse(self.directory.exists())
+
+    def test_unsafe_executable_refuses_before_publication(self):
+        for mode in (0o644, 0o777):
+            with self.subTest(mode=mode):
+                self.binary.chmod(mode)
+                with self.assertRaises(PermissionError):
+                    self.publish(self.fd, PAYLOAD)
+        self.binary.chmod(0o755)
+        link = self.root / 'candidate-link'
+        link.symlink_to(self.binary)
+        with self.assertRaises(PermissionError):
+            writer.publish_first_pin(self.fd, PAYLOAD, manager_binary=link)
+        self.assertFalse(self.directory.exists())
+
     def test_publication_and_refusal_to_overwrite(self):
-        writer.publish_first_pin(self.fd, PAYLOAD)
+        self.publish(self.fd, PAYLOAD)
         pin = self.directory / 'restore.pin'
         self.assertEqual(pin.read_bytes(), PAYLOAD)
         self.assertEqual(pin.stat().st_mode & 0o777, 0o600)
@@ -32,7 +58,7 @@ class PinWriterTests(unittest.TestCase):
         self.assertEqual({p.name for p in self.directory.iterdir()}, {'restore.pin', writer.PENDING})
         self.assertTrue((self.directory / writer.PENDING).is_dir())
         with self.assertRaises(FileExistsError):
-            writer.publish_first_pin(self.fd, PAYLOAD.replace(b'a'*64, b'd'*64))
+            self.publish(self.fd, PAYLOAD.replace(b'a'*64, b'd'*64))
         self.assertEqual(pin.read_bytes(), PAYLOAD)
 
     def test_pending_intent_precedes_pin_publication(self):
@@ -42,7 +68,7 @@ class PinWriterTests(unittest.TestCase):
             seen.append({p.name for p in self.directory.iterdir()})
             real_fsync(fd)
         with mock.patch.object(writer.os, 'fsync', side_effect=checkpoint):
-            writer.publish_first_pin(self.fd, PAYLOAD)
+            self.publish(self.fd, PAYLOAD)
         self.assertEqual(seen, [set(), {writer.PENDING},
                                {writer.PENDING, 'pending.pin'},
                                {writer.PENDING, 'restore.pin'}])
@@ -50,13 +76,13 @@ class PinWriterTests(unittest.TestCase):
     def test_invalid_payload_does_not_create_latch(self):
         for payload in (PAYLOAD[:-1], PAYLOAD+b'\0', PAYLOAD+b'\n', b''):
             with self.subTest(payload=payload[:10]), self.assertRaises(ValueError):
-                writer.publish_first_pin(self.fd, payload)
+                self.publish(self.fd, payload)
             self.assertFalse(self.directory.exists())
 
     def test_existing_partial_directory_is_not_adopted(self):
         self.directory.mkdir()
         with self.assertRaises(FileExistsError):
-            writer.publish_first_pin(self.fd, PAYLOAD)
+            self.publish(self.fd, PAYLOAD)
         self.assertEqual(list(self.directory.iterdir()), [])
 
     def test_symlink_is_not_followed(self):
@@ -64,13 +90,13 @@ class PinWriterTests(unittest.TestCase):
         target.mkdir()
         self.directory.symlink_to(target)
         with self.assertRaises(FileExistsError):
-            writer.publish_first_pin(self.fd, PAYLOAD)
+            self.publish(self.fd, PAYLOAD)
         self.assertEqual(list(target.iterdir()), [])
 
     def test_unsafe_parent(self):
         self.root.chmod(0o777)
         with self.assertRaises(PermissionError):
-            writer.publish_first_pin(self.fd, PAYLOAD)
+            self.publish(self.fd, PAYLOAD)
         self.assertFalse(self.directory.exists())
 
     def test_failure_at_each_durability_boundary_retains_latch(self):
@@ -88,7 +114,7 @@ class PinWriterTests(unittest.TestCase):
                 try:
                     with mock.patch.object(writer.os, 'fsync', side_effect=fail):
                         with self.assertRaises(OSError):
-                            writer.publish_first_pin(fd, PAYLOAD)
+                            self.publish(fd, PAYLOAD)
                     directory = pathlib.Path(tmp) / writer.DIRECTORY
                     self.assertTrue(directory.is_dir())
                     pin = directory / 'restore.pin'
@@ -97,14 +123,14 @@ class PinWriterTests(unittest.TestCase):
                     else:
                         self.assertFalse(pin.exists())
                     with self.assertRaises(FileExistsError):
-                        writer.publish_first_pin(fd, PAYLOAD)
+                        self.publish(fd, PAYLOAD)
                 finally:
                     os.close(fd)
 
     def test_concurrent_first_writers_have_one_winner(self):
         def publish(payload):
             try:
-                writer.publish_first_pin(self.fd, payload)
+                self.publish(self.fd, payload)
                 return payload
             except FileExistsError:
                 return None
@@ -118,7 +144,7 @@ class PinWriterTests(unittest.TestCase):
     def test_failed_rename_never_publishes(self):
         with mock.patch.object(writer.os, 'rename', side_effect=OSError('rename failure')):
             with self.assertRaises(OSError):
-                writer.publish_first_pin(self.fd, PAYLOAD)
+                self.publish(self.fd, PAYLOAD)
         self.assertTrue(self.directory.is_dir())
         self.assertFalse((self.directory / 'restore.pin').exists())
         self.assertEqual((self.directory / 'pending.pin').read_bytes(), PAYLOAD)
