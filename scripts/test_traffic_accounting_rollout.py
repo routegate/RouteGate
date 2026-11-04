@@ -141,6 +141,17 @@ class TrafficRolloutTests(unittest.TestCase):
                 with self.assertRaisesRegex(rollout.Stop, 'local_agent_us_server_binding_not_verified'):
                     rollout.diagnose()
 
+    def test_production_workflow_allows_inspection_only(self):
+        workflow = pathlib.Path(__file__).resolve().parents[1] / '.github/workflows/traffic-accounting-rollout.yml'
+        content = workflow.read_text()
+        self.assertIn('options: [inspect]', content)
+        self.assertIn('[[ "$MODE" == inspect ]]', content)
+        self.assertIn('concurrency:\n  group: routegate-production-like-deploy', content)
+        self.assertIn('StrictHostKeyChecking=yes', content)
+        self.assertNotIn('options: [inspect, install', content)
+        self.assertNotIn('BOOTSTRAP_BASE_URL', content)
+        self.assertNotIn('Build reproducible control-plane payload', content)
+
     def test_non_inspection_modes_still_refuse_before_any_mutation(self):
         for mode in ('install', 'apply', 'invalid'):
             with self.subTest(mode=mode), \
