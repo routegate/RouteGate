@@ -118,7 +118,7 @@ jobs:
           # The database preflight and the Manager update run with
           # production-like secrets only from the trusted main workflow
           # definition, never a dispatch from another ref.
-          if [[ ( "$operation" == "start-manager-only" || "$operation" == "preflight-applied-client-settings-155" || "$operation" == "update-manager" || "$operation" == "publish-bootstrap" ) && "$EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF" != "refs/heads/main" ]]; then
+          if [[ ( "$operation" == "traffic-inspect" || "$operation" == "start-manager-only" || "$operation" == "preflight-applied-client-settings-155" || "$operation" == "update-manager" || "$operation" == "publish-bootstrap" ) && "$EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF" != "refs/heads/main" ]]; then
             printf 'The %s operation can only be dispatched from main.\n' "$operation" >&2
             exit 2
           fi
