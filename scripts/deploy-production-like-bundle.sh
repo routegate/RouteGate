@@ -91,11 +91,23 @@ SQL
   return "$rc"
 }
 
-if [[ ${1:-} == "--run-down-migration" ]]; then
+if [[ ${1:-} == "--run-down-migration" || ${1:-} == "--run-down-migration-inherited" ]]; then
   [[ $# -eq 4 ]] || {
     printf 'usage: %s --run-down-migration <database-url> <down-file> <version>\n' "$0" >&2
     exit 2
   }
+  lock_file=${RG_UPDATE_LOCK_FILE:-/run/lock/routegate-update.lock}
+  if [[ $1 == --run-down-migration-inherited ]]; then
+    # Re-lock the same open file description; a new open would contend
+    # with the waiting Manager. Reject a missing or unrelated descriptor.
+    [[ /proc/self/fd/8 -ef "$lock_file" ]] || {
+      printf '[production-like] invalid inherited host update lock\n' >&2
+      exit 1
+    }
+  else
+    exec 8>>"$lock_file"
+  fi
+  flock -n 8 || { printf '[production-like] host update lock unavailable\n' >&2; exit 1; }
   run_atomic_down_migration "$2" "$3" "$4"
   exit $?
 fi
@@ -112,7 +124,6 @@ BOOTSTRAP_ROOT=${ROUTEGATE_BOOTSTRAP_ROOT:-/var/www/routegate/bootstrap}
 BOOTSTRAP_DIR="${BOOTSTRAP_ROOT}/${EXPECTED_COMMIT}"
 NGINX_SITE=${ROUTEGATE_NGINX_SITE:-/etc/nginx/sites-available/routegate}
 NGINX_BIN=${ROUTEGATE_NGINX_BIN:-/usr/sbin/nginx}
-WORK_DIR=$(mktemp -d /tmp/routegate-production-like.XXXXXX)
 BACKUP_DIR=""
 BACKUP_SCHEMA=""
 NGINX_BACKUP=""
@@ -134,6 +145,8 @@ MAINTENANCE_SERVICE_UNIT=/etc/systemd/system/routegate-maintenance-dispatch@.ser
 RG_UPDATE_LOG_PREFIX='[production-like]'
 # shellcheck source=scripts/routegate-update-core.sh
 source "$UPDATE_CORE"
+rg_update_acquire_production_like_lock
+WORK_DIR=$(mktemp -d /tmp/routegate-production-like.XXXXXX)
 
 log() {
   rg_update_log "$*"

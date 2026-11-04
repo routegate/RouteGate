@@ -36,9 +36,9 @@ Default shared-lock identity is checked for all three entry points.
 
 - Production-like deploy, Manager update, repair and operational workflows use
   `/run/lock/routegate-production-like.lock` in their SSH wrappers. Their script
-  entry points are not all self-locking. They remain separate from the updater
-  lock; simply changing the wrapper path and adding the same lock inside would
-  cause self-contention through independently opened descriptors.
+  entry points are not all self-locking. Bundle deploy and both Manager update
+  scripts now acquire the updater lock inside the legacy wrapper. Repair and
+  other operational wrappers still require separate coverage.
 - Agent config application and direct systemd/binary invocation do not acquire
   this administrative lock. The lock does not prevent an Agent apply racing a
   recovery config rollback, or establish a protected startup gate.
@@ -62,11 +62,16 @@ verifies that another updater is still refused. After the child is killed, a new
 updater can acquire the lock. Closing descriptor 9 in the child breaks this test.
 This establishes one descriptor-lifetime case, not arbitrary descendant cleanup.
 
-Production-like Manager rollback invokes deploy-production-like-bundle.sh with
---run-down-migration in a separate Bash process. That mode runs before the deploy
-script loads the shared core library. A future lock integration must explicitly
-cover direct invocation and inherited invocation, without trusting a boolean
-"already locked" environment flag. Reopening and locking the same path in the
-child uses a different open file description and can refuse its own parent.
-The production-like wrappers retain their separate lock for now. No runtime
-locking changes or conversion activation are made by this checkpoint.
+## Bundle deploy and Manager rollback
+
+Bundle deploy and both production-like Manager scripts open the shared host
+lock append-only on fd 8 and acquire it before creating their work directory.
+The parent retains it through rollback. Direct `--run-down-migration` takes a
+fresh exclusive lock. Both Manager parents invoke
+`--run-down-migration-inherited` synchronously: the runner checks fd 8 against
+the configured lock inode and attempts exclusive nonblocking flock on that fd
+before preparing SQL. A different open description contends with the parent.
+The legacy SSH wrapper lock stays in place.
+
+This covers these script entry points. It does not serialize the entire
+multi-script deploy cycle, repair workflows, Agent apply or service startup.
