@@ -54,8 +54,8 @@ jobs:
       - name: Verify external schema readiness with a non-owner login
         run: go test ./internal/db -run '^TestSchemaReadiness' -count=1 -timeout=120s -v
 
-      - name: Rehearse old credential login fence and session termination
-        run: go test ./internal/db -run '^TestCredentialConversionSessionFence$' -count=1 -timeout=90s -v
+      - name: Verify old credential membership preflight and session fence
+        run: go test ./internal/db -run '^TestCredentialConversion(SessionFence|Membership)' -count=1 -timeout=90s -v
 
       - name: Verify explicit runtime role privileges and unchanged SQL fences
         run: go test ./internal/db -run '^TestRuntimeRole' -count=1 -timeout=120s -v

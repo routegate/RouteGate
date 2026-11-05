@@ -408,3 +408,32 @@ not connect the pin writer to PostgreSQL. #545 remains open.
 
 PostgreSQL semantics: https://www.postgresql.org/docs/16/functions-admin.html
 and https://www.postgresql.org/docs/16/sql-alterrole.html.
+
+
+### Read-only incoming-membership preflight (unwired)
+
+`RequireNoCredentialConversionMembers` checks a caller-supplied role OID/name
+pair in one SELECT against qualified PostgreSQL catalogs. A missing or replaced
+identity, inspection error or any incoming member withholds admission. Recursive
+UNION follows direct and indirect members without filtering on LOGIN, INHERIT,
+SET or ADMIN options. Even disabled-option and NOLOGIN memberships are refused
+conservatively; the helper does not revoke grants or alter roles. Outgoing
+membership alone is not an incoming path and does not fail this narrow check.
+
+PostgreSQL 16 integration tests execute the helper inside READ ONLY transactions
+and compare role attributes and memberships before/after each decision. They
+cover independent roles, outgoing membership, direct SET-only, INHERIT-only,
+ADMIN-only and disabled-option grants, and a real login that can SET ROLE through
+a NOLOGIN/NOINHERIT intermediate. Removing that incoming edge admits the narrow
+check again. Missing, mismatched and recreated identity pairs and cancelled
+inspection must fail. The previous session-drain rehearsal remains unchanged.
+
+This is a snapshot, not a durable database fence. No installer or conversion
+caller is connected. A concurrent administrator can grant membership after the
+check; already-assumed identities, superuser access, direct object ACLs, SECURITY
+DEFINER code, prepared transactions and authentication already in progress are
+not excluded. The caller still needs an explicit administrative concurrency and
+recovery contract before credential mutation. A nil error from this helper alone
+must never authorize conversion or mark it completed. #545 remains open.
+
+Membership options: https://www.postgresql.org/docs/16/role-membership.html.
