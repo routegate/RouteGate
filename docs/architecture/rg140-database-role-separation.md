@@ -437,3 +437,35 @@ recovery contract before credential mutation. A nil error from this helper alone
 must never authorize conversion or mark it completed. #545 remains open.
 
 Membership options: https://www.postgresql.org/docs/16/role-membership.html.
+
+
+### Prepared-transaction preflight (unwired)
+
+`RequireNoCredentialConversionPrepared` is a SELECT-only check of a pinned role
+OID/name and its entries in `pg_catalog.pg_prepared_xacts`. It checks the whole
+cluster without filtering by database. Missing/mismatched identity or query
+failure withholds admission. It never issues COMMIT/ROLLBACK PREPARED, changes
+LOGIN or prints transaction GIDs. The external coordinator/administrator must
+choose whether pending work should commit or roll back.
+
+The PostgreSQL 16 backend CI service enables eight prepared-transaction slots
+before testing; no installed PostgreSQL configuration is changed. The test
+creates two disposable databases and two roles. It prepares writes in both
+bases as the target role, terminates its backends, sets NOLOGIN and verifies zero
+sessions. The preflight must still refuse from a third database. READ ONLY
+transactions and before/after snapshots prove that refusals do not resolve work.
+
+Explicit fixture COMMIT PREPARED in one database leaves the gate blocked by the
+other; explicit ROLLBACK PREPARED of the last target transaction clears only this
+gate. Row readback proves the commit/rollback effects. An unrelated prepared
+transaction remains throughout and is removed only by fixture teardown. Invalid
+identity and cancellation also refuse. Teardown knows only its randomly named
+fixture objects; no automatic production recovery procedure is provided.
+
+This snapshot does not exclude concurrent preparation, transactions owned by
+other identities but touching relevant objects, direct ACLs, SECURITY DEFINER
+execution or administrative changes. Existing membership/session gates and host
+intent remain separate primitives. Installer activation, serialized admission,
+restart-safe outcome handling and VPN revocation E2E are still incomplete.
+
+PostgreSQL semantics: https://www.postgresql.org/docs/16/sql-prepare-transaction.html.
