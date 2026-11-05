@@ -340,7 +340,7 @@ export function VpnAccountRoutingPolicyPanel({ accountId, active = true }: { acc
               {policy.effectiveRoutingProfile && (
                 <div className="form-message">
                   <p>{t('routingPolicy.v2raynSetup')}</p>
-                  <button className="small-button" type="button" disabled={exportRouting.isPending} onClick={() => exportRouting.mutate()}>
+                  <button className="small-button" type="button" disabled={editingDisabled || exportRouting.isPending} onClick={() => exportRouting.mutate()}>
                     {t('routingPolicy.v2raynDownload')}
                   </button>
                   {exportRouting.isError && <p role="alert">{t('routingPolicy.v2raynExportError')}</p>}
