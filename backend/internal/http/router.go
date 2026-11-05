@@ -169,6 +169,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) stdht
 	mux.Handle("POST /api/v1/vpn-accounts/{id}/client-connection/pre-import", authn(auth.RequirePermission("vpn_users:update")(auth.RequirePermission("configs:read")(stdhttp.HandlerFunc(vpnAccountsHandler.PreviewUnappliedVLESS)))))
 	mux.Handle("GET /api/v1/vpn-accounts/{id}/client-profile", authn(auth.RequirePermission("vpn_users:read")(stdhttp.HandlerFunc(vpnAccountsHandler.GetClientProfile))))
 	mux.Handle("PATCH /api/v1/vpn-accounts/{id}/client-profile", authn(auth.RequirePermission("vpn_users:update")(stdhttp.HandlerFunc(vpnAccountsHandler.UpdateClientProfile))))
+	mux.Handle("GET /api/v1/account-transfer-reservations", authn(auth.RequirePermission("vpn_users:read")(auth.RequirePermission("servers:read")(stdhttp.HandlerFunc(transfersHandler.Reservations)))))
 	mux.Handle("GET /api/v1/vpn-accounts/{id}/transfer", authn(auth.RequirePermission("vpn_users:read")(stdhttp.HandlerFunc(transfersHandler.Latest))))
 	mux.Handle("POST /api/v1/vpn-accounts/{id}/transfer", authn(auth.RequirePermission("vpn_users:update")(auth.RequirePermission("configs:apply")(auth.RequirePermission("configs:render")(auth.RequirePermission("configs:validate")(stdhttp.HandlerFunc(transfersHandler.Start)))))))
 	mux.Handle("POST /api/v1/vpn-accounts/{id}/transfer/{transferId}", authn(auth.RequirePermission("vpn_users:update")(auth.RequirePermission("configs:apply")(auth.RequirePermission("configs:render")(auth.RequirePermission("configs:validate")(stdhttp.HandlerFunc(transfersHandler.Act)))))))
