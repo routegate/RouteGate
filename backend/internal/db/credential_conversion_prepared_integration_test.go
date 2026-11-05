@@ -89,6 +89,11 @@ func TestCredentialConversionPreparedPreflight(t *testing.T) {
 		exec(c, "GRANT INSERT ON public.probe TO "+ident(old)+", "+ident(other))
 		databases, owners = append(databases, name), append(owners, c)
 	}
+	targetDatabase := databases[1]
+	var databaseOID uint32
+	if err := admin.QueryRow(ctx, "SELECT oid FROM pg_catalog.pg_database WHERE datname=$1", targetDatabase).Scan(&databaseOID); err != nil {
+		t.Fatal(err)
+	}
 	// Clean up only fixture GIDs, including after an assertion failure. This is
 	// test teardown, not production recovery policy.
 	pending := map[string]*pgx.Conn{}
@@ -131,7 +136,7 @@ func TestCredentialConversionPreparedPreflight(t *testing.T) {
 			return state
 		}
 		before := snapshot()
-		err = RequireNoCredentialConversionPrepared(ctx, tx, oid, old)
+		err = RequireNoCredentialConversionPrepared(ctx, tx, oid, old, databaseOID, targetDatabase)
 		if wantBlocked && !errors.Is(err, ErrCredentialConversionPrepared) {
 			t.Fatalf("prepared transaction not refused: %v", err)
 		}
@@ -148,8 +153,9 @@ func TestCredentialConversionPreparedPreflight(t *testing.T) {
 	check(false)
 	controlGID, firstGID, secondGID := "rg140_control_"+suffix, "rg140_first_"+suffix, "rg140_second_"+suffix
 	prepare(0, other, controlGID)
-	check(false) // Unrelated transactions are neither resolved nor attributed to old.
+	check(false) // A different owner in a different database is out of scope.
 	prepare(0, old, firstGID)
+	check(true) // Old-role work blocks even outside the target database.
 	prepare(1, old, secondGID)
 	exec(admin, "ALTER ROLE "+ident(old)+" NOLOGIN")
 	var sessions int
@@ -165,6 +171,12 @@ func TestCredentialConversionPreparedPreflight(t *testing.T) {
 	exec(owners[1], "ROLLBACK PREPARED '"+secondGID+"'")
 	delete(pending, secondGID)
 	check(false)
+	alternateGID := "rg140_alternate_" + suffix
+	prepare(1, other, alternateGID)
+	check(true) // A different owner can still have prepared writes in the target.
+	exec(owners[1], "ROLLBACK PREPARED '"+alternateGID+"'")
+	delete(pending, alternateGID)
+	check(false)
 	for i, want := range []int{1, 0} {
 		var count int
 		if err := owners[i].QueryRow(ctx, "SELECT count(*) FROM public.probe").Scan(&count); err != nil || count != want {
@@ -179,14 +191,22 @@ func TestCredentialConversionPreparedPreflight(t *testing.T) {
 		oid  uint32
 		name string
 	}{{0, old}, {oid, ""}, {oid, other}, {oid, old + "_missing"}} {
-		if err := RequireNoCredentialConversionPrepared(ctx, admin, target.oid, target.name); err == nil {
-			t.Fatal("invalid target admitted")
+		if err := RequireNoCredentialConversionPrepared(ctx, admin, target.oid, target.name, databaseOID, targetDatabase); err == nil {
+			t.Fatal("invalid role admitted")
+		}
+	}
+	for _, target := range []struct {
+		oid  uint32
+		name string
+	}{{0, targetDatabase}, {databaseOID, ""}, {databaseOID, databases[0]}, {databaseOID, targetDatabase + "_missing"}} {
+		if err := RequireNoCredentialConversionPrepared(ctx, admin, oid, old, target.oid, target.name); err == nil {
+			t.Fatal("invalid database admitted")
 		}
 	}
 	cancelled, stop := context.WithCancel(ctx)
 	stop()
-	if err := RequireNoCredentialConversionPrepared(cancelled, admin, oid, old); !errors.Is(err, context.Canceled) {
+	if err := RequireNoCredentialConversionPrepared(cancelled, admin, oid, old, databaseOID, targetDatabase); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation not propagated: %v", err)
 	}
-	t.Log("NOLOGIN and zero sessions still leave prepared work; read-only preflight blocks across databases and preserves unrelated work")
+	t.Log("read-only preflight refuses old-role prepared work across databases and alternate-role prepared work in the target database")
 }
