@@ -24,9 +24,10 @@ import (
 	"time"
 )
 
-// Opt-in only: uses a disposable CI VM, one temporary systemd unit and loopback.
-// Never point this test at an installed RouteGate service or a production node.
-func TestCredentialRemovalSystemdRealityTraffic(t *testing.T) {
+// RunCredentialRemovalSystemdRealityFixture lets the external test drive the
+// first removal through the Agent HTTP client without a package import cycle.
+// The remaining phases continue to exercise the executor and recovery directly.
+func RunCredentialRemovalSystemdRealityFixture(t *testing.T, executeViaHTTP func(*testing.T, context.Context, ConfigTask, CredentialRemovalExecutor) (CredentialRemovalReport, error)) {
 	binary := os.Getenv("ROUTEGATE_TEST_SING_BOX")
 	if os.Getenv("ROUTEGATE_TEST_REMOVAL_SYSTEMD") != "1" || binary == "" {
 		t.Skip("requires disposable systemd runner and pinned sing-box")
@@ -36,12 +37,12 @@ func TestCredentialRemovalSystemdRealityTraffic(t *testing.T) {
 	}
 	for _, phase := range []string{"terminal_history", "prepared_release_intent", "prepared_release_submission", "cleaned_sources", "cleaned_commit_intent", "admission_release"} {
 		t.Run(phase, func(t *testing.T) {
-			testCredentialRemovalSystemdRealityTraffic(t, binary, phase != "terminal_history", phase == "prepared_release_submission" || phase == "cleaned_sources" || phase == "cleaned_commit_intent" || phase == "admission_release", phase == "cleaned_sources" || phase == "cleaned_commit_intent" || phase == "admission_release", phase == "cleaned_commit_intent" || phase == "admission_release", phase == "admission_release")
+			testCredentialRemovalSystemdRealityTraffic(t, binary, phase != "terminal_history", phase == "prepared_release_submission" || phase == "cleaned_sources" || phase == "cleaned_commit_intent" || phase == "admission_release", phase == "cleaned_sources" || phase == "cleaned_commit_intent" || phase == "admission_release", phase == "cleaned_commit_intent" || phase == "admission_release", phase == "admission_release", executeViaHTTP)
 		})
 	}
 }
 
-func testCredentialRemovalSystemdRealityTraffic(t *testing.T, binary string, prepared, submitted, cleanup, commitIntent, release bool) {
+func testCredentialRemovalSystemdRealityTraffic(t *testing.T, binary string, prepared, submitted, cleanup, commitIntent, release bool, executeViaHTTP func(*testing.T, context.Context, ConfigTask, CredentialRemovalExecutor) (CredentialRemovalReport, error)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +144,12 @@ func testCredentialRemovalSystemdRealityTraffic(t *testing.T, binary string, pre
 		}
 	}
 	mutationStarted := time.Now()
-	report, err := e.Execute(ctx, task)
+	var report CredentialRemovalReport
+	if prepared {
+		report, err = e.Execute(ctx, task)
+	} else {
+		report, err = executeViaHTTP(t, ctx, task, e)
+	}
 	if err != nil {
 		t.Fatal(report, err)
 	}
