@@ -1,5 +1,8 @@
 # UI workspace patterns (RG-80)
 
+For design token ownership and CSS consolidation, see
+[RG-80A Design System foundation](ui-design-system.md).
+
 ## Scope
 
 The account workspace establishes reusable interaction patterns for the admin UI.

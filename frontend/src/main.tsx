@@ -8,6 +8,8 @@ import { GlobalSearchController } from './app/GlobalSearchController';
 import { LegacyRouteRedirects } from './app/LegacyRouteRedirects';
 import { PortalAccessGate } from './app/PortalAccessGate';
 import { ScrollToTop } from './app/ScrollToTop';
+// Standalone frontend builds mirror the official /brand tokens (checked in CI).
+import './shared/brand-tokens.css';
 import './shared/styles.css';
 import './shared/rg45.css';
 import './shared/rg61.css';

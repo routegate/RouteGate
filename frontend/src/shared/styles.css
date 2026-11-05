@@ -1,10 +1,8 @@
 :root {
   color-scheme: dark;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-  color: #e5e7eb;
-  background: #0f172a;
+  font-family: var(--rg-font-sans);
+  color: var(--rg-color-text);
+  background: var(--rg-color-bg);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }

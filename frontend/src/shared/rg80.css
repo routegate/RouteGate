@@ -1,19 +1,21 @@
 @import './rg80-feature-screens.css';
 
 :root {
-  --rg-bg-deep: #07111f;
-  --rg-bg-main: #0b1220;
+  /* RG-80 compatibility aliases. Core identity values come from /brand. */
+  --rg-bg-deep: var(--rg-color-bg);
+  --rg-bg-main: var(--rg-color-surface);
   --rg-bg-muted: #101827;
   --rg-surface-main: #111c2e;
   --rg-surface-raised: #162235;
-  --rg-primary: #2563eb;
+  --rg-primary: var(--rg-color-primary);
   --rg-primary-hover: #1d4ed8;
+  /* Existing feature accents/surfaces are retained pending visual acceptance. */
   --rg-accent-cyan: #06b6d4;
-  --rg-success: #22c55e;
-  --rg-warning: #f59e0b;
-  --rg-danger: #ef4444;
-  --rg-text-primary: #f8fafc;
-  --rg-text-secondary: #94a3b8;
+  --rg-success: var(--rg-color-success);
+  --rg-warning: var(--rg-color-warning);
+  --rg-danger: var(--rg-color-danger);
+  --rg-text-primary: var(--rg-color-text);
+  --rg-text-secondary: var(--rg-color-muted);
   --rg-border: #263449;
 }
 
@@ -29,11 +31,6 @@ body {
 .sidebar {
   background: linear-gradient(180deg, rgba(7, 17, 31, 0.98), rgba(11, 18, 32, 0.96));
   border-right-color: rgba(38, 52, 73, 0.9);
-}
-
-.brand-mark {
-  background: linear-gradient(135deg, var(--rg-primary), var(--rg-accent-cyan));
-  box-shadow: 0 16px 40px rgba(37, 99, 235, 0.26);
 }
 
 .brand-title {

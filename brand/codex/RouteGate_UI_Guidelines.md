@@ -19,3 +19,12 @@ Before making any UI, UX or branding changes, read `/brand` and treat it as the 
 ## Brand language
 Main slogan: Control Your Routes.
 Product description: Modern Self-Hosted VPN Management Platform.
+
+## Design token implementation
+- `/brand/tokens` is authoritative. The frontend uses a checked mirror at
+  `frontend/src/shared/brand-tokens.css` to support standalone frontend builds.
+- When the official palette changes, update the brand token sources and copy
+  the CSS mirror. Run `npm run test:design-system` from `frontend/` in a
+  complete repository checkout.
+- Legacy RG-80 variables are compatibility aliases, not independent identity
+  colors. See `docs/architecture/ui-design-system.md` for scope and exceptions.

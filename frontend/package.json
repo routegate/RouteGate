@@ -13,6 +13,7 @@
     "test:protocol-drafts-browser": "node --test scripts/protocol-drafts.browser.test.mjs",
     "test:rollout": "node --test src/pages/settings/platformUpdateRolloutModel.test.ts",
     "test:ui": "node --test scripts/shared-ui.test.mjs",
+    "test:design-system": "node --test scripts/design-system.test.mjs",
     "preview": "vite preview",
     "test:workspace-integration": "node scripts/workspace-integration.mjs",
     "test:node-onboarding-browser": "node --test scripts/node-onboarding.browser.test.mjs",

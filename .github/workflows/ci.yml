@@ -374,6 +374,9 @@ jobs:
       - name: Test rollout UI safety model
         run: npm run test:rollout
 
+      - name: Verify RG-80 design token contract
+        run: npm run test:design-system
+
       - name: Test shared UI semantics
         run: npm run test:ui
 
