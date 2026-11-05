@@ -441,12 +441,14 @@ Membership options: https://www.postgresql.org/docs/16/role-membership.html.
 
 ### Prepared-transaction preflight (unwired)
 
-`RequireNoCredentialConversionPrepared` is a SELECT-only check of a pinned role
-OID/name and its entries in `pg_catalog.pg_prepared_xacts`. It checks the whole
-cluster without filtering by database. Missing/mismatched identity or query
-failure withholds admission. It never issues COMMIT/ROLLBACK PREPARED, changes
-LOGIN or prints transaction GIDs. The external coordinator/administrator must
-choose whether pending work should commit or roll back.
+`RequireNoCredentialConversionPrepared` validates the old role and Manager
+database OID/name pairs in one SELECT. It refuses old-role prepared transactions
+anywhere in the cluster and prepared transactions of any owner in the pinned
+database. An alternate login can prepare writes against the same tables, and
+the catalog does not establish which application data a transaction changed.
+Missing/mismatched identity or query failure withholds admission. The helper never
+issues COMMIT/ROLLBACK PREPARED, changes LOGIN or prints transaction GIDs.
+The external coordinator/administrator must decide how to resolve pending work.
 
 The PostgreSQL 16 backend CI service enables eight prepared-transaction slots
 before testing; no installed PostgreSQL configuration is changed. The test
@@ -458,14 +460,16 @@ transactions and before/after snapshots prove that refusals do not resolve work.
 Explicit fixture COMMIT PREPARED in one database leaves the gate blocked by the
 other; explicit ROLLBACK PREPARED of the last target transaction clears only this
 gate. Row readback proves the commit/rollback effects. An unrelated prepared
-transaction remains throughout and is removed only by fixture teardown. Invalid
-identity and cancellation also refuse. Teardown knows only its randomly named
-fixture objects; no automatic production recovery procedure is provided.
+transaction in another database remains throughout and is removed only by
+fixture teardown. An alternate owner's prepared write in the pinned database
+blocks until explicitly rolled back. Invalid role and database identities and
+cancellation also refuse. Teardown knows only its randomly named fixture objects.
 
-This snapshot does not exclude concurrent preparation, transactions owned by
-other identities but touching relevant objects, direct ACLs, SECURITY DEFINER
-execution or administrative changes. Existing membership/session gates and host
-intent remain separate primitives. Installer activation, serialized admission,
-restart-safe outcome handling and VPN revocation E2E are still incomplete.
+This snapshot does not exclude concurrent preparation, work under alternate
+identities outside the pinned database (including changes to shared catalogs),
+direct ACLs, SECURITY DEFINER execution or administrative changes. Existing
+membership/session gates and host intent remain separate primitives. Installer
+activation, serialized admission, restart-safe outcome handling and VPN
+revocation E2E are still incomplete.
 
 PostgreSQL semantics: https://www.postgresql.org/docs/16/sql-prepare-transaction.html.
