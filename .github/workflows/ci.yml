@@ -43,6 +43,21 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: backend/go.sum
 
+      - name: Enable prepared transactions only in the disposable PostgreSQL service
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$PG_CONTAINER" psql -X -U routegate -d routegate_ci -v ON_ERROR_STOP=1 \
+            -c 'ALTER SYSTEM SET max_prepared_transactions = 8'
+          docker restart "$PG_CONTAINER"
+          for attempt in $(seq 1 30); do
+            if docker exec "$PG_CONTAINER" pg_isready -U routegate -d routegate_ci; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(docker exec "$PG_CONTAINER" psql -X -U routegate -d routegate_ci -Atc 'SHOW max_prepared_transactions')" = 8
+
       - name: Download dependencies
         run: go mod download
 
@@ -54,8 +69,8 @@ jobs:
       - name: Verify external schema readiness with a non-owner login
         run: go test ./internal/db -run '^TestSchemaReadiness' -count=1 -timeout=120s -v
 
-      - name: Verify old credential membership preflight and session fence
-        run: go test ./internal/db -run '^TestCredentialConversion(SessionFence|Membership)' -count=1 -timeout=90s -v
+      - name: Verify old credential membership, prepared work and session fences
+        run: go test ./internal/db -run '^TestCredentialConversion(SessionFence|Membership|Prepared)' -count=1 -timeout=90s -v
 
       - name: Verify explicit runtime role privileges and unchanged SQL fences
         run: go test ./internal/db -run '^TestRuntimeRole' -count=1 -timeout=120s -v
