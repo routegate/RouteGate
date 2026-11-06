@@ -378,6 +378,9 @@ jobs:
       - name: Test shared UI semantics
         run: npm run test:ui
 
+      - name: Verify built-in routing profile localization
+        run: npm run test:routing-profile-locale
+
       - name: Test analytics diagnostic admission and queue states
         run: npm run test:analytics-diagnostics
 
