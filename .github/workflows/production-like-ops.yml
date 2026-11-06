@@ -27,9 +27,10 @@ on:
           - renew-certificate
           - preflight-applied-client-settings-155
           - update-manager
+          - update-frontend
           - publish-bootstrap
       commit:
-        description: update-manager or publish-bootstrap - full 40-character main commit with a successful RouteGate CI run
+        description: update-manager, update-frontend or publish-bootstrap - full 40-character main commit with a successful RouteGate CI run
         required: false
         type: string
         default: ''
@@ -82,7 +83,7 @@ jobs:
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             operation="$DISPATCH_OPERATION"
             commit="${DISPATCH_COMMIT:-}"
-          elif [[ "$REQUEST_BODY" =~ ^operation=(update-manager|publish-bootstrap)\ commit=([0-9a-f]{40})$ ]]; then
+          elif [[ "$REQUEST_BODY" =~ ^operation=(update-manager|update-frontend|publish-bootstrap)\ commit=([0-9a-f]{40})$ ]]; then
             # Parameterized requests accept only: a full lowercase commit id and
             # nothing else (no trailing newline, spaces or other text).
             operation="${BASH_REMATCH[1]}"
@@ -112,27 +113,27 @@ jobs:
           fi
 
           case "$operation" in
-            diagnose|diagnose-sing-box|traffic-inspect|diagnose-agent-task|validate|validate-deploy-rollback-cycle|restart-control-plane|start-manager-only|restart-sing-box|restart-wireguard|restart-hysteria2|restart-mtproto|reconcile-mtproto-port-conflict|renew-certificate|preflight-applied-client-settings-155|update-manager|publish-bootstrap) ;;
+            diagnose|diagnose-sing-box|traffic-inspect|diagnose-agent-task|validate|validate-deploy-rollback-cycle|restart-control-plane|start-manager-only|restart-sing-box|restart-wireguard|restart-hysteria2|restart-mtproto|reconcile-mtproto-port-conflict|renew-certificate|preflight-applied-client-settings-155|update-manager|update-frontend|publish-bootstrap) ;;
             *) exit 2 ;;
           esac
           # The database preflight and the Manager update run with
           # production-like secrets only from the trusted main workflow
           # definition, never a dispatch from another ref.
-          if [[ ( "$operation" == "traffic-inspect" || "$operation" == "start-manager-only" || "$operation" == "preflight-applied-client-settings-155" || "$operation" == "update-manager" || "$operation" == "publish-bootstrap" ) && "$EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF" != "refs/heads/main" ]]; then
+          if [[ ( "$operation" == "traffic-inspect" || "$operation" == "start-manager-only" || "$operation" == "preflight-applied-client-settings-155" || "$operation" == "update-manager" || "$operation" == "update-frontend" || "$operation" == "publish-bootstrap" ) && "$EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF" != "refs/heads/main" ]]; then
             printf 'The %s operation can only be dispatched from main.\n' "$operation" >&2
             exit 2
           fi
-          if [[ "$operation" == "update-manager" || "$operation" == "publish-bootstrap" ]]; then
+          if [[ "$operation" == "update-manager" || "$operation" == "update-frontend" || "$operation" == "publish-bootstrap" ]]; then
             [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { printf 'Operation requires a full 40-character lowercase commit id.\n' >&2; exit 2; }
           elif [[ -n "$commit" ]]; then
-            printf 'The commit input is accepted only by update-manager and publish-bootstrap.\n' >&2
+            printf 'The commit input is accepted only by update-manager, update-frontend and publish-bootstrap.\n' >&2
             exit 2
           fi
           printf 'operation=%s\n' "$operation" >> "$GITHUB_OUTPUT"
           printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT"
 
       - name: Verify update-manager target is on main with a successful CI run
-        if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'publish-bootstrap'
+        if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'update-frontend' || steps.request.outputs.operation == 'publish-bootstrap'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,7 +146,7 @@ jobs:
           printf 'target=%s successful_main_ci_runs=%s\n' "$TARGET_SHA" "$runs"
 
       - name: Checkout pinned update-manager target
-        if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'publish-bootstrap'
+        if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'update-frontend' || steps.request.outputs.operation == 'publish-bootstrap'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ steps.request.outputs.commit }}
@@ -154,7 +155,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify pinned checkout is in main
-        if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'publish-bootstrap'
+        if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'update-frontend' || steps.request.outputs.operation == 'publish-bootstrap'
         shell: bash
         env:
           TARGET_SHA: ${{ steps.request.outputs.commit }}
@@ -211,8 +212,8 @@ jobs:
             target/backend/go.sum
             target/agent/go.sum
 
-      - name: Setup Node.js for the Manager update
-        if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'publish-bootstrap'
+      - name: Setup Node.js for the Manager or frontend static update
+        if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'update-frontend' || steps.request.outputs.operation == 'publish-bootstrap'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '24'
