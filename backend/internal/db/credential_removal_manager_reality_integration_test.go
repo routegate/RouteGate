@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -14,8 +15,10 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/ikaevus/routegate/backend/internal/agents"
+	"github.com/ikaevus/routegate/backend/internal/revocations"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -96,6 +99,9 @@ func TestCredentialRemovalManagerAgentReality(t *testing.T) {
 		t.Fatalf("isolated Agent/Reality child failed: %v\n%s", err, out)
 	}
 	t.Logf("%s", out)
+	// The isolated child has now observed the old stream close, challenged the
+	// cached UUID and connected the second account to the real origin.
+	checkRemovalTerminalEvidence(t, f, decision.Audience, private)
 	var retained bool
 	if err := f.pool.QueryRow(f.ctx, `SELECT r.state='prepared' AND j.status='held_for_revocation'
  AND s.active_config_version_id=r.baseline_version_id
@@ -105,5 +111,72 @@ func TestCredentialRemovalManagerAgentReality(t *testing.T) {
  JOIN vpn_credential_revocations r ON r.id=h.operation_id JOIN config_apply_jobs j ON j.id=h.job_id
  JOIN servers s ON s.id=r.server_id WHERE h.operation_id=$1::uuid`, f.operation).Scan(&retained); err != nil || !retained {
 		t.Fatal("Manager did not retain exact evidence, baseline pointer and reservation", err)
+	}
+}
+
+func checkRemovalTerminalEvidence(t *testing.T, f dispatchGateFixture, audience string, dispatchKey ed25519.PrivateKey) {
+	t.Helper()
+	var report []byte
+	var now time.Time
+	if err := f.pool.QueryRow(f.ctx, `SELECT evidence,clock_timestamp()
+FROM routegate_dispatch.removal_results WHERE operation_id=$1::uuid`, f.operation).Scan(&report, &now); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := revocations.RuntimeDigest(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := revocations.NewRemovalVerificationAuthority(audience, public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := revocations.RemovalVerificationProof{
+		Audience: audience, OperationID: f.operation, AgentReportDigest: digest, ObservedAtUnixMicros: now.UnixMicro(),
+		OldSessionTerminated: true, CachedCredentialRejected: true, Continuity: revocations.RemovalRemainingAccountReconnected,
+	}
+	sign := func(p revocations.RemovalVerificationProof, key ed25519.PrivateKey) []byte {
+		t.Helper()
+		message, err := p.SigningBytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ed25519.Sign(key, message)
+	}
+	if err := f.svc.CheckHeldRemovalTerminalEvidence(f.ctx, proof, authority, sign(proof, private)); err != nil {
+		t.Fatal("valid independently signed traffic evidence refused", err)
+	}
+	dispatchAuthority, err := revocations.NewRemovalVerificationAuthority(audience, dispatchKey.Public().(ed25519.PublicKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.CheckHeldRemovalTerminalEvidence(f.ctx, proof, dispatchAuthority, sign(proof, dispatchKey)); !errors.Is(err, revocations.ErrPreflight) {
+		t.Fatal("dispatch signer was allowed to verify its own operation", err)
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*revocations.RemovalVerificationProof)
+	}{
+		{"wrong report", func(p *revocations.RemovalVerificationProof) { p.AgentReportDigest = digest[1:] + digest[:1] }},
+		{"old session unverified", func(p *revocations.RemovalVerificationProof) { p.OldSessionTerminated = false }},
+		{"cached credential unverified", func(p *revocations.RemovalVerificationProof) { p.CachedCredentialRejected = false }},
+		{"wrong continuity", func(p *revocations.RemovalVerificationProof) { p.Continuity = revocations.RemovalEmptyListenerVerified }},
+		{"future observation", func(p *revocations.RemovalVerificationProof) {
+			p.ObservedAtUnixMicros = now.Add(time.Minute).UnixMicro()
+		}},
+		{"pre-result observation", func(p *revocations.RemovalVerificationProof) {
+			p.ObservedAtUnixMicros = now.Add(-time.Minute).UnixMicro()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := proof
+			tc.edit(&changed)
+			if err := f.svc.CheckHeldRemovalTerminalEvidence(f.ctx, changed, authority, sign(changed, private)); !errors.Is(err, revocations.ErrPreflight) {
+				t.Fatal("invalid traffic observation accepted", err)
+			}
+		})
 	}
 }

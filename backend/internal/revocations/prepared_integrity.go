@@ -44,11 +44,23 @@ func (s *Service) InspectPreparedRemovalIntegrity(ctx context.Context, operation
 	}
 	defer tx.Rollback(ctx)
 
+	p, err := inspectPreparedRemovalIntegrity(ctx, tx, operation)
+	if err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return zero, err
+	}
+	return p, nil
+}
+
+func inspectPreparedRemovalIntegrity(ctx context.Context, tx pgx.Tx, operation string) (PreparedRemovalIntegrity, error) {
+	var zero PreparedRemovalIntegrity
 	var p PreparedRemovalIntegrity
 	var storedCandidate []byte
 	var accountNode, accountStatus, originalAccountStatus, identity, activeVersion, agentNode string
 	var currentGeneration int64
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 SELECT r.id::text, r.vpn_account_id::text, r.server_id::text,
  r.agent_id::text, r.agent_credential_generation,
  r.baseline_version_id::text, r.baseline_hash, r.candidate_hash,
@@ -124,9 +136,6 @@ WHERE r.id=$1::uuid AND r.state='prepared'`, operation).Scan(
 	if e1 != nil || e2 != nil || oldHash != p.BaselineRuntimeHash ||
 		newHash != p.CandidateRuntimeHash {
 		return zero, ErrPreflight
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return zero, err
 	}
 	return p, nil
 }

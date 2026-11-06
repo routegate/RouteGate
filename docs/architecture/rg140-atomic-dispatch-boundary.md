@@ -201,3 +201,20 @@ verify and bind the exact retired UUID to the Agent result, update the account
 and active version, record the retirement and release the reservation together.
 Backups that predate the registry and Agent-local recovery remain separate
 reconciliation paths before serving VPN traffic.
+
+### Independent verification before a terminal write
+
+The held Agent result records the applied configuration digest and measured
+service restart. An isolated read-only check now pairs that report with a
+signed traffic observation for the exact operation and report digest. The
+observation attests that a pre-existing stream ended, the cached credential was
+rejected and either another account reconnected or the empty listener was
+verified, according to the pinned candidate. A separate coordinator key signs
+this observation after the Agent report is recorded. The check rejects evidence
+more than two minutes old. The systemd/Reality integration fixture signs after
+the actual old-stream, cached-credential and surviving-account checks pass.
+
+The evidence check creates no durable receipt. A terminal writer still needs to
+revalidate the evidence while holding its write locks, then commit the retired
+identity, account delivery state, applied configuration and reservation release.
+There is no production verifier or terminal write endpoint in this change.
