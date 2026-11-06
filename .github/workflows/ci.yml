@@ -213,6 +213,7 @@ jobs:
           bash scripts/test-update-toolchain.sh
           bash scripts/test-update-verified.sh
           python3 -m unittest scripts/test_maintenance_dispatch.py scripts/test_publish_bootstrap.py scripts/test_remote_node_vpn_e2e.py
+          python3 -m unittest discover -s scripts -p test_production_like_frontend_static.py
           bash scripts/routegate-update-transaction.sh --help >/dev/null
           bash scripts/routegate-update-verified.sh --help >/dev/null
 
