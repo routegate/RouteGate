@@ -218,3 +218,20 @@ The evidence check creates no durable receipt. A terminal writer still needs to
 revalidate the evidence while holding its write locks, then commit the retired
 identity, account delivery state, applied configuration and reservation release.
 There is no production verifier or terminal write endpoint in this change.
+
+### Isolated terminal commit
+
+Schema 179 adds an owner-only terminal write. The coordinator takes the node
+and retirement locks, then rechecks the held Agent report and independent
+traffic signature. A single transaction records both proofs, revokes the
+target's legacy and device subscription tokens, rotates its UUID, retires the
+old UUID and promotes the candidate with the remaining accounts' existing
+client settings. The terminal job has its own history status so the ordinary
+Apply lifecycle skips its protocol promotion and pruning side effects. The
+existing node reservation ends at commit. An exact retry reads the original
+confirmation time. A conflicting active version on another node aborts the
+entire transaction.
+
+The Manager/Agent integration fixture exercises this internal coordinator
+path. Production enablement still requires provisioning the independent
+verifier, an operator entry point and recovery from uncertain outcomes.

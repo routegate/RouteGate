@@ -57,6 +57,22 @@ func (p RemovalVerificationProof) SigningBytes() ([]byte, error) {
 // read-only snapshot. The eventual terminal writer must repeat the checks
 // under its write locks. Success here grants no authority and retains the hold.
 func (s *Service) CheckHeldRemovalTerminalEvidence(ctx context.Context, proof RemovalVerificationProof, authority RemovalVerificationAuthority, signature []byte) error {
+	if err := verifyRemovalVerificationSignature(proof, authority, signature); err != nil {
+		return err
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := verifyHeldRemovalTerminalEvidence(ctx, tx, proof, authority); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func verifyRemovalVerificationSignature(proof RemovalVerificationProof, authority RemovalVerificationAuthority, signature []byte) error {
 	if !evidenceID.MatchString(proof.OperationID) || proof.Audience != authority.audience ||
 		!validRemovalHash(proof.AgentReportDigest) || !proof.OldSessionTerminated || !proof.CachedCredentialRejected ||
 		len(authority.key) != ed25519.PublicKeySize || len(signature) != ed25519.SignatureSize {
@@ -66,12 +82,10 @@ func (s *Service) CheckHeldRemovalTerminalEvidence(ctx context.Context, proof Re
 	if err != nil || !ed25519.Verify(authority.key, message, signature) {
 		return ErrPreflight
 	}
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
+	return nil
+}
 
+func verifyHeldRemovalTerminalEvidence(ctx context.Context, tx pgx.Tx, proof RemovalVerificationProof, authority RemovalVerificationAuthority) error {
 	pinned, err := inspectPreparedRemovalIntegrity(ctx, tx, proof.OperationID)
 	if err != nil {
 		return ErrPreflight
@@ -107,5 +121,5 @@ WHERE e.operation_id=$1::uuid`, proof.OperationID).Scan(&report, &dispatchKey, &
 		observed.After(now) || now.Sub(observed) > removalVerificationMaxAge || proof.Continuity != continuity {
 		return ErrPreflight
 	}
-	return tx.Commit(ctx)
+	return nil
 }
