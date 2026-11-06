@@ -84,6 +84,22 @@ class OpsBridgeIdentityTests(unittest.TestCase):
         self.assertIn('sudo -n', branch)
         self.assertIn('StrictHostKeyChecking=yes', source)
 
+    def test_squash_provenance_fallback_is_frontend_only_and_requires_matching_tree(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        start = source.index('      - name: Verify pinned release matches successful CI')
+        end = source.index('      - name: Checkout pinned update-manager target', start)
+        check = source[start:end]
+        self.assertIn('if (( runs > 0 )); then', check)
+        self.assertIn('elif [[ "$OPERATION" == "update-frontend" ]]; then', check)
+        self.assertIn('commits/${TARGET_SHA}/pulls', check)
+        self.assertIn('.merge_commit_sha == $expected', check)
+        self.assertIn('.head.repo.full_name == $repository', check)
+        self.assertIn('.merged_at != null', check)
+        self.assertIn('"$pr_tree" == "$main_tree"', check)
+        self.assertIn('event=pull_request&status=success', check)
+        self.assertIn('No successful RouteGate CI push run', check)
+        self.assertIn('else\n            printf', check)
+
     def test_static_ui_operation_is_pinned_and_never_calls_manager_update(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("'update-frontend'", source)
