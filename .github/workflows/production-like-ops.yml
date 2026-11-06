@@ -132,7 +132,7 @@ jobs:
           printf 'operation=%s\n' "$operation" >> "$GITHUB_OUTPUT"
           printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT"
 
-      - name: Verify pinned release matches successful CI
+      - name: Verify update-manager target is on main with a successful CI run
         if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'update-frontend' || steps.request.outputs.operation == 'publish-bootstrap'
         shell: bash
         env:
