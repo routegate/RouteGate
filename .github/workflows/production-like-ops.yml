@@ -246,6 +246,27 @@ jobs:
           printf 'checksums_sha=%s\n' "$(sha256sum "$OUTPUT_DIR/SHA256SUMS" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
           printf 'bundle commit=%s sha256=%s\n' "$COMMIT" "$bundle_sha"
 
+      - name: Build pinned frontend-only archive
+        if: steps.request.outputs.operation == 'update-frontend'
+        id: frontend_bundle
+        shell: bash
+        env:
+          UI_REVISION: ${{ steps.request.outputs.commit }}
+        run: |
+          set -euo pipefail
+          [[ "$UI_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git -C target rev-parse HEAD)" == "$UI_REVISION" ]]
+          npm ci --prefix target/frontend
+          npm run build --prefix target/frontend
+          printf '%s\n' "$UI_REVISION" > target/frontend/dist/routegate-ui-version.txt
+          bundle="$RUNNER_TEMP/routegate-ui-${UI_REVISION}.tar.gz"
+          tar -czf "$bundle" -C target/frontend dist
+          [[ -s "$bundle" ]]
+          digest=$(sha256sum "$bundle" | cut -d' ' -f1)
+          printf 'bundle=%s\n' "$bundle" >> "$GITHUB_OUTPUT"
+          printf 'sha=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          printf 'revision=%s\n' "$UI_REVISION" >> "$GITHUB_OUTPUT"
+
       - name: Validate ops scripts locally
         shell: bash
         run: |
@@ -258,6 +279,7 @@ jobs:
           bash -n scripts/production-like-update-manager.sh
           bash -n scripts/routegate-update-core.sh
           bash -n scripts/routegate-update-role.sh
+          python3 -m unittest discover -s scripts -p test_production_like_frontend_static.py
           if command -v shellcheck >/dev/null 2>&1; then
             shellcheck -x scripts/production-like-ops.sh
             shellcheck -x scripts/production-like-task-diagnostics.sh
@@ -291,6 +313,9 @@ jobs:
           BUNDLE_FILE: ${{ steps.rollback_bundle.outputs.bundle }}
           BUNDLE_SHA: ${{ steps.rollback_bundle.outputs.bundle_sha }}
           MANAGER_COMMIT: ${{ steps.request.outputs.commit }}
+          FRONTEND_COMMIT: ${{ steps.frontend_bundle.outputs.revision }}
+          FRONTEND_BUNDLE: ${{ steps.frontend_bundle.outputs.bundle }}
+          FRONTEND_SHA: ${{ steps.frontend_bundle.outputs.sha }}
           MANAGER_BUNDLE: ${{ steps.manager_bundle.outputs.bundle }}
           MANAGER_BUNDLE_SHA: ${{ steps.manager_bundle.outputs.bundle_sha }}
           BOOTSTRAP_ARM64: ${{ steps.manager_bundle.outputs.arm64 }}
