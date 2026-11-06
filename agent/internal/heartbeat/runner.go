@@ -34,6 +34,7 @@ type Runner struct {
 	runtimeCleaner              runtimecleanup.Cleaner
 	runtimeMutationDir          string
 	runtimeMutationManagerReady bool
+	removalManagerReady         bool
 	recoveryResponse            *tasks.RuntimeRecoveryChallengeResponse
 }
 
@@ -196,11 +197,13 @@ func (r *Runner) sendHeartbeat(ctx context.Context) error {
 	info := systeminfo.Collect()
 	r.prepareRuntimeMutationHeartbeat(&info)
 	r.runtimeMutationManagerReady = false
+	r.removalManagerReady = false
 	res, err := r.client.Heartbeat(ctx, r.cfg.AgentToken, info)
 	if err != nil {
 		return err
 	}
 	r.runtimeMutationManagerReady = res.OK && res.AgentID == r.cfg.AgentID && res.ServerID == r.cfg.ServerID && res.RuntimeMutationFencingAccepted
+	r.removalManagerReady = r.runtimeMutationManagerReady && res.CredentialRemovalAccepted
 	r.logger.Info("heartbeat accepted", "agent_id", res.AgentID, "server_id", res.ServerID, "server_status", res.ServerStatus)
 	return nil
 }
@@ -245,6 +248,15 @@ func (r *Runner) processNextTask(ctx context.Context) error {
 	r.recoveryResponse = nil
 	task := work.Task
 	if task == nil {
+		if r.removalManagerReady && r.credentialRemovalEnabled() {
+			dir := r.runtimeMutationDir
+			if dir == "" {
+				dir = tasks.DefaultRuntimeMutationDir
+			}
+			executor := tasks.NewCredentialRemovalExecutor(r.cfg.ActiveConfigPath, dir, r.cfg.ServerID, r.cfg.AgentID, r.vpnCoreAdapter, r.cfg.ServiceControlEnabled)
+			_, err := r.client.ProcessHeldRemoval(ctx, r.cfg.AgentToken, executor)
+			return err
+		}
 		r.logger.Debug("no agent task available")
 		return nil
 	}

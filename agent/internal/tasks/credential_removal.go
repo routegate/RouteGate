@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 type removalGenerationObserver interface {
@@ -36,6 +37,25 @@ type removalReceipt struct {
 }
 
 func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask) (CredentialRemovalReport, error) {
+	return e.execute(ctx, task, time.Time{})
+}
+
+// ExecuteHeld is the entry point for authenticated Manager delivery. The
+// wall-clock deadline is converted to the local monotonic clock once, and
+// limits admission only. An admitted mutation still needs to finish safely.
+func (e CredentialRemovalExecutor) ExecuteHeld(ctx context.Context, task ConfigTask) (CredentialRemovalReport, error) {
+	now := time.Now()
+	if task.DeliveryExpiresAt == nil {
+		return CredentialRemovalReport{}, errors.New("credential removal delivery deadline missing")
+	}
+	remaining := task.DeliveryExpiresAt.Sub(now)
+	if remaining <= 0 || remaining > 2*time.Minute {
+		return CredentialRemovalReport{}, errors.New("credential removal delivery deadline invalid")
+	}
+	return e.execute(ctx, task, now.Add(remaining))
+}
+
+func (e CredentialRemovalExecutor) execute(ctx context.Context, task ConfigTask, deadline time.Time) (CredentialRemovalReport, error) {
 	report := CredentialRemovalReport{SchemaVersion: 1, State: "failed", Code: "invalid_request"}
 	deny := func(code string) (CredentialRemovalReport, error) {
 		report.Code = code
@@ -94,6 +114,10 @@ func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask)
 		return deny("local_state_unavailable")
 	}
 	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); _ = lock.Close() }()
+	expired := func() bool { return !deadline.IsZero() && !time.Now().Before(deadline) }
+	if expired() {
+		return deny("delivery_expired")
+	}
 	// Check before receipt replay too: an interrupted legacy operation can
 	// invalidate a previously successful removal's evidence.
 	if !runtimeMarkerAbsent(filepath.Join(e.receiptDir, "mutation-inflight.json")) || !runtimeMarkerAbsent(filepath.Join(e.receiptDir, runtimeResultFile)) || !runtimeRecoveryStateAbsent(e.receiptDir) {
@@ -216,6 +240,9 @@ func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask)
 	if ctx.Err() != nil {
 		return fail("cancelled_before_mutation")
 	}
+	if expired() {
+		return fail("delivery_expired")
+	}
 	report.Before = before
 	report.State = "applying"
 	if err = save(); err != nil {
@@ -226,8 +253,33 @@ func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask)
 	if err = writeRemovalFile(fencePath, []byte(fingerprint)); err != nil {
 		return fail("fence_write_failed")
 	}
+	var blockedPromotion string
+	err = publishRemovalFileCheckpoint(e.activePath, candidate, true, func(step string, _ *os.File) error {
+		if step != "before-rename" {
+			return nil
+		}
+		switch {
+		case ctx.Err() != nil:
+			blockedPromotion = "cancelled_before_mutation"
+		case expired():
+			blockedPromotion = "delivery_expired"
+		default:
+			return nil
+		}
+		return ErrCredentialRemoval
+	})
+	if blockedPromotion != "" {
+		failed, failure := fail(blockedPromotion)
+		// The active file has not been touched. Clear only our own fence
+		// after durably recording that the attempt stopped before mutation.
+		if failed.Code == blockedPromotion && removeRemovalFile(fencePath) != nil {
+			report.State = "recovery_required"
+			return deny("fence_clear_failed")
+		}
+		return failed, failure
+	}
 	mutating = true
-	if err = writeRemovalFile(e.activePath, candidate); err != nil {
+	if err != nil {
 		return fail("promotion_failed")
 	}
 	if _, err = e.adapter.Restart(ctx); err != nil {
@@ -350,6 +402,9 @@ func publishRemovalFileCheckpoint(path string, data []byte, replace bool, checkp
 		return err
 	}
 	if replace {
+		if err = cut("before-rename"); err != nil {
+			return err
+		}
 		if err = os.Rename(tmp, path); err != nil {
 			return err
 		}

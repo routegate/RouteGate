@@ -131,9 +131,15 @@ Identical report retries succeed; conflicting reports are rejected.
 
 Reports are retained as evidence, with no change to the applied configuration
 or node reservation. The handlers are exercised in isolated PostgreSQL tests.
-The production router and Agent runner are not wired to them; the latter must
-enforce the delivery deadline before any mutation. Terminal verification and
-recovery remain required before rollout.
+The Agent runner can use the dedicated exchange on an isolated Manager only
+after both local opt-ins and explicit heartbeat acceptance. The executor
+rejects a missing, elapsed or overlong deadline and checks it again after
+validation and immediately before promotion. This check relies on synchronized
+Manager and Agent clocks; once admitted, mutation verification proceeds to a
+safe outcome even if the delivery window subsequently closes. A missing result
+acknowledgement leaves the local receipt available for reconciliation.
+The production router does not mount these handlers. Terminal verification
+and recovery remain required before rollout.
 
 Use the existing lifecycle completion contract to define dispatch, claim,
 result acceptance and terminal release together. Recovery attempts must retain
