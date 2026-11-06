@@ -264,8 +264,8 @@
   padding-block: 12px;
 }
 
-.dashboard-page .health-list + .health-pulse {
-  margin-top: 12px;
+.dashboard-page .health-widget .health-list {
+  margin-bottom: 12px;
 }
 
 .dashboard-page .health-pulse--pending {
