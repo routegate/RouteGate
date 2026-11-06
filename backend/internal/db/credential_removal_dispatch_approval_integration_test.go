@@ -119,6 +119,7 @@ func TestCredentialRemovalDispatchHumanApproval(t *testing.T) {
 	if _,err=svc.IssuePreparedRemovalDispatchApproval(authorized,inp);!errors.Is(err,revocations.ErrPreflight) {
 		t.Fatal("cancelled preparation renewed dispatch authority",err)
 	}
+	downgradeEmptyRetirementGuard(t, ctx, pool)
 	exchangeDown, err := os.ReadFile("../../migrations/000177_credential_removal_agent_exchange.down.sql")
 	if err != nil { t.Fatal(err) }
 	if _, err = pool.Exec(ctx, string(exchangeDown)); err != nil { t.Fatal("empty Agent exchange downgrade", err) }

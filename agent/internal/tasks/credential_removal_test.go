@@ -20,12 +20,16 @@ type removalAdapter struct {
 	generation                              RuntimeGeneration
 	restarts, validations                   int
 	validationHook, restartHook, healthHook func() error
+	observeHook                             func() (RuntimeGeneration, error)
 }
 
 func (a *removalAdapter) Descriptor() platform.VPNCoreAdapterDescriptor {
 	return platform.VPNCoreAdapterDescriptor{Core: "sing-box", Protocol: "vless"}
 }
 func (a *removalAdapter) ObserveGeneration(context.Context, string) (RuntimeGeneration, error) {
+	if a.observeHook != nil {
+		return a.observeHook()
+	}
 	return a.generation, nil
 }
 func (a *removalAdapter) IsEnabled(context.Context) (ServiceResult, error) {
@@ -285,6 +289,22 @@ func TestCredentialRemovalSystemdGeneration(t *testing.T) {
 			t.Fatal("invalid generation accepted")
 		}
 		output = saved
+	}
+}
+
+func TestCredentialRemovalWaitsForReplacementProcessWithoutRestartingAgain(t *testing.T) {
+	e, task, adapter, _ := removalExecutorFixture(t)
+	firstAfterRestart := true
+	adapter.observeHook = func() (RuntimeGeneration, error) {
+		if adapter.restarts == 1 && firstAfterRestart {
+			firstAfterRestart = false
+			return RuntimeGeneration{}, ErrCredentialRemoval
+		}
+		return adapter.generation, nil
+	}
+	report, err := e.Execute(context.Background(), task)
+	if err != nil || report.State != "succeeded" || adapter.restarts != 1 || firstAfterRestart {
+		t.Fatal(report, err, adapter.restarts)
 	}
 }
 

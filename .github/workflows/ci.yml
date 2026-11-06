@@ -88,13 +88,19 @@ jobs:
       - name: Verify approved IDs still cannot bypass generic Apply SQL guards
         run: go test ./internal/db -run '^TestCredentialRemovalApprovedIDsStillBlockGenericApply$' -count=1 -timeout=120s -v
 
-      # Split both original suites into independent Go processes.
-      # Retain their 120-second timeout and every previous test.
+      - name: Verify retired VLESS credentials cannot return through Apply
+        run: go test ./internal/db -run '^TestRetiredVLESSCredential$' -count=1 -timeout=120s -v
+
       - name: Verify credential revocation preparation transactions
         run: go test ./internal/db -run '^TestCredentialRevocation' -count=1 -timeout=120s -v
 
+      # Run transport separately so repeated PostgreSQL fixture migrations
+      # do not exhaust a single 120-second test process budget.
       - name: Verify runtime mutation fencing and recovery conflicts
-        run: go test ./internal/db -run '^TestRuntimeMutationFencing' -count=1 -timeout=120s -v
+        run: go test ./internal/db -run '^TestRuntimeMutationFencing' -skip '^TestRuntimeMutationFencingRecoveryTransport' -count=1 -timeout=120s -v
+
+      - name: Verify runtime recovery transport and its rejection cases
+        run: go test ./internal/db -run '^TestRuntimeMutationFencingRecoveryTransport' -count=1 -timeout=120s -v
 
       - name: Verify read-only prepared credential-removal integrity
         run: go test ./internal/db -run '^TestPreparedCredentialRemovalIntegrity$' -count=1 -timeout=120s -v

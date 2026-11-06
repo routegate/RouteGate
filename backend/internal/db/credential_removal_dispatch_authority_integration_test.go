@@ -233,6 +233,7 @@ func TestCredentialRemovalDispatchAdmissionHeldIssuance(t *testing.T) {
 	if _, err := f.svc.Cancel(f.ctx, f.operation, "isolated-operator"); err == nil {
 		t.Fatal("generic cancellation released the held removal reservation")
 	}
+	downgradeEmptyRetirementGuard(t, f.ctx, f.pool)
 	exchangeDown, err := os.ReadFile("../../migrations/000177_credential_removal_agent_exchange.down.sql")
 	if err != nil {
 		t.Fatal(err)
