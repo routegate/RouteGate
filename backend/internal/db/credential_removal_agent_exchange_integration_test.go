@@ -18,7 +18,10 @@ import (
 )
 
 func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
-	const token = "isolated-credential-removal-agent-token"
+	token, err := agents.GenerateAgentToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 	f, authority, decision, private := newSignedRemovalDecisionWithToken(t, agents.HashToken(token))
 	if _, err := f.svc.StagePreparedCredentialRemoval(f.ctx, f.operation, f.nonce, true); err != nil {
 		t.Fatal(err)
@@ -30,7 +33,10 @@ func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
 	if _, err := f.svc.IssueHeldRemovalDispatch(f.ctx, f.operation, f.nonce, authority, ed25519.Sign(private, data)); err != nil {
 		t.Fatal(err)
 	}
-	const unrelatedToken = "isolated-unrelated-agent-token"
+	unrelatedToken, err := agents.GenerateAgentToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.pool.Exec(f.ctx, "UPDATE agents SET token_hash=$2 WHERE server_id=$1::uuid", f.target, agents.HashToken(unrelatedToken)); err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +65,7 @@ func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
 		return response.Task
 	}
 	serve("/removals/claim", "unknown-agent-token", nil, http.StatusUnauthorized)
+	serve("/removals/claim", "rg_agent_unknown-fixture-token", nil, http.StatusUnauthorized)
 	if claim(token) != nil || claim(unrelatedToken) != nil {
 		t.Fatal("task delivered before capability negotiation or to another Agent")
 	}
