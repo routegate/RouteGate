@@ -86,7 +86,7 @@ class OpsBridgeIdentityTests(unittest.TestCase):
 
     def test_squash_provenance_fallback_is_frontend_only_and_requires_matching_tree(self):
         source = WORKFLOW.read_text(encoding="utf-8")
-        start = source.index('      - name: Verify pinned release matches successful CI')
+        start = source.index('      - name: Verify update-manager target is on main with a successful CI run')
         end = source.index('      - name: Checkout pinned update-manager target', start)
         check = source[start:end]
         self.assertIn('if (( runs > 0 )); then', check)
@@ -106,7 +106,8 @@ class OpsBridgeIdentityTests(unittest.TestCase):
         self.assertIn('operation=(update-manager|update-frontend|publish-bootstrap)', source)
         self.assertIn('npm run build --prefix target/frontend', source)
         self.assertIn('frontend_bundle.outputs.sha', source)
-        start = source.index('elif [[ "$OPERATION" == "update-frontend" ]]; then')
+        remote = source.index('      - name: Run allow-listed remote operation')
+        start = source.index('elif [[ "$OPERATION" == "update-frontend" ]]; then', remote)
         end = source.index('elif [[ "$OPERATION" == "update-manager" ]]; then', start)
         step = source[start:end]
         self.assertIn('flock -w 600 /run/lock/routegate-production-like.lock', step)
