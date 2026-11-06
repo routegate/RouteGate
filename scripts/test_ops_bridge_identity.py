@@ -84,6 +84,22 @@ class OpsBridgeIdentityTests(unittest.TestCase):
         self.assertIn('sudo -n', branch)
         self.assertIn('StrictHostKeyChecking=yes', source)
 
+    def test_static_ui_operation_is_pinned_and_never_calls_manager_update(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("'update-frontend'", source)
+        self.assertIn('operation=(update-manager|update-frontend|publish-bootstrap)', source)
+        self.assertIn('npm run build --prefix target/frontend', source)
+        self.assertIn('frontend_bundle.outputs.sha', source)
+        start = source.index('elif [[ "$OPERATION" == "update-frontend" ]]; then')
+        end = source.index('elif [[ "$OPERATION" == "update-manager" ]]; then', start)
+        step = source[start:end]
+        self.assertIn('flock -w 600 /run/lock/routegate-production-like.lock', step)
+        self.assertIn('production-like-frontend-static.py', step)
+        self.assertIn("'$FRONTEND_SHA'", step)
+        self.assertNotIn('production-like-update-manager.sh', step)
+        self.assertNotIn('systemctl', step)
+        self.assertNotIn('routegate-agent', step)
+
     def test_no_workflow_dispatch_from_untrusted_ref_for_sensitive_ops(self):
         source = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn('"$GITHUB_REF" != "refs/heads/main"', source)
