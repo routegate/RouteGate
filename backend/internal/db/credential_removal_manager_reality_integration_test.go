@@ -19,6 +19,7 @@ import (
 
 	"github.com/ikaevus/routegate/backend/internal/agents"
 	"github.com/ikaevus/routegate/backend/internal/revocations"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -101,7 +102,7 @@ func TestCredentialRemovalManagerAgentReality(t *testing.T) {
 	t.Logf("%s", out)
 	// The isolated child has now observed the old stream close, challenged the
 	// cached UUID and connected the second account to the real origin.
-	checkRemovalTerminalEvidence(t, f, decision.Audience, private)
+	proof, verifier, signature := checkRemovalTerminalEvidence(t, f, decision.Audience, private)
 	var retained bool
 	if err := f.pool.QueryRow(f.ctx, `SELECT r.state='prepared' AND j.status='held_for_revocation'
  AND s.active_config_version_id=r.baseline_version_id
@@ -112,9 +113,10 @@ func TestCredentialRemovalManagerAgentReality(t *testing.T) {
  JOIN servers s ON s.id=r.server_id WHERE h.operation_id=$1::uuid`, f.operation).Scan(&retained); err != nil || !retained {
 		t.Fatal("Manager did not retain exact evidence, baseline pointer and reservation", err)
 	}
+	testRemovalTerminalCommit(t, f, decision, proof, verifier, signature, token)
 }
 
-func checkRemovalTerminalEvidence(t *testing.T, f dispatchGateFixture, audience string, dispatchKey ed25519.PrivateKey) {
+func checkRemovalTerminalEvidence(t *testing.T, f dispatchGateFixture, audience string, dispatchKey ed25519.PrivateKey) (revocations.RemovalVerificationProof, revocations.RemovalVerificationAuthority, []byte) {
 	t.Helper()
 	var report []byte
 	var now time.Time
@@ -178,5 +180,98 @@ FROM routegate_dispatch.removal_results WHERE operation_id=$1::uuid`, f.operatio
 				t.Fatal("invalid traffic observation accepted", err)
 			}
 		})
+	}
+	return proof, authority, sign(proof, private)
+}
+
+func testRemovalTerminalCommit(t *testing.T, f dispatchGateFixture, decision revocations.RemovalDispatchDecision, proof revocations.RemovalVerificationProof, verifier revocations.RemovalVerificationAuthority, signature []byte, token string) {
+	t.Helper()
+	var originalUUID, remainingID, stale string
+	if err := f.pool.QueryRow(f.ctx, `SELECT vless_uuid::text FROM vpn_accounts WHERE id=$1::uuid`, decision.AccountID).Scan(&originalUUID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `SELECT id::text FROM vpn_accounts WHERE server_id=$1::uuid AND id<>$2::uuid`,
+		decision.ServerID, decision.AccountID).Scan(&remainingID); err != nil {
+		t.Fatal(err)
+	}
+	// The shared preparation fixture already has one active device token.
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO vpn_subscription_tokens(vpn_account_id,token_hash)
+VALUES ($1::uuid,'terminal-target-legacy'), ($2::uuid,'terminal-survivor')`, decision.AccountID, remainingID); err != nil {
+		t.Fatal(err)
+	}
+
+	runtime, _ := runtimeRoleFixture(t, f.ctx, f.pool)
+	var denied *pgconn.PgError
+	_, err := runtime.Exec(f.ctx, `SELECT routegate_dispatch.confirm_held_removal($1::uuid,'{}'::jsonb,NULL,NULL)`, f.operation)
+	if !errors.As(err, &denied) || denied.Code != "42501" {
+		t.Fatal("ordinary runtime could invoke terminal writer", err)
+	}
+
+	// A stale active version on another node prevents retirement at commit,
+	// after the coordinator has attempted all the terminal writes.
+	if err := f.pool.QueryRow(f.ctx, `INSERT INTO config_versions(server_id,version,config_hash,status,rendered_config)
+VALUES($1::uuid,1,'stale-terminal-test','applied',jsonb_build_object('vpnAccounts',
+  jsonb_build_array(jsonb_build_object('vlessUuid',$2::text)))) RETURNING id::text`, f.target, originalUUID).Scan(&stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE servers SET active_config_version_id=$2::uuid WHERE id=$1::uuid`, f.target, stale); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.svc.ConfirmHeldRemoval(f.ctx, proof, verifier, signature)
+	if !errors.As(err, &denied) || denied.Code != "P0141" || denied.Message != "VLESS credential remains in an account, active config, or open job" {
+		t.Fatal("expected terminal commit to fail at the retirement fence", err)
+	}
+	var rolledBack bool
+	if err := f.pool.QueryRow(f.ctx, `SELECT r.state='prepared' AND j.status='held_for_revocation'
+AND s.active_config_version_id=r.baseline_version_id AND a.vless_uuid=$2::uuid AND a.status=r.account_status
+AND (SELECT count(*) FROM vpn_subscription_tokens WHERE vpn_account_id=a.id AND status='active')=2
+AND NOT EXISTS (SELECT 1 FROM routegate_dispatch.confirmed_removals c WHERE c.operation_id=r.id)
+AND NOT EXISTS (SELECT 1 FROM routegate_dispatch.retired_vless_credentials x WHERE x.operation_id=r.id)
+FROM vpn_credential_revocations r JOIN servers s ON s.id=r.server_id JOIN vpn_accounts a ON a.id=r.vpn_account_id
+JOIN routegate_dispatch.held_removals h ON h.operation_id=r.id JOIN config_apply_jobs j ON j.id=h.job_id
+WHERE r.id=$1::uuid`, f.operation, originalUUID).Scan(&rolledBack); err != nil || !rolledBack {
+		t.Fatal("failed confirmation left a partial terminal state", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE servers SET active_config_version_id=NULL WHERE id=$1::uuid`, f.target); err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := f.svc.ConfirmHeldRemoval(f.ctx, proof, verifier, signature)
+	if err != nil {
+		t.Fatal("confirm held removal", err)
+	}
+	again, err := f.svc.ConfirmHeldRemoval(f.ctx, proof, verifier, signature)
+	if err != nil || confirmed.IsZero() || !again.Equal(confirmed) {
+		t.Fatal("confirmation replay rewrote its timestamp", err)
+	}
+
+	var exact bool
+	var report []byte
+	if err := f.pool.QueryRow(f.ctx, `SELECT r.state='confirmed' AND j.status='revocation_confirmed'
+AND s.active_config_version_id=v.id AND v.status='applied' AND v.pinned AND v.applied_at=c.confirmed_at
+AND a.status='revoked' AND a.vless_uuid<>$2::uuid AND x.digest=sha256(uuid_send($2::uuid))
+AND (v.client_settings->'accounts' ? ($3::uuid)::text) AND NOT (v.client_settings->'accounts' ? a.id::text)
+AND (SELECT count(*) FROM vpn_subscription_tokens WHERE vpn_account_id=a.id AND status='revoked')=2
+AND EXISTS(SELECT 1 FROM vpn_subscription_tokens WHERE vpn_account_id=$3::uuid AND status='active')
+AND (SELECT count(*) FROM vpn_credential_revocation_events WHERE operation_id=r.id AND action='confirmed')=1,
+e.evidence
+FROM vpn_credential_revocations r JOIN servers s ON s.id=r.server_id JOIN vpn_accounts a ON a.id=r.vpn_account_id
+JOIN routegate_dispatch.held_removals h ON h.operation_id=r.id JOIN config_apply_jobs j ON j.id=h.job_id
+JOIN config_versions v ON v.id=h.version_id JOIN routegate_dispatch.confirmed_removals c ON c.operation_id=r.id
+JOIN routegate_dispatch.removal_results e ON e.operation_id=r.id
+JOIN routegate_dispatch.retired_vless_credentials x ON x.operation_id=r.id
+WHERE r.id=$1::uuid`, f.operation, originalUUID, remainingID).Scan(&exact, &report); err != nil || !exact {
+		t.Fatal("terminal state did not agree with evidence, applied membership or subscriptions", err)
+	}
+	if err := f.svc.AcceptHeldRemovalResult(f.ctx, agents.HashToken(token), decision.ApplyJobID, report); err != nil {
+		t.Fatal("exact Agent result replay failed after confirmation", err)
+	}
+	_, err = runtime.Exec(f.ctx, `UPDATE vpn_subscription_tokens SET status='active' WHERE token_hash='terminal-target-legacy'`)
+	if !errors.As(err, &denied) || denied.Code != "P0141" {
+		t.Fatal("terminal subscription was reactivated while account remained revoked", err)
+	}
+	_, err = runtime.Exec(f.ctx, `UPDATE servers SET active_config_version_id=$2::uuid WHERE id=$1::uuid`,
+		decision.ServerID, decision.BaselineVersionID)
+	if !errors.As(err, &denied) || denied.Code != "P0141" || denied.Message != "retired VLESS credential cannot be used" {
+		t.Fatal("old UUID passed the retirement fence after reservation release", err)
 	}
 }

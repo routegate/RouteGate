@@ -13,7 +13,7 @@ import (
 
 var runtimeRoleName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 
-// Explicit schema-178 DML policy, not a discovery query or default grant.
+// Explicit schema-179 DML policy, not a discovery query or default grant.
 // Every added table requires a reviewed policy change. In particular, future
 // dispatch-consumption tables must NOT automatically inherit ordinary DML.
 var runtimeTables = strings.Fields(`
@@ -116,8 +116,8 @@ func ProvisionRuntimeRole(ctx context.Context, pool *pgxpool.Pool, name string) 
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(version),'') FROM public.schema_migrations`).Scan(&latest); err != nil {
 		return err
 	}
-	if latest != "000178_retired_vless_credentials" {
-		return fmt.Errorf("runtime role policy requires schema 178")
+	if latest != "000179_confirm_held_removal" {
+		return fmt.Errorf("runtime role policy requires schema 179")
 	}
 	expected := map[string]bool{"schema_migrations": true}
 	for _, table := range runtimeTables {

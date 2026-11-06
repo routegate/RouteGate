@@ -149,7 +149,7 @@ func (s *Service) AcceptHeldRemovalResult(ctx context.Context, tokenHash, jobID 
 	}
 	h, err := readHeldAgentRemoval(ctx, tx, agentID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && h.binding.JobID != jobID) {
-		return agents.ErrRemovalExchangeRejected
+		return acceptConfirmedRemovalReplay(ctx, tx, agentID, jobID, data)
 	}
 	if err != nil {
 		return err
@@ -174,6 +174,28 @@ func (s *Service) AcceptHeldRemovalResult(ctx context.Context, tokenHash, jobID 
 	}
 	if !exact {
 		return agents.ErrRemovalExchangeRejected
+	}
+	return tx.Commit(ctx)
+}
+
+// A result sent again after a lost acknowledgement can still read its exact
+// receipt, even when the terminal writer has already released the hold.
+func acceptConfirmedRemovalReplay(ctx context.Context, tx pgx.Tx, agentID, jobID string, data []byte) error {
+	if _, _, _, err := canonicalRemovalJSON(data); err != nil {
+		return agents.ErrRemovalExchangeRejected
+	}
+	var stored []byte
+	err := tx.QueryRow(ctx, `SELECT e.evidence FROM routegate_dispatch.confirmed_removals c
+JOIN routegate_dispatch.removal_results e USING (operation_id)
+JOIN routegate_dispatch.held_removals h USING (operation_id)
+JOIN vpn_credential_revocations r ON r.id=c.operation_id AND r.state='confirmed'
+JOIN agents a ON a.id=r.agent_id AND a.server_id=r.server_id AND a.credential_generation=r.agent_credential_generation
+WHERE h.job_id=$1::uuid AND a.id=$2::uuid`, jobID, agentID).Scan(&stored)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !samePreparedRemovalJSON(data, stored)) {
+		return agents.ErrRemovalExchangeRejected
+	}
+	if err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }

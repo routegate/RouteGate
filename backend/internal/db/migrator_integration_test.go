@@ -42,8 +42,8 @@ func TestMigrationsApplyFromScratchOnPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000178_retired_vless_credentials" {
-		t.Fatalf("applied schema version = %q, want 000178_retired_vless_credentials", version)
+	if version != "000179_confirm_held_removal" {
+		t.Fatalf("applied schema version = %q, want 000179_confirm_held_removal", version)
 	}
 	assertRawTrafficArchivalPreservesDailyRollup(t, ctx, pool)
 	assertAgentMaintenanceJobContract(t, ctx, pool)
@@ -530,8 +530,8 @@ func TestRuntimeMetricsBackfillMigrationRepairsAppliedSchemaDrift(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000178_retired_vless_credentials" {
-		t.Fatalf("applied schema version = %q, want 000178_retired_vless_credentials", version)
+	if version != "000179_confirm_held_removal" {
+		t.Fatalf("applied schema version = %q, want 000179_confirm_held_removal", version)
 	}
 }
 

@@ -309,6 +309,13 @@ func TestCredentialRevocationSeesJobCommittedWhileAdmissionWaits(t *testing.T) {
 }
 func downgradeEmptyRetirementGuard(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
+	terminalDown, err := os.ReadFile("../../migrations/000179_confirm_held_removal.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, string(terminalDown)); err != nil {
+		t.Fatal("empty terminal confirmation downgrade", err)
+	}
 	retiredDown, err := os.ReadFile("../../migrations/000178_retired_vless_credentials.down.sql")
 	if err != nil {
 		t.Fatal(err)
