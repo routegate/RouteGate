@@ -377,6 +377,9 @@ jobs:
       - name: Test shared UI semantics
         run: npm run test:ui
 
+      - name: Test analytics diagnostic admission and queue states
+        run: npm run test:analytics-diagnostics
+
       - name: Verify Dashboard animation safety
         run: node --test scripts/dashboard-motion.test.mjs
 

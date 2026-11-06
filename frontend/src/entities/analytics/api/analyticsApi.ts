@@ -92,7 +92,12 @@ export interface DiagnosticRun {
   id: string;
   serverId: string;
   profileKey: string;
-  status: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  state?: HealthState;
+  reasonCode?: string;
+  summary?: string;
+  recommendedAction?: string;
+  errorMessage?: string;
 }
 
 export function getAnalyticsOverview(): Promise<AnalyticsOverview> {
@@ -117,4 +122,9 @@ export function runManagerCertificateDiagnostic(serverId: string): Promise<Diagn
   return apiPost<{ profileKey: string }, DiagnosticRun>(`/api/v1/servers/${serverId}/diagnostics`, {
     profileKey: 'manager_certificate',
   });
+}
+
+/** Check the actual Agent result before enabling another diagnostic for the node. */
+export function getDiagnosticRun(serverId: string, runId: string): Promise<DiagnosticRun> {
+  return apiGet<DiagnosticRun>(`/api/v1/servers/${serverId}/diagnostics/${runId}`);
 }

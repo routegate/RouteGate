@@ -5,17 +5,20 @@ import { useNavigate } from 'react-router-dom';
 import {
   autoDetectServerGeography,
   getAnalyticsOverview,
+  getDiagnosticRun,
   runHostDiagnostic,
   runManagerCertificateDiagnostic,
   updateServerGeography,
   type AnalyticsAlert,
   type AnalyticsNode,
+  type DiagnosticRun,
   type HealthState,
   type ServerGeographyInput,
 } from '../../entities/analytics/api/analyticsApi';
 import { getClientConnections, type ClientConnection } from '../../entities/connection/api/connectionApi';
 import { getCurrentLocale, t, type TranslationKey } from '../../shared/i18n/i18n';
 import { AnalyticsWorldMap } from './AnalyticsWorldMap';
+import { diagnosticRequestErrorKey, isDiagnosticActive } from './analyticsDiagnosticState';
 import './AnalyticsPage.css';
 import './AnalyticsMapInspectorLatch.css';
 
@@ -280,13 +283,39 @@ function LocationEditor({ node, onClose }: { node: AnalyticsNode; onClose: () =>
 function SelectedNodePanel({ node }: { node: AnalyticsNode }) {
   const navigate = useNavigate();
   const [editingLocation, setEditingLocation] = useState(false);
-  const diagnosticMutation = useMutation({ mutationFn: () => runHostDiagnostic(node.id) });
-  const certificateDiagnosticMutation = useMutation({ mutationFn: () => runManagerCertificateDiagnostic(node.id) });
+  // One Agent operation per node can be pending/running. Poll its *real*
+  // lifecycle instead of leaving "queued" banners next to failed retries.
+  const [requestedRun, setRequestedRun] = useState<DiagnosticRun | null>(null);
+  const diagnosticMutation = useMutation({
+    mutationFn: (profileKey: 'host_overview' | 'manager_certificate') =>
+      profileKey === 'manager_certificate'
+        ? runManagerCertificateDiagnostic(node.id)
+        : runHostDiagnostic(node.id),
+    onSuccess: run => setRequestedRun(run),
+  });
+  const resultQuery = useQuery({
+    queryKey: ['analytics-diagnostic-run', node.id, requestedRun?.id],
+    queryFn: () => getDiagnosticRun(node.id, requestedRun?.id ?? ''),
+    enabled: Boolean(requestedRun && requestedRun.serverId === node.id),
+    retry: 2,
+    refetchInterval: query => {
+      if (query.state.status === 'error') return false;
+      return isDiagnosticActive(query.state.data?.status ?? requestedRun?.status) ? 2500 : false;
+    },
+  });
+  const run = requestedRun?.serverId === node.id ? resultQuery.data ?? requestedRun : null;
+  const diagnosticBusy = diagnosticMutation.isPending || Boolean(run && isDiagnosticActive(run.status) && !resultQuery.isError);
+  const startDiagnostic = (profileKey: 'host_overview' | 'manager_certificate') => {
+    if (diagnosticBusy) return;
+    diagnosticMutation.reset();
+    setRequestedRun(null);
+    diagnosticMutation.mutate(profileKey);
+  };
 
   useEffect(() => {
     setEditingLocation(false);
+    setRequestedRun(null);
     diagnosticMutation.reset();
-    certificateDiagnosticMutation.reset();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node.id]);
 
@@ -329,19 +358,39 @@ function SelectedNodePanel({ node }: { node: AnalyticsNode }) {
         </div>
       )}
 
-      {diagnosticMutation.isSuccess && <div className="form-message form-message-success">{t('analytics.diagnosticQueued')}</div>}
-      {diagnosticMutation.isError && <div className="form-message form-message-error">{t('analytics.diagnosticError')}</div>}
-      {certificateDiagnosticMutation.isSuccess && <div className="form-message form-message-success">{t('analytics.certificateDiagnosticQueued')}</div>}
-      {certificateDiagnosticMutation.isError && <div className="form-message form-message-error">{t('analytics.certificateDiagnosticError')}</div>}
+      {diagnosticMutation.isError && (
+        <div className="form-message form-message-error" role="alert">
+          {t(diagnosticRequestErrorKey(diagnosticMutation.error))}
+        </div>
+      )}
+      {requestedRun && resultQuery.isError && (
+        <div className="form-message form-message-error" role="alert">{t('analytics.diagnosticStatusUnavailable')}</div>
+      )}
+      {run && !resultQuery.isError && (
+        <div
+          className={`form-message ${run.status === 'failed' || run.state === 'unhealthy'
+            ? 'form-message-error' : run.state === 'degraded' || run.state === 'unknown'
+              ? 'form-message-warning' : 'form-message-success'}`}
+          role="status"
+        >
+          {run.status === 'queued'
+            ? t(run.profileKey === 'manager_certificate' ? 'analytics.certificateDiagnosticQueued' : 'analytics.diagnosticQueued')
+            : run.status === 'running'
+              ? t('analytics.diagnosticRunning')
+              : run.status === 'failed'
+                ? t('analytics.diagnosticExecutionFailed')
+                : `${t('analytics.diagnosticCompleted')}: ${healthSummaryLabel(run.reasonCode, run.summary)}`}
+        </div>
+      )}
 
       <div className="analytics-node-actions">
         <button className="button button-primary" onClick={() => navigate(`/servers/${node.id}`)} type="button">
           {t('analytics.openServer')}
         </button>
-        <button className="button button-secondary" disabled={diagnosticMutation.isPending} onClick={() => diagnosticMutation.mutate()} type="button">
+        <button className="button button-secondary" disabled={diagnosticBusy} onClick={() => startDiagnostic('host_overview')} type="button">
           {t('analytics.runDiagnostics')}
         </button>
-        <button className="button button-secondary" disabled={certificateDiagnosticMutation.isPending} onClick={() => certificateDiagnosticMutation.mutate()} type="button">
+        <button className="button button-secondary" disabled={diagnosticBusy} onClick={() => startDiagnostic('manager_certificate')} type="button">
           {t('analytics.checkManagerCertificate')}
         </button>
         <button className="button button-secondary" onClick={() => setEditingLocation(true)} type="button">
