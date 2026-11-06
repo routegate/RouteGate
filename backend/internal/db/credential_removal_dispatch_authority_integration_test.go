@@ -14,8 +14,12 @@ import (
 )
 
 func newSignedRemovalDecision(t *testing.T) (dispatchGateFixture, revocations.RemovalDispatchAuthority, revocations.RemovalDispatchDecision, ed25519.PrivateKey) {
+	return newSignedRemovalDecisionWithToken(t, "")
+}
+
+func newSignedRemovalDecisionWithToken(t *testing.T, tokenHash string) (dispatchGateFixture, revocations.RemovalDispatchAuthority, revocations.RemovalDispatchDecision, ed25519.PrivateKey) {
 	t.Helper()
-	f := newDispatchGateFixture(t)
+	f := newDispatchGateFixtureWithToken(t, tokenHash)
 	pinned, err := f.svc.InspectPreparedRemovalIntegrity(f.ctx, f.operation)
 	if err != nil {
 		t.Fatal(err)
@@ -222,6 +226,13 @@ func TestCredentialRemovalDispatchAdmissionHeldIssuance(t *testing.T) {
 	denySQL("P0141", "UPDATE servers SET next_config_version=next_config_version+1 WHERE id=$1::uuid", decision.ServerID)
 	if _, err := f.svc.Cancel(f.ctx, f.operation, "isolated-operator"); err == nil {
 		t.Fatal("generic cancellation released the held removal reservation")
+	}
+	exchangeDown, err := os.ReadFile("../../migrations/000177_credential_removal_agent_exchange.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.pool.Exec(f.ctx, string(exchangeDown)); err != nil {
+		t.Fatal("empty Agent exchange downgrade", err)
 	}
 	down, err := os.ReadFile("../../migrations/000176_credential_removal_held_dispatch.down.sql")
 	if err != nil {

@@ -44,6 +44,7 @@ type Handler struct {
 	generateAgentToken func() (string, error)
 	now                func() time.Time
 	recovery           RecoveryTransport
+	removal            RemovalTransport
 }
 
 func NewHandler(logger *slog.Logger, pool *pgxpool.Pool) *Handler {

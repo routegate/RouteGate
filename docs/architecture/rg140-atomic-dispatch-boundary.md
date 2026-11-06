@@ -120,6 +120,21 @@ that separation. This implementation has no production caller or independent
 signer service. Before rollout it needs separate coordinator credentials,
 scoped Agent claim/completion and a tested terminal recovery transition.
 
+The isolated Agent exchange adds dedicated handlers for a scoped claim and a
+successful result. The claim requires the original Agent generation and a
+fresh authenticated heartbeat with the removal and fencing capabilities. A
+repeat can return only the original job before its recorded deadline; a
+heartbeat refresh cannot extend the original delivery window. A successful
+report must match the held job, candidate, listener and Agent binding.
+The protected schema retains a single claim and a single verified report.
+Identical report retries succeed; conflicting reports are rejected.
+
+Reports are retained as evidence, with no change to the applied configuration
+or node reservation. The handlers are exercised in isolated PostgreSQL tests.
+The production router and Agent runner are not wired to them; the latter must
+enforce the delivery deadline before any mutation. Terminal verification and
+recovery remain required before rollout.
+
 Use the existing lifecycle completion contract to define dispatch, claim,
 result acceptance and terminal release together. Recovery attempts must retain
 the original operation/reservation and prove old-owner quiescence; the separate
