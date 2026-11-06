@@ -20,6 +20,7 @@ import { Notice } from '../../shared/ui/Notice';
 import { StatusBadge } from '../../shared/ui/StatusBadge';
 import './routingWorkspace.css';
 import { getCurrentLocale, t } from '../../shared/i18n/i18n';
+import { displayRoutingProfile } from './seededProfileDisplay';
 
 type RuleForm = CreateRoutingProfileRuleRequest;
 
@@ -85,11 +86,12 @@ function ruleToForm(rule?: RoutingProfileRule): RuleForm {
 }
 
 function ProfileRow({ profile, selected }: { profile: RoutingProfile; selected: boolean }) {
+  const display = displayRoutingProfile(profile, t);
   return (
     <Link className={`admin-table-row routing-profiles-table-row vpn-account-row-link${selected ? ' vpn-account-row-selected' : ''}`} to={`/routing-profiles/${encodeURIComponent(profile.id)}/overview`} aria-current={selected ? 'page' : undefined}>
       <div>
-        <strong>{formatValue(profile.name)}</strong>
-        <span>{formatValue(profile.description)}</span>
+        <strong>{formatValue(display.name)}</strong>
+        <span>{formatValue(display.description)}</span>
       </div>
       <StatusBadge status={profile.isDefault ? 'default' : 'custom'} />
       <span>{formatDate(profile.updatedAt)}</span>
@@ -269,6 +271,7 @@ function RoutingWorkspace() {
 
   const profiles = profilesQuery.data?.items ?? [];
   const selectedProfile = profileQuery.data;
+  const selectedProfileDisplay = selectedProfile ? displayRoutingProfile(selectedProfile, t) : null;
   const rules = selectedProfile?.rules ?? [];
   const selectedRule = rules.find(rule => rule.id === selectedRuleId) ?? rules[0];
   const actionPending = updateProfileMutation.isPending || deleteProfileMutation.isPending
@@ -317,7 +320,7 @@ function RoutingWorkspace() {
         {selectedProfile && (
           <div className='routing-workspace'>
             <header className='panel routing-workspace-header'>
-              <div><h2>{selectedProfile.name}</h2><p>{formatValue(selectedProfile.description)}</p></div>
+              <div><h2>{selectedProfileDisplay?.name}</h2><p>{formatValue(selectedProfileDisplay?.description)}</p></div>
               <StatusBadge status={selectedProfile.isDefault ? 'default' : 'custom'} />
             </header>
             <WorkspaceNav label={t('routingWorkspace.navigation')} items={sections.map(value => ({ href: sectionPath(value), label: t(`routingWorkspace.${value}`) }))} />
