@@ -34,8 +34,8 @@ VALUES(sha256(uuid_send($1::uuid)),$2::uuid)`
 
 	// The target is unreserved. Render through the normal runtime role to
 	// preserve the exact format and hash that Apply and Reapply validate.
-	const createAccount = `INSERT INTO vpn_accounts(username,protocol,server_id,vless_uuid)
-VALUES('retired-vless-fixture','sing-box',$1::uuid,$2::uuid)`
+	const createAccount = `INSERT INTO vpn_accounts(username,protocol,display_name,status,server_id,vless_uuid)
+VALUES('retired-vless-fixture','sing-box','Retirement fixture','active',$1::uuid,$2::uuid)`
 	var account, job string
 	if err := runtime.QueryRow(f.ctx, createAccount+" RETURNING id::text", f.target, retired).Scan(&account); err != nil {
 		t.Fatal(err)
