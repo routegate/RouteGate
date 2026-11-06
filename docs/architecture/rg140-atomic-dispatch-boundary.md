@@ -141,6 +141,14 @@ acknowledgement leaves the local receipt available for reconciliation.
 The production router does not mount these handlers. Terminal verification
 and recovery remain required before rollout.
 
+The integrated CI scenario drives the isolated Manager HTTP handlers and
+PostgreSQL-held task through the real Agent client and a disposable systemd
+sing-box instance. It uses the actual baseline rendered by Manager and
+verifies the original target stream terminates, its cached UUID cannot reach
+the origin again and the unrelated account reconnects. It also checks the
+stored report matches the exact job and candidate while the reservation
+and database active-version pointer still await a terminal transition.
+
 Use the existing lifecycle completion contract to define dispatch, claim,
 result acceptance and terminal release together. Recovery attempts must retain
 the original operation/reservation and prove old-owner quiescence; the separate

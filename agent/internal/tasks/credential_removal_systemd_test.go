@@ -79,27 +79,7 @@ func testCredentialRemovalSystemdRealityTraffic(t *testing.T, binary string, pre
 	if err = os.WriteFile(e.activePath, baseline, 0600); err != nil {
 		t.Fatal(err)
 	}
-	unit := "routegate-removal-test-" + strconv.Itoa(os.Getpid()) + ".service"
-	unitPath := filepath.Join("/run/systemd/system", unit)
-	if _, err = os.Lstat(unitPath); !os.IsNotExist(err) {
-		t.Fatal("test unit already exists")
-	}
-	content := "[Unit]\nDescription=Isolated RouteGate credential removal test\n[Service]\nType=simple\nExecStart=" + strconv.Quote(binary) + " run -c " + strconv.Quote(e.activePath) + "\nKillMode=control-group\nStandardOutput=null\nStandardError=null\n[Install]\nWantedBy=multi-user.target\n"
-	if err = os.WriteFile(unitPath, []byte(content), 0600); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_ = exec.CommandContext(cleanup, "systemctl", "disable", "--now", unit).Run()
-		_ = os.Remove(unitPath)
-		_ = exec.CommandContext(cleanup, "systemctl", "daemon-reload").Run()
-	})
-	for _, args := range [][]string{{"daemon-reload"}, {"enable", "--now", unit}} {
-		if err = exec.CommandContext(ctx, "systemctl", args...).Run(); err != nil {
-			t.Fatal("isolated systemd setup", err)
-		}
-	}
+	unit := startRemovalTestUnit(t, ctx, binary, e.activePath)
 	adapter := NewSingBoxVLESSAdapter(filepath.Dir(e.activePath), binary, unit)
 	if _, err = adapter.CheckHealth(ctx, e.activePath); err != nil {
 		t.Fatal(err)
@@ -700,6 +680,32 @@ func removalMarshal(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func startRemovalTestUnit(t *testing.T, ctx context.Context, binary, activePath string) string {
+	t.Helper()
+	unit := "routegate-removal-test-" + strconv.Itoa(os.Getpid()) + ".service"
+	unitPath := filepath.Join("/run/systemd/system", unit)
+	if _, err := os.Lstat(unitPath); !os.IsNotExist(err) {
+		t.Fatal("test unit already exists")
+	}
+	content := "[Unit]\nDescription=Isolated RouteGate credential removal test\n[Service]\nType=simple\nExecStart=" + strconv.Quote(binary) + " run -c " + strconv.Quote(activePath) + "\nKillMode=control-group\nStandardOutput=null\nStandardError=null\n[Install]\nWantedBy=multi-user.target\n"
+	if err := os.WriteFile(unitPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(cleanup, "systemctl", "disable", "--now", unit).Run()
+		_ = os.Remove(unitPath)
+		_ = exec.CommandContext(cleanup, "systemctl", "daemon-reload").Run()
+	})
+	for _, args := range [][]string{{"daemon-reload"}, {"enable", "--now", unit}} {
+		if err := exec.CommandContext(ctx, "systemctl", args...).Run(); err != nil {
+			t.Fatal("isolated systemd setup", err)
+		}
+	}
+	return unit
 }
 
 func removalFreePort(t *testing.T) int {
