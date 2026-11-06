@@ -179,3 +179,25 @@ human approval must not become a reusable execution lease.
 
 PostgreSQL acceptance, HTTP receipt, IDs, and post-release evidence are not
 proof of VPN access termination. No US/FI/RU activity or real credentials.
+
+### Durable retirement guard
+
+Schema 178 adds an append-only registry under `routegate_dispatch` with the
+SHA-256 digest of the binary VLESS UUID and its revocation operation. Ordinary
+Manager runtime cannot write or read the registry directly. Historical config
+versions stay readable. Account writes, config writes, apply and reapply jobs,
+Agent claims and active-version promotion check the registry. Both the envelope
+and older plain sing-box configs are checked.
+
+The registry insert conflicts with the shared lock held by those checks through
+commit. These write paths require READ COMMITTED so a waiter reads retirements
+committed during the wait. Before the registry insert commits, a deferred check
+rejects a UUID still attached to an account or present in an active version or
+open job on any node. A downgrade refuses to erase retirement history.
+
+This migration provides the storage and write guards. It does not issue a
+retirement or release a reservation. The protected terminal transaction must
+verify and bind the exact retired UUID to the Agent result, update the account
+and active version, record the retirement and release the reservation together.
+Backups that predate the registry and Agent-local recovery remain separate
+reconciliation paths before serving VPN traffic.

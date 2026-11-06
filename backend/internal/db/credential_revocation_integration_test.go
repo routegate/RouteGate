@@ -311,6 +311,13 @@ func TestCredentialRevocationDowngradePreservesHistory(t *testing.T) {
 	ctx, pool, in, _, done := removalPreparationFixture(t)
 	defer done()
 	// Downgrade in reverse order: remove newer dependent guards first.
+	retiredDown, err := os.ReadFile("../../migrations/000178_retired_vless_credentials.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, string(retiredDown)); err != nil {
+		t.Fatal("empty VLESS retirement downgrade", err)
+	}
 	exchangeDown, err := os.ReadFile("../../migrations/000177_credential_removal_agent_exchange.down.sql")
 	if err != nil { t.Fatal(err) }
 	if _, err = pool.Exec(ctx, string(exchangeDown)); err != nil { t.Fatal("empty Agent exchange downgrade", err) }

@@ -88,6 +88,9 @@ jobs:
       - name: Verify approved IDs still cannot bypass generic Apply SQL guards
         run: go test ./internal/db -run '^TestCredentialRemovalApprovedIDsStillBlockGenericApply$' -count=1 -timeout=120s -v
 
+      - name: Verify retired VLESS credentials cannot return through Apply
+        run: go test ./internal/db -run '^TestRetiredVLESSCredential$' -count=1 -timeout=120s -v
+
       # Split both original suites into independent Go processes.
       # Retain their 120-second timeout and every previous test.
       - name: Verify credential revocation preparation transactions
