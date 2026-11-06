@@ -278,9 +278,6 @@
   border-color: rgba(251, 146, 60, 0.2);
 }
 
-.dashboard-page .health-pulse--pending { --pulse-color: #60a5fa; }
-.dashboard-page .health-pulse--warning { --pulse-color: #f59e0b; }
-
 .dashboard-page .health-pulse svg {
   display: block;
   height: 100%;
