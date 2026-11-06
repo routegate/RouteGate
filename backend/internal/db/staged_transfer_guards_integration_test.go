@@ -12,12 +12,19 @@ import (
 )
 
 func transferFixture(t *testing.T) (context.Context, *pgxpool.Pool, string, string, string, func()) {
+	return transferFixtureWithSourceSetup(t, nil)
+}
+
+func transferFixtureWithSourceSetup(t *testing.T, setup func(context.Context, *pgxpool.Pool, string)) (context.Context, *pgxpool.Pool, string, string, string, func()) {
 	t.Helper()
 	ctx, pool, done := setupAppliedSettingsTest(t)
 	source, account, _ := createAppliedSettingsServer(t, ctx, pool, newRealityTestKey(t))
 	target := createReassignmentTarget(t, ctx, pool, newRealityTestKey(t))
 	addTransferAgent(t, ctx, pool, source)
 	addTransferAgent(t, ctx, pool, target)
+	if setup != nil {
+		setup(ctx, pool, source)
+	}
 	svc := configs.NewService(configs.NewRepository(pool))
 	version := renderVersion(t, ctx, svc, source)
 	job, err := svc.Apply(ctx, source, version, configs.ApplyConfigRequest{})

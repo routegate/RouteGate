@@ -19,8 +19,12 @@ import (
 )
 
 func removalPreparationFixture(t *testing.T) (context.Context, *pgxpool.Pool, revocations.PrepareInput, string, func()) {
+	return removalPreparationFixtureWithSourceSetup(t, nil)
+}
+
+func removalPreparationFixtureWithSourceSetup(t *testing.T, setup func(context.Context, *pgxpool.Pool, string)) (context.Context, *pgxpool.Pool, revocations.PrepareInput, string, func()) {
 	t.Helper()
-	ctx, pool, node, target, account, done := transferFixture(t)
+	ctx, pool, node, target, account, done := transferFixtureWithSourceSetup(t, setup)
 	in := revocations.PrepareInput{AccountID: account, ServerID: node, Actor: "operator"}
 	if _, err := pool.Exec(ctx, `INSERT INTO vpn_client_profiles(vpn_account_id,active_protocol) VALUES($1::uuid,'vless') ON CONFLICT(vpn_account_id) DO NOTHING`, account); err != nil {
 		done()

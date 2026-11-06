@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"crypto/ed25519"
 	"errors"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/ikaevus/routegate/backend/internal/auth"
 	"github.com/ikaevus/routegate/backend/internal/revocations"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func newSignedRemovalDecision(t *testing.T) (dispatchGateFixture, revocations.RemovalDispatchAuthority, revocations.RemovalDispatchDecision, ed25519.PrivateKey) {
@@ -18,8 +20,12 @@ func newSignedRemovalDecision(t *testing.T) (dispatchGateFixture, revocations.Re
 }
 
 func newSignedRemovalDecisionWithToken(t *testing.T, tokenHash string) (dispatchGateFixture, revocations.RemovalDispatchAuthority, revocations.RemovalDispatchDecision, ed25519.PrivateKey) {
+	return newSignedRemovalDecisionWithSourceSetup(t, tokenHash, nil)
+}
+
+func newSignedRemovalDecisionWithSourceSetup(t *testing.T, tokenHash string, setup func(context.Context, *pgxpool.Pool, string)) (dispatchGateFixture, revocations.RemovalDispatchAuthority, revocations.RemovalDispatchDecision, ed25519.PrivateKey) {
 	t.Helper()
-	f := newDispatchGateFixtureWithToken(t, tokenHash)
+	f := newDispatchGateFixtureWithSourceSetup(t, tokenHash, setup)
 	pinned, err := f.svc.InspectPreparedRemovalIntegrity(f.ctx, f.operation)
 	if err != nil {
 		t.Fatal(err)

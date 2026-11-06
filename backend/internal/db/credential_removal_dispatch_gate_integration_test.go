@@ -30,8 +30,12 @@ func newDispatchGateFixture(t *testing.T) dispatchGateFixture {
 }
 
 func newDispatchGateFixtureWithToken(t *testing.T, tokenHash string) dispatchGateFixture {
+ return newDispatchGateFixtureWithSourceSetup(t, tokenHash, nil)
+}
+
+func newDispatchGateFixtureWithSourceSetup(t *testing.T, tokenHash string, setup func(context.Context, *pgxpool.Pool, string)) dispatchGateFixture {
  t.Helper()
- ctx, pool, in, target, done := removalPreparationFixture(t)
+ ctx, pool, in, target, done := removalPreparationFixtureWithSourceSetup(t, setup)
  t.Cleanup(done)
  if tokenHash != "" {
   if _, err := pool.Exec(ctx, "UPDATE agents SET token_hash=$2 WHERE server_id=$1::uuid", in.ServerID, tokenHash); err != nil { t.Fatal(err) }
