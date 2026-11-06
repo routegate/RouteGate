@@ -125,6 +125,7 @@ func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
  JOIN servers s ON s.id=r.server_id WHERE h.operation_id=$1::uuid`, f.operation, body).Scan(&retained); err != nil || !retained {
 		t.Fatal("result changed held state, active config, reservation or retained evidence", err)
 	}
+	downgradeEmptyRetirementGuard(t, f.ctx, f.pool)
 	down, err := os.ReadFile("../../migrations/000177_credential_removal_agent_exchange.down.sql")
 	if err != nil {
 		t.Fatal(err)

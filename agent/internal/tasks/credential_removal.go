@@ -285,8 +285,8 @@ func (e CredentialRemovalExecutor) execute(ctx context.Context, task ConfigTask,
 	if _, err = e.adapter.Restart(ctx); err != nil {
 		return fail("restart_failed")
 	}
-	after, err := observer.ObserveGeneration(ctx, e.activePath)
-	if err != nil || !validRemovalGeneration(after) || after.InvocationID == before.InvocationID {
+	after, err := observeRemovalRestart(ctx, observer, e.activePath, before)
+	if err != nil {
 		return fail("restart_not_verified")
 	}
 	if _, err = e.adapter.IsEnabled(ctx); err != nil {
@@ -315,6 +315,26 @@ func (e CredentialRemovalExecutor) execute(ctx context.Context, task ConfigTask,
 		return fail("fence_clear_failed")
 	}
 	return report, nil
+}
+
+// A Type=simple unit can report restart completion before exec has made
+// the replacement process observable. Retry observation, never the restart.
+func observeRemovalRestart(ctx context.Context, observer removalGenerationObserver, activePath string, before RuntimeGeneration) (RuntimeGeneration, error) {
+	checkCtx, cancel := context.WithTimeout(ctx, defaultListenerHealthTimeout)
+	defer cancel()
+	ticker := time.NewTicker(defaultListenerHealthRetryInterval)
+	defer ticker.Stop()
+	for checkCtx.Err() == nil {
+		after, err := observer.ObserveGeneration(checkCtx, activePath)
+		if err == nil && checkCtx.Err() == nil && validRemovalGeneration(after) && after.InvocationID != before.InvocationID {
+			return after, nil
+		}
+		select {
+		case <-checkCtx.Done():
+		case <-ticker.C:
+		}
+	}
+	return RuntimeGeneration{}, ErrCredentialRemoval
 }
 
 func validRemovalGeneration(value RuntimeGeneration) bool {
