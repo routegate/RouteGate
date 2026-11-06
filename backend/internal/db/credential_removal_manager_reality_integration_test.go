@@ -194,13 +194,9 @@ func testRemovalTerminalCommit(t *testing.T, f dispatchGateFixture, decision rev
 		decision.ServerID, decision.AccountID).Scan(&remainingID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(f.ctx, `WITH device AS (
- INSERT INTO vpn_account_devices(vpn_account_id) VALUES($1::uuid) RETURNING id
-)
-INSERT INTO vpn_subscription_tokens(vpn_account_id,token_hash,device_id)
-VALUES ($1::uuid,'terminal-target-legacy',NULL),
-       ($1::uuid,'terminal-target-device',(SELECT id FROM device)),
-       ($2::uuid,'terminal-survivor',NULL)`, decision.AccountID, remainingID); err != nil {
+	// The shared preparation fixture already has one active device token.
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO vpn_subscription_tokens(vpn_account_id,token_hash)
+VALUES ($1::uuid,'terminal-target-legacy'), ($2::uuid,'terminal-survivor')`, decision.AccountID, remainingID); err != nil {
 		t.Fatal(err)
 	}
 
