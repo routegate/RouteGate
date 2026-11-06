@@ -109,8 +109,8 @@ func TestClientProfilePostRestoreRepairRestoresObservedInvariants(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000175_credential_removal_dispatch_stages" {
-		t.Fatalf("applied schema version = %q, want 000175_credential_removal_dispatch_stages", version)
+	if version != "000176_credential_removal_held_dispatch" {
+		t.Fatalf("applied schema version = %q, want 000176_credential_removal_held_dispatch", version)
 	}
 }
 

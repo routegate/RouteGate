@@ -103,6 +103,22 @@ side and creates no executable rows. The future protected writer must check the
 signature within its write transaction, recheck freshness at consumption and
 prevent reuse atomically. A passing rehearsal is not a lease.
 
+The isolated issuance transaction now consumes a signed decision and creates
+the staged candidate version and job in `held_for_revocation` status. It also
+increments the reserved node's counter once. The owner-only receipt resides in
+`routegate_dispatch`; ordinary Manager runtime has no grants on that schema.
+The scoped SQL guards accept only the pinned writes in the receipt's own
+transaction. A retry with the exact proof and a live original session returns
+the stored IDs. Generic polling, status changes and cancellation cannot release
+or execute the held job. Empty downgrade is supported; retained issuance
+blocks downgrade.
+
+The isolated owner connection is trusted to verify the signature before
+writing the receipt. The legacy database-owner serving login does not provide
+that separation. This implementation has no production caller or independent
+signer service. Before rollout it needs separate coordinator credentials,
+scoped Agent claim/completion and a tested terminal recovery transition.
+
 Use the existing lifecycle completion contract to define dispatch, claim,
 result acceptance and terminal release together. Recovery attempts must retain
 the original operation/reservation and prove old-owner quiescence; the separate
