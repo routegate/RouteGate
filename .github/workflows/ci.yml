@@ -401,6 +401,9 @@ jobs:
       - name: Verify Dashboard animation in Chromium
         run: node --test scripts/dashboard-motion.browser.test.mjs
 
+      - name: Verify infrastructure health layout at mobile and desktop widths
+        run: npm run test:dashboard-health-browser
+
       - name: Test Getting Started in the browser
         run: npm run test:getting-started-browser
 
