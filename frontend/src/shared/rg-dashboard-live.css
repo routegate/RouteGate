@@ -241,17 +241,41 @@
 /* ---- Infrastructure health: heartbeat trace ---- */
 
 .dashboard-page .health-widget {
+  background:
+    radial-gradient(circle at 92% 0%, rgba(16, 185, 129, 0.09), transparent 46%),
+    linear-gradient(180deg, rgba(17, 28, 46, 0.96), rgba(11, 18, 32, 0.84));
+  border-color: rgba(86, 121, 162, 0.47);
   display: flex;
   flex-direction: column;
 }
 
 .dashboard-page .health-pulse {
   --pulse-color: var(--rg-live-green);
-  border-top: 1px solid rgba(148, 163, 184, 0.1);
-  height: 72px;
+  background: rgba(3, 17, 26, 0.32);
+  border: 1px solid rgba(74, 222, 128, 0.1);
+  border-radius: 12px;
+  box-sizing: border-box;
+  flex: 0 0 76px;
+  height: 76px;
   margin-top: auto;
-  padding-inline: 10px;
-  padding-top: 12px;
+  min-width: 0;
+  overflow: hidden;
+  padding-inline: 12px;
+  padding-block: 12px;
+}
+
+.dashboard-page .health-list + .health-pulse {
+  margin-top: 12px;
+}
+
+.dashboard-page .health-pulse--pending {
+  --pulse-color: #60a5fa;
+  border-color: rgba(96, 165, 250, 0.16);
+}
+
+.dashboard-page .health-pulse--warning {
+  --pulse-color: #f59e0b;
+  border-color: rgba(251, 146, 60, 0.2);
 }
 
 .dashboard-page .health-pulse--pending { --pulse-color: #60a5fa; }
