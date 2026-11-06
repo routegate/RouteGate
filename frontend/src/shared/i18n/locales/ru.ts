@@ -466,6 +466,8 @@ export const ru: Record<TranslationKey, string> = {
   'routingWorkspace.openRules': 'Перейти к правилам',
   'routingWorkspace.deleteProfileConfirm': 'Удалить профиль «{name}» и его правила? Это действие нельзя отменить.',
   'routingWorkspace.deleteRuleConfirm': 'Удалить правило «{name}» из этого профиля? Это действие нельзя отменить.',
+  'routingProfiles.seededDefaultName': 'Базовый профиль',
+  'routingProfiles.seededDefaultDescription': 'Встроенный базовый профиль. Весь трафик проходит через VPN, если не заданы отдельные правила раздельной маршрутизации.'
   'routingProfiles.title': 'Профили маршрутизации',
   'routingProfiles.subtitle': 'Правила определяют, какой трафик направлять через VPN, пропускать напрямую или блокировать.',
   'routingProfiles.profileCount': '{count} профилей',
