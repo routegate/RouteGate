@@ -88,6 +88,21 @@ separation and privilege reconciliation across install/update/restore remain
 prerequisites; the current owner-login installer is not that boundary.
 Do not silently narrow the threat model to make an implementation pass.
 
+The signed admission rehearsal introduces a pinned Ed25519 public key and a
+deployment audience. The verifier reconstructs the signed decision after the
+existing server, preparation, Agent and human-authority locks. The signature
+binds the exact account, baseline, candidate, job, Agent generation, actor and
+session, original nonce and approval window. Its domain commits to consent for
+the shared restart. A valid SQL approval without the independently signed
+decision is insufficient for this check.
+
+The signer must authenticate the human independently and protect its private
+key outside ordinary Manager. The verifier key and deployment audience must
+also be outside runtime database authority. The rehearsal provisions neither
+side and creates no executable rows. The future protected writer must check the
+signature within its write transaction, recheck freshness at consumption and
+prevent reuse atomically. A passing rehearsal is not a lease.
+
 Use the existing lifecycle completion contract to define dispatch, claim,
 result acceptance and terminal release together. Recovery attempts must retain
 the original operation/reservation and prove old-owner quiescence; the separate

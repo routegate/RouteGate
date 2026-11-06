@@ -250,8 +250,21 @@ jobs:
       matrix:
         include:
           - suite: dispatch
-            packages: ./internal/config ./internal/client ./internal/heartbeat ./internal/tasks
+            packages: ./internal/config ./internal/client ./internal/heartbeat
             pattern: (FencedDispatch|RuntimeMutation|CompleteTask|CredentialRemoval)
+          - suite: dispatch-task-basics
+            packages: ./internal/tasks
+            pattern: (FencedDispatch|RuntimeMutation|CompleteTask|CredentialRemoval)
+            skip: ^TestRuntimeMutation(Recovery|FenceRelease|Retirement|PreparedRelease|Terminal|Final|Historical)
+          - suite: dispatch-task-recovery
+            packages: ./internal/tasks
+            pattern: ^TestRuntimeMutation(Recovery|FenceRelease|Retirement|PreparedRelease)
+          - suite: dispatch-task-terminal
+            packages: ./internal/tasks
+            pattern: ^TestRuntimeMutationTerminal
+          - suite: dispatch-task-final
+            packages: ./internal/tasks
+            pattern: ^TestRuntimeMutation(Final|Historical)
           - suite: prepared-release
             packages: ./internal/tasks ./internal/client
             pattern: ^TestPreparedRelease
@@ -288,6 +301,7 @@ jobs:
           - suite: cleaned-commit-intent
             packages: ./internal/tasks ./internal/client
             pattern: ^TestCleanedCommitIntent
+            skip: ^TestCleanedCommitIntentHistoryRefusals$
           - suite: cleaned-commit-history
             packages: ./internal/tasks
             pattern: ^TestCleanedCommitIntentHistoryRefusals$
@@ -386,13 +400,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
       - name: Run unchanged focused race checks
-        run: |
-          if [[ '${{ matrix.suite }}' == 'cleaned-commit-intent' ]]; then
-            # History runs in its own required shard with the same watchdog.
-            go test -race ${{ matrix.packages }} -run '${{ matrix.pattern }}' -skip '^TestCleanedCommitIntentHistoryRefusals$' -count=1 -timeout=120s -v
-          else
-            go test -race ${{ matrix.packages }} -run '${{ matrix.pattern }}' -count=1 -timeout=120s -v
-          fi
+        env:
+          RACE_TEST_SKIP: ${{ matrix.skip }}
+        run: go test -race ${{ matrix.packages }} -run '${{ matrix.pattern }}' -skip "$RACE_TEST_SKIP" -count=1 -timeout=120s -v
 
   agent:
     name: Agent tests

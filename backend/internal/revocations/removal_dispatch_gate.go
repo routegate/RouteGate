@@ -14,6 +14,7 @@ import (
 type preparedRemovalDispatchGate struct {
  OperationID, ServerID, AgentID, VersionID, JobID, CandidateHash, RuntimeHash string
  Generation int64
+ IssuedAt, ExpiresAt time.Time
 }
 
 // CheckPreparedRemovalDispatchAdmission checks freshness but grants NO lease.
@@ -102,5 +103,7 @@ func validatePreparedRemovalDispatchLocked(ctx context.Context, tx pgx.Tx, pinne
  gate.VersionID,gate.JobID).Scan(&vacant); err!=nil || !vacant { return zero, ErrPreflight }
  gate.ServerID=node
  gate.AgentID=agent
+ gate.IssuedAt=issued
+ gate.ExpiresAt=expires
  return gate,nil
 }
