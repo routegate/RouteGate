@@ -41,10 +41,9 @@ func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := agents.NewHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), f.pool)
-	handler.SetRemovalTransport(f.svc)
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /removals/claim", handler.NextHeldRemoval)
-	mux.HandleFunc("POST /removals/{job_id}/result", handler.CompleteHeldRemoval)
+	handler.MountHeldRemoval(mux, f.svc)
+	const removalPath = "/api/v1/agent/credential-removals/"
 	serve := func(path, bearer string, body []byte, want int) []byte {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)).WithContext(f.ctx)
@@ -59,13 +58,13 @@ func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
 	claim := func(bearer string) *agents.AgentDeliveryTask {
 		t.Helper()
 		var response agents.AgentNextTaskResponse
-		if err := json.Unmarshal(serve("/removals/claim", bearer, nil, http.StatusOK), &response); err != nil {
+		if err := json.Unmarshal(serve(removalPath+"claim", bearer, nil, http.StatusOK), &response); err != nil {
 			t.Fatal("invalid claim response")
 		}
 		return response.Task
 	}
-	serve("/removals/claim", "unknown-agent-token", nil, http.StatusUnauthorized)
-	serve("/removals/claim", "rg_agent_unknown-fixture-token", nil, http.StatusUnauthorized)
+	serve(removalPath+"claim", "unknown-agent-token", nil, http.StatusUnauthorized)
+	serve(removalPath+"claim", "rg_agent_unknown-fixture-token", nil, http.StatusUnauthorized)
 	if claim(token) != nil || claim(unrelatedToken) != nil {
 		t.Fatal("task delivered before capability negotiation or to another Agent")
 	}
@@ -87,7 +86,7 @@ func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "/removals/" + decision.ApplyJobID + "/result"
+	path := removalPath + decision.ApplyJobID + "/result"
 	serve(path, token, body, http.StatusConflict)
 	if _, err := f.pool.Exec(f.ctx, `UPDATE agents SET capabilities=capabilities ||
  '{"credentialRemovalV1":true,"runtimeMutationFencingV1":true}'::jsonb WHERE id=$1::uuid`, f.agent); err != nil {
@@ -103,7 +102,7 @@ func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
 		t.Fatal("repeat claim changed the job or its original authority window")
 	}
 	serve(path, unrelatedToken, body, http.StatusConflict)
-	serve("/removals/"+decision.CandidateVersionID+"/result", token, body, http.StatusConflict)
+	serve(removalPath+decision.CandidateVersionID+"/result", token, body, http.StatusConflict)
 	serve(path, token, bytes.Replace(body, []byte(`"jobId"`), []byte(`"JobId"`), 1), http.StatusConflict)
 	if _, err := f.pool.Exec(f.ctx, `UPDATE agents SET last_authenticated_heartbeat_at=clock_timestamp()-interval '2 minutes' WHERE id=$1::uuid`, f.agent); err != nil {
 		t.Fatal(err)

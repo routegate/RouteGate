@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -28,6 +29,7 @@ type ConfigTask struct {
 	RenderedConfig    json.RawMessage           `json:"renderedConfig,omitempty"`
 	ConfigHash        string                    `json:"configHash,omitempty"`
 	CredentialRemoval *CredentialRemovalRequest `json:"credentialRemoval,omitempty"`
+	DeliveryExpiresAt *time.Time                `json:"deliveryExpiresAt,omitempty"`
 }
 
 func (t ConfigTask) EffectiveKind() string {

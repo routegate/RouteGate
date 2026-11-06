@@ -19,8 +19,12 @@ type RemovalTransport interface {
 	AcceptHeldRemovalResult(context.Context, string, string, []byte) error
 }
 
-func (h *Handler) SetRemovalTransport(transport RemovalTransport) {
+// MountHeldRemoval explicitly enables the exchange on an isolated Manager.
+// Call during setup, before the mux can serve requests.
+func (h *Handler) MountHeldRemoval(mux *http.ServeMux, transport RemovalTransport) {
 	h.removal = transport
+	mux.HandleFunc("POST /api/v1/agent/credential-removals/claim", h.NextHeldRemoval)
+	mux.HandleFunc("POST /api/v1/agent/credential-removals/{job_id}/result", h.CompleteHeldRemoval)
 }
 
 func (h *Handler) NextHeldRemoval(w http.ResponseWriter, r *http.Request) {

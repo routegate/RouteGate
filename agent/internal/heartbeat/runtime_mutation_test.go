@@ -337,6 +337,52 @@ func TestFencedHeartbeatRequestsTimeoutPreservation(t *testing.T) {
 	}
 }
 
+func TestFencedDispatchHeldRemovalRequiresOptInAndNegotiation(t *testing.T) {
+	var polls atomic.Int32
+	manager := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/api/v1/agent/tasks/next":
+		case "/api/v1/agent/credential-removals/claim":
+			if req.Method != http.MethodPost || req.Header.Get("Authorization") != "Bearer isolated-token" {
+				t.Error("scoped claim was not authenticated")
+			}
+			polls.Add(1)
+		default:
+			t.Errorf("unexpected path %s", req.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, "{}")
+	}))
+	defer manager.Close()
+	r := NewRunner(config.Config{ManagerURL: manager.URL, AgentToken: "isolated-token", ServiceControlEnabled: true}, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.vpnCoreAdapter = &recoveryServiceAdapter{fencedServiceAdapter: &fencedServiceAdapter{}}
+	r.runtimeMutationDir = filepath.Join(t.TempDir(), "mutations")
+	for _, tc := range []struct{ removal, fencing, accepted bool }{
+		{false, true, true},
+		{true, false, true},
+		{true, true, false},
+		{true, true, true},
+	} {
+		r.cfg.ExperimentalCredentialRemoval = tc.removal
+		r.cfg.ExperimentalRuntimeMutationFencing = tc.fencing
+		r.removalManagerReady = tc.accepted
+		info := systeminfo.Info{}
+		r.prepareRuntimeMutationHeartbeat(&info)
+		capable, _ := info.Capabilities["credentialRemovalV1"].(bool)
+		if capable != (tc.removal && tc.fencing) {
+			t.Fatal("removal capability advertised without both opt-ins")
+		}
+		before := polls.Load()
+		if err := r.processNextTask(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if (polls.Load() == before+1) != (tc.removal && tc.fencing && tc.accepted) {
+			t.Fatal("scoped polling did not follow the negotiated policy")
+		}
+	}
+}
+
 func TestFencedDispatchChangedIntentCannotClear(t *testing.T) {
 	r, a, _ := fencedRunnerFixture(t, tasks.TaskKindVPNCoreService, 204)
 	a.run = func() error {
