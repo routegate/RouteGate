@@ -11,8 +11,13 @@ The existing `Production-like Ops` workflow accepts:
 
 `operation=update-frontend commit=<40-character main SHA>`
 
-It runs solely from trusted `main` and only after successful `RouteGate CI`
-on that exact SHA. GitHub Actions builds the frontend via `npm ci` and
+It runs solely from trusted `main`. Normally the exact target SHA must
+have successful `RouteGate CI` on a `main` push. For **UI-only** releases
+squash-merged via GitHub App, where a new `main` CI push is not emitted, a
+narrow alternative proves that the target main commit is the merge commit of
+one internal, merged PR, its full Git tree is byte-for-byte identical to that
+PR's head commit, and the head commit has successful `RouteGate CI` from
+`pull_request`. Manager and bootstrap operations **never** use this fallback. GitHub Actions builds the frontend via `npm ci` and
 `npm run build`, stamps the artifact with the full revision, computes SHA256,
 and copies the archive and fixed audited runner to US via the pinned SSH key and
 known-host verification. It executes under the production-like host lock and

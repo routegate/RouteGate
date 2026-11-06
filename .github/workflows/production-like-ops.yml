@@ -138,12 +138,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ steps.request.outputs.commit }}
+          OPERATION: ${{ steps.request.outputs.operation }}
         run: |
           set -euo pipefail
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
           runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${TARGET_SHA}&branch=main&event=push&status=success&per_page=1" --jq '.total_count')
-          [[ "$runs" =~ ^[0-9]+$ && "$runs" -gt 0 ]] || { printf 'No successful RouteGate CI push run on main for %s.\n' "$TARGET_SHA" >&2; exit 1; }
-          printf 'target=%s successful_main_ci_runs=%s\n' "$TARGET_SHA" "$runs"
+          [[ "$runs" =~ ^[0-9]+$ ]]
+          if (( runs > 0 )); then
+            printf 'target=%s provenance=main-push-ci-success\n' "$TARGET_SHA"
+          elif [[ "$OPERATION" == "update-frontend" ]]; then
+            # GitHub App squash merges can have no new push CI, even though the
+            # PR head was tested. Prove *identical full source tree* instead.
+            # This narrowly scoped fallback is forbidden for Manager/bootstrap.
+            pr_sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}/pulls" \
+              | jq -r --arg expected "$TARGET_SHA" --arg repository "$GITHUB_REPOSITORY" \
+                '[.[] | select(.merge_commit_sha == $expected and .merged_at != null and .base.ref == "main" and .head.repo.full_name == $repository)] | if length == 1 then .[0].head.sha else "" end')
+            [[ "$pr_sha" =~ ^[0-9a-f]{40}$ ]] || { printf "No unique trusted merged PR for %s.\n" "$TARGET_SHA" >&2; exit 1; }
+            main_tree=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${TARGET_SHA}" --jq '.tree.sha')
+            pr_tree=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${pr_sha}" --jq '.tree.sha')
+            [[ "$main_tree" =~ ^[0-9a-f]{40}$ && "$pr_tree" == "$main_tree" ]] || { printf "Tested PR and main release trees differ.\n" >&2; exit 1; }
+            tested=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${pr_sha}&event=pull_request&status=success&per_page=1" --jq '.total_count')
+            [[ "$tested" =~ ^[0-9]+$ && "$tested" -gt 0 ]] || { printf "The identical PR tree has no successful CI.\n" >&2; exit 1; }
+            printf "target=%s provenance=merged-pr-ci-success source=%s matching-tree=%s\n" "$TARGET_SHA" "$pr_sha" "$main_tree"
+          else
+            printf "No successful RouteGate CI push run on main for %s.\n" "$TARGET_SHA" >&2
+            exit 1
+          fi
 
       - name: Checkout pinned update-manager target
         if: steps.request.outputs.operation == 'update-manager' || steps.request.outputs.operation == 'update-frontend' || steps.request.outputs.operation == 'publish-bootstrap'
