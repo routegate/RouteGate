@@ -1,6 +1,9 @@
 package agents
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ListAgentsResponse struct {
 	Items []Agent `json:"items"`
@@ -44,11 +47,12 @@ type AgentHeartbeatResponse struct {
 type AgentDeliveryTask struct {
 	AgentConfigTask
 	CredentialRemoval *AgentCredentialRemovalRequest `json:"credentialRemoval,omitempty"`
+	DeliveryExpiresAt *time.Time                     `json:"deliveryExpiresAt,omitempty"`
 }
 
 type AgentNextTaskResponse struct {
 	Task              *AgentDeliveryTask `json:"task,omitempty"`
-	RecoveryChallenge json.RawMessage   `json:"recoveryChallenge,omitempty"`
+	RecoveryChallenge json.RawMessage    `json:"recoveryChallenge,omitempty"`
 }
 
 type CompleteAgentTaskRequest struct {

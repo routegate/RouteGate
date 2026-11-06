@@ -21,13 +21,21 @@ type dispatchGateFixture struct {
  nonce string
  agent string
  session string
+ target string
  done func()
 }
 
 func newDispatchGateFixture(t *testing.T) dispatchGateFixture {
+ return newDispatchGateFixtureWithToken(t, "")
+}
+
+func newDispatchGateFixtureWithToken(t *testing.T, tokenHash string) dispatchGateFixture {
  t.Helper()
- ctx, pool, in, _, done := removalPreparationFixture(t)
+ ctx, pool, in, target, done := removalPreparationFixture(t)
  t.Cleanup(done)
+ if tokenHash != "" {
+  if _, err := pool.Exec(ctx, "UPDATE agents SET token_hash=$2 WHERE server_id=$1::uuid", in.ServerID, tokenHash); err != nil { t.Fatal(err) }
+ }
  svc := revocations.NewService(pool)
  prep, err := svc.Prepare(ctx, in)
  if err != nil { t.Fatal(err) }
@@ -54,7 +62,7 @@ func newDispatchGateFixture(t *testing.T) dispatchGateFixture {
   revocations.PreparedRemovalDispatchApprovalInput{OperationID:prep.ID,ConfirmSharedProcessRestart:true})
  if err != nil { t.Fatal(err) }
  return dispatchGateFixture{ctx:ctx,pool:pool,svc:svc,operation:prep.ID,
-  nonce:approval.Nonce,agent:prep.AgentID,session:u.SessionID,done:done}
+  nonce:approval.Nonce,agent:prep.AgentID,session:u.SessionID,target:target,done:done}
 }
 
 func TestCredentialRemovalDispatchAdmissionGate(t *testing.T) {
