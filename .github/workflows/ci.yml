@@ -181,8 +181,16 @@ jobs:
       - name: Verify authenticated admission-release HTTP handlers
         run: go test ./internal/agents -run '^TestRecoveryAdmissionReleaseHandlers$' -count=1 -timeout=120s -v
 
-      - name: Run tests
-        run: go test ./...
+      - name: Run backend tests outside the database package
+        run: |
+          packages=$(go list -buildvcs=false ./...)
+          mapfile -t test_packages < <(printf '%s\n' "$packages" | awk '$0 !~ /\/internal\/db$/')
+          go test "${test_packages[@]}"
+
+      # This package repeatedly rebuilds the PostgreSQL fixture schema. Its
+      # complete suite exceeds Go's default ten-minute package timeout.
+      - name: Run complete PostgreSQL package tests
+        run: go test ./internal/db -timeout=20m
 
       - name: Test isolated VLESS credential removal with real sing-box
         run: |
