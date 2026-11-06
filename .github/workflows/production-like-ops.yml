@@ -481,6 +481,30 @@ jobs:
             fi
             set -e
             "${SSH[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST" "rm -f $(printf "'%s' " "${remote_files[@]}")" || true
+          elif [[ "$OPERATION" == "update-frontend" ]]; then
+            # Static-only: no Manager restart, DB migration, Agent, VPN or
+            # bootstrap change. Host script atomically swaps index with rollback.
+            [[ "$FRONTEND_COMMIT" =~ ^[0-9a-f]{40}$ && "$FRONTEND_SHA" =~ ^[0-9a-f]{64}$ ]]
+            [[ -s "$FRONTEND_BUNDLE" ]]
+            remote_prefix="/tmp/routegate-ui-${GITHUB_RUN_ID}"
+            remote_bundle="${remote_prefix}.tar.gz"
+            remote_runner="${remote_prefix}.py"
+            copied=1
+            "${SCP[@]}" "$FRONTEND_BUNDLE" "$ROUTEGATE_USER@$ROUTEGATE_HOST:$remote_bundle" || copied=0
+            if (( copied == 1 )); then
+              "${SCP[@]}" scripts/production-like-frontend-static.py "$ROUTEGATE_USER@$ROUTEGATE_HOST:$remote_runner" || copied=0
+            fi
+            set +e
+            if (( copied == 1 )); then
+              "${SSH[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST" \
+                "sudo -n flock -w 600 /run/lock/routegate-production-like.lock python3 '$remote_runner' '$FRONTEND_COMMIT' '$remote_bundle' '$FRONTEND_SHA'" >"$output_file" 2>&1
+              rc=$?
+            else
+              printf '[routegate-frontend] RESULT=failed stage=copy\n' >"$output_file"
+              rc=2
+            fi
+            set -e
+            "${SSH[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST" "rm -f '$remote_bundle' '$remote_runner'" || true
           elif [[ "$OPERATION" == "update-manager" ]]; then
             # The bundle is built from the pinned, verified commit; the update
             # engine and the pinned SQL come from the trusted main checkout.
@@ -552,6 +576,8 @@ jobs:
           elif [[ "$OPERATION" == "update-manager" ]]; then
             # Likewise the full preflight/postflight output of the update.
             grep -E '^\[routegate-(manager-update|update)\]' "$output_file" || true
+          elif [[ "$OPERATION" == "update-frontend" ]]; then
+            grep -E '^\[routegate-frontend\]' "$output_file" || true
           else
             cat "$output_file"
           fi
@@ -584,6 +610,7 @@ jobs:
           REMOTE_RC: ${{ steps.remote.outputs.rc }}
           EVENT_NAME: ${{ github.event_name }}
           MANAGER_COMMIT: ${{ steps.request.outputs.commit }}
+          FRONTEND_COMMIT: ${{ steps.frontend_bundle.outputs.revision }}
         run: |
           set -euo pipefail
           rc=${REMOTE_RC:-1}
@@ -601,6 +628,47 @@ jobs:
               summary='Remote operation did not produce output.'
             fi
             summary="${summary}"$'\n\n'"Full P0-P7 result: artifact routegate-preflight-applied-client-settings-155-${GITHUB_RUN_ID} of the run below (kept 7 days). PASSED only means the read-only checks completed; blocking results in P1-P4 still stop the update."
+          elif [[ "$OPERATION" == "update-frontend" ]]; then
+            summary="revision=${FRONTEND_COMMIT}; scope=static-ui-only; manager=unchanged; vpn=unchanged"
+            if [[ -f "$output_file" ]]; then
+              summary="${summary}"
+              summary=$(grep -E '^\[routegate-(manager-update|update)\]' "$output_file" | tail -n 80 || true)
+            else
+              summary='Remote operation did not produce output.'
+            fi
+            summary="target commit=${MANAGER_COMMIT}"$'\n'"${summary}"$'\n\n'"Full preflight P0-P7 and postflight Q0-Q6: artifact routegate-update-manager-${GITHUB_RUN_ID} of the run below (kept 7 days)."
+          elif [[ -f "$output_file" ]]; then
+            summary=$(tail -n 80 "$output_file")
+          else
+            summary='Remote operation did not produce output.'
+          fi
+
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body=$(jq -n \
+            --arg operation "$OPERATION" \
+            --arg status "$status" \
+            --arg summary "$summary" \
+            --arg run_url "$run_url" \
+            '{body:("Ops operation `" + $operation + "` **" + $status + "**.\n\n```text\n" + $summary + "\n```\n\nActions audit: " + $run_url)}')
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/268/comments" --input - <<<"$body" >/dev/null
+
+          if [[ "$EVENT_NAME" == issues ]]; then
+            baseline='Reserved control issue for RouteGate production-like operations.\n\nSet only an exact allow-listed `operation=...` request while this issue is closed, then reopen it. The workflow clears the request by closing the issue after every run. Arbitrary issue text is never executed as shell input.'
+            patch=$(jq -n --arg body "$baseline" '{state:"closed",body:$body}')
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/268" --input - <<<"$patch" >/dev/null
+          fi
+
+      - name: Propagate remote failure
+        if: always() && steps.request.outcome == 'success'
+        shell: bash
+        env:
+          REMOTE_RC: ${{ steps.remote.outputs.rc }}
+        run: |
+          set -euo pipefail
+          rc=${REMOTE_RC:-1}
+          [[ "$rc" == 0 ]]
+\n'"$(grep -E '^\[routegate-frontend\]' "$output_file" | tail -n 30 || true)"
+            fi
           elif [[ "$OPERATION" == "update-manager" ]]; then
             if [[ -f "$output_file" ]]; then
               summary=$(grep -E '^\[routegate-(manager-update|update)\]' "$output_file" | tail -n 80 || true)
