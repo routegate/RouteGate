@@ -465,7 +465,7 @@ export const en = {
   'routingWorkspace.deleteProfileConfirm': 'Delete profile “{name}” and its rules? This cannot be undone.',
   'routingWorkspace.deleteRuleConfirm': 'Delete rule “{name}” from this profile? This cannot be undone.',
   'routingProfiles.seededDefaultName': 'Default direct',
-  'routingProfiles.seededDefaultDescription': 'Built-in default profile. All traffic uses the VPN route unless explicit split-tunnel rules are added.'
+  'routingProfiles.seededDefaultDescription': 'Built-in default profile. All traffic uses the VPN route unless explicit split-tunnel rules are added.',
   'routingProfiles.title': 'Routing Profiles',
   'routingProfiles.subtitle': 'Manage split-tunnel profiles and direct, VPN, or block routing rules.',
   'routingProfiles.profileCount': '{count} profiles',
