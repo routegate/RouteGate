@@ -136,6 +136,33 @@ function UnavailableWidget({ title, subtitle, className }: { title: string; subt
 
 const HEARTBEAT_PATH = 'M0 24 H70 L78 24 L84 14 L90 34 L97 6 L104 40 L110 24 L118 24 H160 L166 18 L172 28 L178 24 H240';
 
+type HealthMetricKind = 'manager' | 'server' | 'connection';
+
+function HealthMetricIcon({ kind }: { kind: HealthMetricKind }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {kind === 'manager' ? (
+        <>
+          <path d="M12 2.5 20 7v10l-8 4.5L4 17V7l8-4.5Z" />
+          <path d="m4.3 7.3 7.7 4.3 7.7-4.3M12 11.6v9.5" />
+        </>
+      ) : kind === 'server' ? (
+        <>
+          <rect x="3.5" y="4" width="17" height="7" rx="2" />
+          <rect x="3.5" y="13" width="17" height="7" rx="2" />
+          <path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6" />
+        </>
+      ) : (
+        <>
+          <path d="m9 14.5 6-6" />
+          <path d="m8.2 8.8 1.9-1.9a4 4 0 0 1 5.7 5.7l-1.2 1.2" />
+          <path d="m15.8 15.2-1.9 1.9a4 4 0 0 1-5.7-5.7l1.2-1.2" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 function InfrastructureHealthWidget({
   managerHealthy,
   serversCount,
@@ -149,27 +176,33 @@ function InfrastructureHealthWidget({
   serversAvailable: boolean;
   agentsAvailable: boolean;
 }) {
-  const rows = [
-    [t('dashboard.managerApi'), managerHealthy ? 'healthy' : 'warning', managerHealthy ? t('dashboard.managerOnline') : t('common.notAvailable')],
-    [t('dashboard.servers'), serversAvailable ? (serversCount > 0 ? 'healthy' : 'pending') : 'warning', serversAvailable ? String(serversCount) : t('common.notAvailable')],
-    [t('dashboard.agents'), agentsAvailable ? (agentsCount > 0 ? 'healthy' : 'pending') : 'warning', agentsAvailable ? String(agentsCount) : t('common.notAvailable')],
+  // Keep all values and statuses derived from the live Manager/Agent queries.
+  // The visual redesign must never turn an unavailable source into "healthy".
+  const rows: { kind: HealthMetricKind; label: string; status: string; value: string }[] = [
+    { kind: 'manager', label: t('dashboard.managerApi'), status: managerHealthy ? 'healthy' : 'warning', value: managerHealthy ? t('dashboard.managerOnline') : t('common.notAvailable') },
+    { kind: 'server', label: t('dashboard.servers'), status: serversAvailable ? (serversCount > 0 ? 'healthy' : 'pending') : 'warning', value: serversAvailable ? String(serversCount) : t('common.notAvailable') },
+    { kind: 'connection', label: t('dashboard.agents'), status: agentsAvailable ? (agentsCount > 0 ? 'healthy' : 'pending') : 'warning', value: agentsAvailable ? String(agentsCount) : t('common.notAvailable') },
   ];
 
-  const pulseState = rows.some(([, status]) => status === 'warning')
+  const pulseState = rows.some(row => row.status === 'warning')
     ? 'warning'
-    : rows.every(([, status]) => status === 'healthy') ? 'healthy' : 'pending';
+    : rows.every(row => row.status === 'healthy') ? 'healthy' : 'pending';
 
   return (
     <WidgetPanel title={t('dashboard.infrastructureHealth')} className="health-widget">
       <div className="health-list">
-        {rows.map(([label, status, value]) => (
-          <div className="health-row" key={label}>
-            <span>{label}</span>
-            <strong>{value}</strong>
-            <StatusBadge status={String(status)} />
+        {rows.map(row => (
+          <div className={`health-row health-row--${row.status}`} key={row.kind}>
+            <span className="health-row-icon"><HealthMetricIcon kind={row.kind} /></span>
+            <div className="health-row-details">
+              <span className="health-row-label">{row.label}</span>
+              <strong className="health-row-value">{row.value}</strong>
+            </div>
+            <StatusBadge status={row.status} />
           </div>
         ))}
       </div>
+      {/* Decorative status flourish, not a measured traffic or uptime chart. */}
       <div className={`health-pulse health-pulse--${pulseState}`} aria-hidden="true">
         <svg viewBox="0 0 240 48" preserveAspectRatio="none">
           <path className="health-pulse-grid" d="M0 24 H240" />
