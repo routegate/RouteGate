@@ -632,46 +632,11 @@ jobs:
             summary="revision=${FRONTEND_COMMIT}; scope=static-ui-only; manager=unchanged; vpn=unchanged"
             if [[ -f "$output_file" ]]; then
               status_lines=$(grep -E '^\[routegate-frontend\]' "$output_file" | tail -n 30 || true)
-              summary="${summary}"
-              summary=$(grep -E '^\[routegate-(manager-update|update)\]' "$output_file" | tail -n 80 || true)
-            else
-              summary='Remote operation did not produce output.'
-            fi
-            summary="target commit=${MANAGER_COMMIT}"$'\n'"${summary}"$'\n\n'"Full preflight P0-P7 and postflight Q0-Q6: artifact routegate-update-manager-${GITHUB_RUN_ID} of the run below (kept 7 days)."
-          elif [[ -f "$output_file" ]]; then
-            summary=$(tail -n 80 "$output_file")
-          else
-            summary='Remote operation did not produce output.'
-          fi
-
-          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          body=$(jq -n \
-            --arg operation "$OPERATION" \
-            --arg status "$status" \
-            --arg summary "$summary" \
-            --arg run_url "$run_url" \
-            '{body:("Ops operation `" + $operation + "` **" + $status + "**.\n\n```text\n" + $summary + "\n```\n\nActions audit: " + $run_url)}')
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/268/comments" --input - <<<"$body" >/dev/null
-
-          if [[ "$EVENT_NAME" == issues ]]; then
-            baseline='Reserved control issue for RouteGate production-like operations.\n\nSet only an exact allow-listed `operation=...` request while this issue is closed, then reopen it. The workflow clears the request by closing the issue after every run. Arbitrary issue text is never executed as shell input.'
-            patch=$(jq -n --arg body "$baseline" '{state:"closed",body:$body}')
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/268" --input - <<<"$patch" >/dev/null
-          fi
-
-      - name: Propagate remote failure
-        if: always() && steps.request.outcome == 'success'
-        shell: bash
-        env:
-          REMOTE_RC: ${{ steps.remote.outputs.rc }}
-        run: |
-          set -euo pipefail
-          rc=${REMOTE_RC:-1}
-          [[ "$rc" == 0 ]]
-\n'"${status_lines}"
+              printf -v summary '%s\n%s' "$summary" "$status_lines"
             fi
           elif [[ "$OPERATION" == "update-manager" ]]; then
             if [[ -f "$output_file" ]]; then
+
               summary=$(grep -E '^\[routegate-(manager-update|update)\]' "$output_file" | tail -n 80 || true)
             else
               summary='Remote operation did not produce output.'
