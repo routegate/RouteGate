@@ -328,6 +328,21 @@ network_diagnostics() {
         if output=$(timeout 10 "$tool" -S 2>/dev/null); then
           count=$(printf '%s\n' "$output" | grep -Ec -- '-j (DROP|REJECT)' || true)
           log "network tool=${tool} readable=true filter-drop-reject-rules=${count}"
+          printf '%s\n' "$output" | awk -v tool="$tool" '
+            /-j (DROP|REJECT)/ {
+              chain="custom"; proto="any"; ports="any"; src="false"; dst="false"; neg="false"; verdict="unknown"
+              for (i=1; i<=NF; i++) {
+                if ($i=="-A" && $(i+1) ~ /^(INPUT|OUTPUT|FORWARD)$/) chain=$(i+1)
+                if ($i=="-p" && $(i+1) ~ /^(tcp|udp|icmp|icmpv6|all|[0-9]+)$/) proto=$(i+1)
+                if (($i=="--dport" || $i=="--dports") && $(i+1) ~ /^[0-9,:]+$/) ports=$(i+1)
+                if ($i=="-s") src="true"
+                if ($i=="-d") dst="true"
+                if ($i=="!") neg="true"
+                if ($i=="-j" && $(i+1) ~ /^(DROP|REJECT)$/) verdict=$(i+1)
+              }
+              printf "[routegate-ops] network tool=%s block-chain=%s protocol=%s destination-ports=%s source-match=%s destination-match=%s negated-match=%s verdict=%s\n", tool,chain,proto,ports,src,dst,neg,verdict
+            }'
+
           for chain in INPUT FORWARD OUTPUT; do
             policy=$(printf '%s\n' "$output" | awk -v chain="$chain" '$1 == "-P" && $2 == chain && ($3 == "ACCEPT" || $3 == "DROP") { print $3 }')
             log "network tool=${tool} chain=${chain} policy=${policy:-unknown}"
