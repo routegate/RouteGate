@@ -109,6 +109,9 @@ func TestCredentialRemovalJobIDBinding(t *testing.T) {
 		t.Fatal("cancellation rewrote immutable ID history", err)
 	}
 	// Remove empty dependent human-auth schema first, retaining all IDs.
+	heldDown, err := os.ReadFile("../../migrations/000176_credential_removal_held_dispatch.down.sql")
+	if err != nil { t.Fatal(err) }
+	if _, err = pool.Exec(ctx, string(heldDown)); err != nil { t.Fatal("empty held dispatch downgrade", err) }
 	stageDown, err := os.ReadFile("../../migrations/000175_credential_removal_dispatch_stages.down.sql")
 	if err != nil { t.Fatal(err) }
 	if _, err = pool.Exec(ctx, string(stageDown)); err != nil {

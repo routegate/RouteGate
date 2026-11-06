@@ -42,8 +42,8 @@ func TestMigrationsApplyFromScratchOnPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000175_credential_removal_dispatch_stages" {
-		t.Fatalf("applied schema version = %q, want 000175_credential_removal_dispatch_stages", version)
+	if version != "000176_credential_removal_held_dispatch" {
+		t.Fatalf("applied schema version = %q, want 000176_credential_removal_held_dispatch", version)
 	}
 	assertRawTrafficArchivalPreservesDailyRollup(t, ctx, pool)
 	assertAgentMaintenanceJobContract(t, ctx, pool)
@@ -530,14 +530,14 @@ func TestRuntimeMetricsBackfillMigrationRepairsAppliedSchemaDrift(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000175_credential_removal_dispatch_stages" {
-		t.Fatalf("applied schema version = %q, want 000175_credential_removal_dispatch_stages", version)
+	if version != "000176_credential_removal_held_dispatch" {
+		t.Fatalf("applied schema version = %q, want 000176_credential_removal_held_dispatch", version)
 	}
 }
 
 func resetPublicSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
+	if _, err := pool.Exec(ctx, `DROP SCHEMA IF EXISTS routegate_dispatch CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
 		t.Fatalf("reset public schema: %v", err)
 	}
 }
