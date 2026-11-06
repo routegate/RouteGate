@@ -631,6 +631,7 @@ jobs:
           elif [[ "$OPERATION" == "update-frontend" ]]; then
             summary="revision=${FRONTEND_COMMIT}; scope=static-ui-only; manager=unchanged; vpn=unchanged"
             if [[ -f "$output_file" ]]; then
+              status_lines=$(grep -E '^\[routegate-frontend\]' "$output_file" | tail -n 30 || true)
               summary="${summary}"
               summary=$(grep -E '^\[routegate-(manager-update|update)\]' "$output_file" | tail -n 80 || true)
             else
@@ -667,7 +668,7 @@ jobs:
           set -euo pipefail
           rc=${REMOTE_RC:-1}
           [[ "$rc" == 0 ]]
-\n'"$(grep -E '^\[routegate-frontend\]' "$output_file" | tail -n 30 || true)"
+\n'"${status_lines}"
             fi
           elif [[ "$OPERATION" == "update-manager" ]]; then
             if [[ -f "$output_file" ]]; then
