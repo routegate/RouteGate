@@ -303,12 +303,77 @@ protocol_activation_diagnostics() {
   done <<<"$timing_rows"
 }
 
+network_diagnostics() {
+  # Read-only summaries; raw rules, addresses and ban lists stay on the host.
+  local tool output port count policy chain
+  for tool in nft iptables ip6tables iptables-legacy ip6tables-legacy ufw fail2ban-client; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      log "network tool=${tool} available=false"
+      continue
+    fi
+    case "$tool" in
+      nft)
+        if output=$(timeout 10 nft list ruleset 2>/dev/null); then
+          count=$(printf '%s\n' "$output" | grep -Ec '\b(drop|reject)\b' || true)
+          log "network tool=nft readable=true drop-reject-lines=${count}"
+          for policy in accept drop; do
+            count=$(printf '%s\n' "$output" | grep -Ec "hook input.*policy ${policy}" || true)
+            log "network tool=nft input-policy=${policy} chains=${count}"
+          done
+        else
+          log "network tool=nft readable=false"
+        fi
+        ;;
+      iptables|ip6tables|iptables-legacy|ip6tables-legacy)
+        if output=$(timeout 10 "$tool" -S 2>/dev/null); then
+          count=$(printf '%s\n' "$output" | grep -Ec -- '-j (DROP|REJECT)' || true)
+          log "network tool=${tool} readable=true filter-drop-reject-rules=${count}"
+          for chain in INPUT FORWARD OUTPUT; do
+            policy=$(printf '%s\n' "$output" | awk -v chain="$chain" '$1 == "-P" && $2 == chain && ($3 == "ACCEPT" || $3 == "DROP") { print $3 }')
+            log "network tool=${tool} chain=${chain} policy=${policy:-unknown}"
+          done
+        else
+          log "network tool=${tool} readable=false"
+        fi
+        ;;
+      ufw)
+        if output=$(timeout 10 ufw status 2>/dev/null); then
+          case "$output" in
+            *"Status: inactive"*) log "network ufw=inactive" ;;
+            *"Status: active"*) log "network ufw=active" ;;
+            *) log "network ufw=unknown" ;;
+          esac
+        else
+          log "network ufw=unavailable"
+        fi
+        ;;
+      fail2ban-client)
+        if output=$(timeout 10 fail2ban-client status sshd 2>/dev/null); then
+          count=$(printf '%s\n' "$output" | sed -n 's/.*Currently banned:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+          log "network fail2ban-sshd=current-bans count=${count:-unknown}"
+        else
+          log "network fail2ban-sshd=unavailable"
+        fi
+        ;;
+    esac
+  done
+  for port in 22 443 8443; do
+    if output=$(timeout 5 ss -H -ltn "sport = :${port}" 2>/dev/null); then
+      count=$(printf '%s\n' "$output" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')
+      log "network tcp-port=${port} listeners=${count}"
+    else
+      log "network tcp-port=${port} listeners=unknown"
+    fi
+  done
+}
+
 diagnose() {
   control_plane_diagnostics
   runtime_diagnostics
   http_diagnostics
   schema_diagnostics
   protocol_activation_diagnostics
+  network_diagnostics
 }
 
 validate_platform() {
