@@ -108,7 +108,8 @@ the staged candidate version and job in `held_for_revocation` status. It also
 increments the reserved node's counter once. The owner-only receipt resides in
 `routegate_dispatch`; ordinary Manager runtime has no grants on that schema.
 The scoped SQL guards accept only the pinned writes in the receipt's own
-transaction. A retry with the exact proof and a live original session returns
+transaction on the trusted owner login. A restored transaction ID alone
+cannot authorize a runtime login. A retry with the exact proof and a live original session returns
 the stored IDs. Generic polling, status changes and cancellation cannot release
 or execute the held job. Empty downgrade is supported; retained issuance
 blocks downgrade.

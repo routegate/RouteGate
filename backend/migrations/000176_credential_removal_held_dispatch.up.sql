@@ -34,7 +34,8 @@ RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_t
   JOIN public.vpn_credential_revocations r ON r.id=h.operation_id
   JOIN public.vpn_credential_removal_dispatch_stages s ON s.operation_id=h.operation_id
   JOIN public.vpn_credential_removal_dispatch_authorizations a ON a.operation_id=h.operation_id
-  WHERE h.writer_xid=pg_current_xact_id_if_assigned()
+  WHERE session_user=current_user
+    AND h.writer_xid=pg_current_xact_id_if_assigned()
     AND h.server_id=node AND r.server_id=node AND r.state='prepared'
     AND h.version_id=s.candidate_version_id AND h.job_id=s.apply_job_id
     AND a.expires_at>clock_timestamp()
