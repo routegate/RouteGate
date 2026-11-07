@@ -1,0 +1,73 @@
+name: US VLESS incident proof
+on:
+  issues:
+    types: [edited]
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: routegate-us-vless-proof
+  cancel-in-progress: false
+jobs:
+  proof:
+    if: >-
+      github.repository == 'routegate/RouteGate' &&
+      github.repository_id == '1224779806' &&
+      github.event.issue.number == 268 &&
+      github.event.issue.title == 'RouteGate Ops Bridge' &&
+      github.event.issue.user.id == 62504580 &&
+      github.event.issue.state == 'closed' &&
+      github.event.issue.body == 'operation=probe-us-vless'
+    runs-on: ubuntu-24.04
+    environment: production-like
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check parity privately and probe from external runner
+        shell: bash
+        env:
+          ROUTEGATE_SSH_KEY: ${{ secrets.ROUTEGATE_SSH_KEY }}
+          ROUTEGATE_KNOWN_HOSTS: ${{ secrets.ROUTEGATE_KNOWN_HOSTS }}
+          ROUTEGATE_HOST: ${{ secrets.ROUTEGATE_HOST }}
+          ROUTEGATE_USER: ${{ secrets.ROUTEGATE_USER }}
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          private=$(mktemp -d)
+          remote="/tmp/routegate-us-proof-${GITHUB_RUN_ID}.py"
+          printf '%s\n' "$ROUTEGATE_SSH_KEY" > "$private/key"
+          printf '%s\n' "$ROUTEGATE_KNOWN_HOSTS" > "$private/known_hosts"
+          SSH=(ssh -i "$private/key" -o UserKnownHostsFile="$private/known_hosts" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
+          SCP=(scp -i "$private/key" -o UserKnownHostsFile="$private/known_hosts" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
+          cleanup() {
+            "${SSH[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST" "rm -f '$remote'" >/dev/null 2>&1 || true
+            rm -rf "$private"
+          }
+          trap cleanup EXIT
+          "${SCP[@]}" scripts/us-vless-proof.py "$ROUTEGATE_USER@$ROUTEGATE_HOST:$remote"
+          "${SSH[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST" "sudo -n flock -w 30 /run/lock/routegate-production-like.lock bash -s -- '$remote'" > "$private/payload.json" <<'REMOTE'
+          set -euo pipefail
+          set +x
+          set -a
+          source /etc/routegate/manager.env >/dev/null 2>&1
+          set +a
+          python3 "$1" remote
+          REMOTE
+          "${SCP[@]}" "$ROUTEGATE_USER@$ROUTEGATE_HOST:/usr/bin/sing-box" "$private/sing-box"
+          chmod 700 "$private/sing-box"
+          python3 scripts/us-vless-proof.py runner "$private/payload.json" "$private/sing-box"
+      - name: Clear exact incident request
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/issues/268" --jq '.body')
+          if [[ "$current" == 'operation=probe-us-vless' ]]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/268" \
+              -f body='Reserved control issue for RouteGate production-like operations.' >/dev/null
+          fi
