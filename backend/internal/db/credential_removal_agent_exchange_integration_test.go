@@ -172,7 +172,7 @@ func testCredentialRemovalAgentExchange(t *testing.T, failureCode string) {
 		t.Fatal("result changed held state, active config, reservation or retained evidence", err)
 	}
 	if recovery {
-		testFreshRemovalRecoveryApproval(t, f, decision, private, body)
+		testFreshRemovalRecoveryApproval(t, f, decision, private, body, failureCode == "interrupted_or_failed_mutation")
 		return
 	}
 	downgradeEmptyRetirementGuard(t, f.ctx, f.pool)
