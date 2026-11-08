@@ -20,16 +20,17 @@ import (
 )
 
 func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
-	for _, recovery := range []bool{false, true} {
+	for _, code := range []string{"", "restart_failed", "interrupted_or_failed_mutation"} {
 		name := "success"
-		if recovery {
-			name = "recovery_required"
+		if code != "" {
+			name = code
 		}
-		t.Run(name, func(t *testing.T) { testCredentialRemovalAgentExchange(t, recovery) })
+		t.Run(name, func(t *testing.T) { testCredentialRemovalAgentExchange(t, code) })
 	}
 }
 
-func testCredentialRemovalAgentExchange(t *testing.T, recovery bool) {
+func testCredentialRemovalAgentExchange(t *testing.T, failureCode string) {
+	recovery := failureCode != ""
 	token, err := agents.GenerateAgentToken()
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +96,7 @@ func testCredentialRemovalAgentExchange(t *testing.T, recovery bool) {
 		State:  "succeeded", SessionEffect: "shared_process_restart_observed",
 	}
 	if recovery {
-		report.State, report.Code = "recovery_required", "restart_failed"
+		report.State, report.Code = "recovery_required", failureCode
 		report.ActiveRuntimeHash, report.SessionEffect, report.ListenerPort = "", "", 0
 		report.After = revocations.RuntimeGeneration{}
 	}

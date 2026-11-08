@@ -246,3 +246,18 @@ restart. Manager retains that report in the existing immutable result table.
 The operation keeps its node reservation and cannot pass terminal success
 verification. Additional recovery observations require a separately authorized
 attempt under that same operation.
+
+### Result delivery after execution authority expires
+
+Held-removal receipts now record their delivery origin and acknowledgement
+locally. Before requesting new work, the Agent reads unacknowledged held
+results under the existing nonblocking runtime lock and submits the saved
+report directly. A lost acknowledgement or Agent restart therefore does not
+require the expired task to be claimed again. Manager still checks the exact
+operation and Agent identity when accepting late evidence.
+
+A held receipt left in applying state by a departed worker is converted to
+a durable recovery-required report after the lock can be acquired. Delivery
+and acknowledgement preserve the active file and mutation fence. Older local
+receipts without the held-delivery marker retain their existing explicit
+task-replay path. This delivery path grants no new mutation authority.
