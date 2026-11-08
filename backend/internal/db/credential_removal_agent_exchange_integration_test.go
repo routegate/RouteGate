@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,12 +13,23 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ikaevus/routegate/backend/internal/agents"
 	"github.com/ikaevus/routegate/backend/internal/revocations"
 )
 
 func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
+	for _, recovery := range []bool{false, true} {
+		name := "success"
+		if recovery {
+			name = "recovery_required"
+		}
+		t.Run(name, func(t *testing.T) { testCredentialRemovalAgentExchange(t, recovery) })
+	}
+}
+
+func testCredentialRemovalAgentExchange(t *testing.T, recovery bool) {
 	token, err := agents.GenerateAgentToken()
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +94,11 @@ func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
 		After:  revocations.RuntimeGeneration{InvocationID: strings.Repeat("b", 32), PID: 124, StartedMonotonic: "200"},
 		State:  "succeeded", SessionEffect: "shared_process_restart_observed",
 	}
+	if recovery {
+		report.State, report.Code = "recovery_required", "restart_failed"
+		report.ActiveRuntimeHash, report.SessionEffect, report.ListenerPort = "", "", 0
+		report.After = revocations.RuntimeGeneration{}
+	}
 	body, err := json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)
@@ -115,11 +132,39 @@ func TestCredentialRemovalDispatchAdmissionAgentExchange(t *testing.T) {
 	}
 	serve(path, token, body, http.StatusNoContent)
 	serve(path, token, body, http.StatusNoContent)
-	serve(path, token, bytes.Replace(body, []byte(`"pid":124`), []byte(`"pid":125`), 1), http.StatusConflict)
+	serve(path, token, bytes.Replace(body, []byte(`"pid":123`), []byte(`"pid":125`), 1), http.StatusConflict)
 
+	if recovery {
+		key, signer, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verifier, err := revocations.NewRemovalVerificationAuthority(decision.Audience, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest, err := revocations.RuntimeDigest(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof := revocations.RemovalVerificationProof{
+			Audience: decision.Audience, OperationID: f.operation, AgentReportDigest: digest,
+			ObservedAtUnixMicros: time.Now().UnixMicro(), OldSessionTerminated: true,
+			CachedCredentialRejected: true, Continuity: revocations.RemovalRemainingAccountReconnected,
+		}
+		message, err := proof.SigningBytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.svc.ConfirmHeldRemoval(f.ctx, proof, verifier, ed25519.Sign(signer, message)); !errors.Is(err, revocations.ErrPreflight) {
+			t.Fatal("failure report admitted terminal confirmation", err)
+		}
+	}
 	var retained bool
 	if err := f.pool.QueryRow(f.ctx, `SELECT r.state='prepared' AND j.status='held_for_revocation'
  AND s.active_config_version_id=r.baseline_version_id AND evidence=$2::jsonb
+ AND NOT EXISTS(SELECT 1 FROM routegate_dispatch.confirmed_removals c WHERE c.operation_id=r.id)
+ AND NOT EXISTS(SELECT 1 FROM routegate_dispatch.retired_vless_credentials x WHERE x.operation_id=r.id)
  FROM routegate_dispatch.removal_results e JOIN routegate_dispatch.held_removals h USING(operation_id)
  JOIN vpn_credential_revocations r ON r.id=h.operation_id JOIN config_apply_jobs j ON j.id=h.job_id
  JOIN servers s ON s.id=r.server_id WHERE h.operation_id=$1::uuid`, f.operation, body).Scan(&retained); err != nil || !retained {

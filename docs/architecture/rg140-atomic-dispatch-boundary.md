@@ -235,3 +235,14 @@ entire transaction.
 The Manager/Agent integration fixture exercises this internal coordinator
 path. Production enablement still requires provisioning the independent
 verifier, an operator entry point and recovery from uncertain outcomes.
+
+### Failed restart evidence
+
+The scoped exchange accepts a bounded `recovery_required` report for the exact
+claimed operation, including a failed restart after file promotion. The Agent
+submits this report even when execution returns an error. After a lost HTTP
+acknowledgement, it replays the exact locally saved failure without another
+restart. Manager retains that report in the existing immutable result table.
+The operation keeps its node reservation and cannot pass terminal success
+verification. Additional recovery observations require a separately authorized
+attempt under that same operation.

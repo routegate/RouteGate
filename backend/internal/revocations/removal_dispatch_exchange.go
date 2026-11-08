@@ -131,7 +131,7 @@ func (s *Service) ClaimHeldRemoval(ctx context.Context, tokenHash string) (*agen
 	}, nil
 }
 
-// AcceptHeldRemovalResult stores verified, secret-free evidence exactly once.
+// AcceptHeldRemovalResult stores verified success or recovery-required evidence exactly once.
 // A report never activates the config, lifts the reservation, or authorizes a
 // retry. Late evidence can be recorded after delivery authority has expired.
 func (s *Service) AcceptHeldRemovalResult(ctx context.Context, tokenHash, jobID string, data []byte) error {
@@ -155,6 +155,9 @@ func (s *Service) AcceptHeldRemovalResult(ctx context.Context, tokenHash, jobID 
 		return err
 	}
 	report, err := VerifySuccess(data, h.binding)
+	if err != nil {
+		report, err = VerifyRecoveryRequired(data, h.binding)
+	}
 	if err != nil {
 		return agents.ErrRemovalExchangeRejected
 	}
