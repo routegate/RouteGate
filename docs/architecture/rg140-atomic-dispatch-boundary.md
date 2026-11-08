@@ -261,3 +261,24 @@ a durable recovery-required report after the lock can be acquired. Delivery
 and acknowledgement preserve the active file and mutation fence. Older local
 receipts without the held-delivery marker retain their existing explicit
 task-replay path. This delivery path grants no new mutation authority.
+
+### Fresh consent after a recorded failure
+
+Schema 180 records append-only human recovery approvals under the original
+held operation. A separate domain signature binds the failed-report digest,
+original job and candidate, Agent generation, authenticated actor/session,
+fresh nonce, shared-restart consent and a lifetime of at most 90 seconds.
+The original dispatch signature and nonce cannot approve recovery.
+
+The protected coordinator locks node, operation, Agent and current human
+authority before validating the signature and inserting consent. The final
+insert checks the current heartbeat, session and deadline again. Concurrent
+identical requests return one unchanged approval. A replacement approval must
+reference the expired preceding approval, retaining the chain without forks.
+A retained approval prevents downgrade from erasing its history.
+
+Approval records do not dispatch a task or release the original reservation.
+The recovery execution transition still needs an Agent observation under the
+shared mutation lock and a durable attempt checkpoint that excludes resumption
+by an earlier worker. Those checks must be implemented before consumption of
+these approvals can authorize a restart.
