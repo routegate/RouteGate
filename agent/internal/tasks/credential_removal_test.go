@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 const removalAccount = "11111111-1111-4111-8111-111111111111"
@@ -349,5 +350,23 @@ func TestCredentialRemovalRejectsNonRegularFilesWithoutBlocking(t *testing.T) {
 	}
 	if _, err := readRemovalFile(filepath.Dir(path), 1024, false); err == nil {
 		t.Fatal("accepted directory")
+	}
+}
+
+// RunCredentialRemovalFailureHTTPFixture exercises the actual executor with
+// an injected restart error through the caller's real Agent HTTP client.
+func RunCredentialRemovalFailureHTTPFixture(t *testing.T, process func(ConfigTask, CredentialRemovalExecutor) (*CredentialRemovalReport, error)) {
+	t.Helper()
+	executor, task, adapter, _ := removalExecutorFixture(t)
+	deadline := time.Now().Add(time.Minute)
+	task.DeliveryExpiresAt = &deadline
+	adapter.restartHook = func() error { return errors.New("private-command-output-must-stay-local") }
+	first, err := process(task, executor)
+	if err == nil || first != nil || adapter.restarts != 1 {
+		t.Fatal("first result must be unacknowledged after one failed restart", err, adapter.restarts)
+	}
+	replay, err := process(task, executor)
+	if err == nil || replay == nil || replay.State != "recovery_required" || replay.Code != "restart_failed" || adapter.restarts != 1 {
+		t.Fatal("failure replay did not retain its original report and single restart", replay, err, adapter.restarts)
 	}
 }

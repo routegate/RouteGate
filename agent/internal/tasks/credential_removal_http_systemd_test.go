@@ -80,3 +80,51 @@ func executeRemovalViaHTTP(t *testing.T, ctx context.Context, task tasks.ConfigT
 	t.Log("Agent fetched scoped removal via authenticated HTTP and returned exact credential-free evidence")
 	return *report, nil
 }
+
+func TestCredentialRemovalHTTPPreservesRestartFailureAcrossLostAcknowledgement(t *testing.T) {
+	var task tasks.ConfigTask
+	var original []byte
+	results := 0
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer isolated-failure-agent" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/api/v1/agent/credential-removals/claim" {
+			_ = json.NewEncoder(w).Encode(client.NextWorkResponse{Task: &task})
+			return
+		}
+		if r.URL.Path != "/api/v1/agent/credential-removals/"+task.ID+"/result" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16384))
+		var report tasks.CredentialRemovalReport
+		if err != nil || json.Unmarshal(body, &report) != nil || report.State != "recovery_required" ||
+			report.Code != "restart_failed" || bytes.Contains(body, []byte("private-command-output")) ||
+			bytes.Contains(body, []byte(task.CredentialRemoval.VLESSUUID)) {
+			t.Error("invalid or secret-bearing failure report")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		results++
+		if results == 1 {
+			original = bytes.Clone(body)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if !bytes.Equal(body, original) {
+			t.Error("lost acknowledgement changed the failure report")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer peer.Close()
+	agent := client.New(peer.URL)
+	tasks.RunCredentialRemovalFailureHTTPFixture(t, func(work tasks.ConfigTask, executor tasks.CredentialRemovalExecutor) (*tasks.CredentialRemovalReport, error) {
+		task = work
+		return agent.ProcessHeldRemoval(context.Background(), "isolated-failure-agent", executor)
+	})
+	if results != 2 {
+		t.Fatal("failure report was not delivered and replayed", results)
+	}
+}

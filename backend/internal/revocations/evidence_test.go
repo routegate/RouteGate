@@ -38,3 +38,33 @@ func TestVerifyRemovalEvidenceBindings(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyRecoveryRequiredRetainsBindingAndRejectsUnboundedErrors(t *testing.T) {
+	binding, success := evidenceFixture()
+	failure := success
+	failure.State, failure.Code = "recovery_required", "restart_failed"
+	failure.ActiveRuntimeHash, failure.SessionEffect, failure.ListenerPort = "", "", 0
+	failure.After = RuntimeGeneration{}
+	data, _ := json.Marshal(failure)
+	if got, err := VerifyRecoveryRequired(data, binding); err != nil || got != failure {
+		t.Fatal(got, err)
+	}
+	if _, err := VerifySuccess(data, binding); err == nil {
+		t.Fatal("failure became terminal success")
+	}
+	for _, change := range []func(*CredentialRemovalReport){
+		func(r *CredentialRemovalReport) { r.Code = "private command output" },
+		func(r *CredentialRemovalReport) { r.OperationID = binding.AccountID },
+		func(r *CredentialRemovalReport) { r.Before = RuntimeGeneration{} },
+		func(r *CredentialRemovalReport) { r.State = "succeeded" },
+		func(r *CredentialRemovalReport) { r.ConfigHash = binding.BaselineRuntimeHash },
+		func(r *CredentialRemovalReport) { r.ActiveRuntimeHash = "private configuration" },
+	} {
+		bad := failure
+		change(&bad)
+		data, _ := json.Marshal(bad)
+		if _, err := VerifyRecoveryRequired(data, binding); err == nil {
+			t.Fatal("unbound or unbounded failure accepted")
+		}
+	}
+}

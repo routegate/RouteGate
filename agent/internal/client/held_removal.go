@@ -23,12 +23,15 @@ func (c *Client) ProcessHeldRemoval(ctx context.Context, token string, executor 
 		return nil, nil
 	}
 	report, err := executor.ExecuteHeld(ctx, *work.Task)
-	if err != nil {
+	if err != nil && (report.State != "recovery_required" || report.JobID != work.Task.ID) {
 		return nil, errors.New("credential removal requires reconciliation")
 	}
 	path := heldRemovalPath + url.PathEscape(report.JobID) + "/result"
 	if c.doJSONExpect(ctx, http.MethodPost, path, token, report, nil, http.StatusNoContent) != nil {
 		return nil, errors.New("credential removal result was not acknowledged")
+	}
+	if err != nil {
+		return &report, errors.New("credential removal requires reconciliation")
 	}
 	return &report, nil
 }

@@ -131,6 +131,9 @@ func (e CredentialRemovalExecutor) execute(ctx context.Context, task ConfigTask,
 		if json.Unmarshal(data, &old) != nil || old.Fingerprint != fingerprint || !sameRemovalBinding(old.Report, report) {
 			return deny("operation_identity_changed")
 		}
+		if validSavedRemovalFailure(old.Report) {
+			return old.Report, errors.New("credential removal requires reconciliation")
+		}
 		if old.Report.State != "succeeded" {
 			if old.Report.State == "prepared" {
 				report.State = "failed"
@@ -476,4 +479,20 @@ func removeRemovalFileCheckpoint(path string, checkpoint func() error) error {
 
 func sameRemovalBinding(a, b CredentialRemovalReport) bool {
 	return a.SchemaVersion == b.SchemaVersion && a.JobID == b.JobID && a.OperationID == b.OperationID && a.ServerID == b.ServerID && a.AgentID == b.AgentID && a.AccountID == b.AccountID && a.BaselineVersionID == b.BaselineVersionID && a.ConfigVersionID == b.ConfigVersionID && a.ConfigHash == b.ConfigHash && a.BaselineRuntimeHash == b.BaselineRuntimeHash
+}
+
+// Only fixed, secret-free outcomes with measured pre-mutation identity can be
+// replayed. Keep the exact saved report after a lost HTTP acknowledgement.
+func validSavedRemovalFailure(report CredentialRemovalReport) bool {
+	switch report.Code {
+	case "promotion_failed", "restart_failed", "restart_not_verified", "runtime_not_enabled",
+		"listener_not_verified", "applied_evidence_changed", "receipt_write_failed", "fence_clear_failed":
+	default:
+		return false
+	}
+	return report.State == "recovery_required" && validRemovalGeneration(report.Before) &&
+		(report.After == (RuntimeGeneration{}) || validRemovalGeneration(report.After)) &&
+		(report.ActiveRuntimeHash == "" || validRemovalHash(report.ActiveRuntimeHash)) &&
+		(report.ListenerPort == 0 || (report.ListenerPort > 0 && report.ListenerPort <= 65535)) &&
+		(report.SessionEffect == "" || report.SessionEffect == "shared_process_restart_observed")
 }

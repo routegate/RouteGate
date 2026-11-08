@@ -72,6 +72,9 @@ jobs:
       - name: Verify old credential membership, prepared work and session fences
         run: go test ./internal/db -run '^TestCredentialConversion(SessionFence|Membership|Prepared)' -count=1 -timeout=90s -v
 
+      - name: Verify scoped Agent success and failed-restart reports in PostgreSQL
+        run: go test ./internal/db -run '^TestCredentialRemovalDispatchAdmissionAgentExchange$' -count=1 -timeout=120s -v
+
       - name: Verify explicit runtime role privileges and unchanged SQL fences
         run: go test ./internal/db -run '^TestRuntimeRole' -count=1 -timeout=120s -v
 
