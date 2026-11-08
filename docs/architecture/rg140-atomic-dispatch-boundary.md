@@ -282,3 +282,32 @@ The recovery execution transition still needs an Agent observation under the
 shared mutation lock and a durable attempt checkpoint that excludes resumption
 by an earlier worker. Those checks must be implemented before consumption of
 these approvals can authorize a restart.
+
+### Agent observation and attempt checkpoint
+
+The local recovery observer pins the approval key, deployment audience and
+Agent generation from trusted configuration. It checks the signed decision,
+the acknowledged failure report and the retained mutation fence while holding
+the same nonblocking runtime lock used by removal execution. A candidate file
+digest and bracketed process/listener observation are recorded separately.
+Failure to establish a stable process records an unverified runtime.
+
+Each admitted attempt has a durable signed-decision checkpoint and an original
+observation time. The original failure report points to the current attempt.
+Replay requires the same decision and current observations; replacing an
+attempt requires its signed expiry and predecessor to match. Checkpoints,
+original failure evidence, active config and the mutation fence are retained.
+Collection also has a monotonic context deadline.
+
+Recovery execution must also establish that previously submitted systemd jobs
+have settled. The Agent mutation lock covers the local worker; an already
+submitted service-control job can outlive that worker. The observation itself
+therefore cannot establish service-control quiescence.
+
+The observation lease retains the lock for the caller and closes it explicitly.
+It provides diagnostics only. Service restart, Manager consumption and terminal
+confirmation must use their own checked transition while the lock is held.
+The isolated tests cover lock contention, changed identity/config binding,
+expiry during observation, lost-process reconstruction, predecessor expiry,
+unverified runtime and unchanged original evidence. A shared signing fixture
+checks the independently built Manager and Agent contracts.

@@ -88,6 +88,9 @@ jobs:
       - name: Verify Manager credential-removal Agent-only typed wire
         run: go test ./internal/agents -run '^TestAgentCredentialRemovalRequestWireParity$' -count=1 -timeout=120s -v
 
+      - name: Verify Manager and Agent recovery signature contract
+        run: go test ./internal/revocations -run '^TestCredentialRemovalRecoveryDecisionSigningParity$' -count=1 -timeout=120s -v
+
       - name: Verify approved IDs still cannot bypass generic Apply SQL guards
         run: go test ./internal/db -run '^TestCredentialRemovalApprovedIDsStillBlockGenericApply$' -count=1 -timeout=120s -v
 
@@ -230,6 +233,9 @@ jobs:
 
       - name: Verify Agent typed revocation wire cannot stage as generic Apply
         run: go test ./internal/tasks -run '^TestCredentialRemovalAgentWireEnvelope$' -count=1 -timeout=120s -v
+
+      - name: Verify held-removal recovery observations and durable checkpoints
+        run: go test -race ./internal/tasks -run '^TestCredentialRemovalRecovery' -count=1 -timeout=120s -v
 
       - name: Verify post-release historical readback on Agent
         run: go test -race ./internal/client -run '^TestRecoveryAdmissionReleaseReadback' -count=1 -timeout=120s -v

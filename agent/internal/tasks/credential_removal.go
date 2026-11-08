@@ -32,10 +32,11 @@ func NewCredentialRemovalExecutor(activePath, receiptDir, serverID, agentID stri
 }
 
 type removalReceipt struct {
-	Fingerprint  string                  `json:"fingerprint"`
-	Held         bool                    `json:"held,omitempty"`
-	Acknowledged bool                    `json:"acknowledged,omitempty"`
-	Report       CredentialRemovalReport `json:"report"`
+	Fingerprint       string                  `json:"fingerprint"`
+	Held              bool                    `json:"held,omitempty"`
+	RecoveryAttemptID string                  `json:"recoveryAttemptId,omitempty"`
+	Acknowledged      bool                    `json:"acknowledged,omitempty"`
+	Report            CredentialRemovalReport `json:"report"`
 }
 
 func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask) (CredentialRemovalReport, error) {
