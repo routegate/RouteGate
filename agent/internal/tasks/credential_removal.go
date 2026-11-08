@@ -32,8 +32,10 @@ func NewCredentialRemovalExecutor(activePath, receiptDir, serverID, agentID stri
 }
 
 type removalReceipt struct {
-	Fingerprint string                  `json:"fingerprint"`
-	Report      CredentialRemovalReport `json:"report"`
+	Fingerprint  string                  `json:"fingerprint"`
+	Held         bool                    `json:"held,omitempty"`
+	Acknowledged bool                    `json:"acknowledged,omitempty"`
+	Report       CredentialRemovalReport `json:"report"`
 }
 
 func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask) (CredentialRemovalReport, error) {
@@ -191,7 +193,7 @@ func (e CredentialRemovalExecutor) execute(ctx context.Context, task ConfigTask,
 		return deny("runtime_recovery_required")
 	}
 	save := func() error {
-		data, _ := json.Marshal(removalReceipt{Fingerprint: fingerprint, Report: report})
+		data, _ := json.Marshal(removalReceipt{Fingerprint: fingerprint, Held: !deadline.IsZero(), Report: report})
 		return writeRemovalFile(receiptPath, data)
 	}
 	report.State = "prepared"
@@ -485,7 +487,7 @@ func sameRemovalBinding(a, b CredentialRemovalReport) bool {
 // replayed. Keep the exact saved report after a lost HTTP acknowledgement.
 func validSavedRemovalFailure(report CredentialRemovalReport) bool {
 	switch report.Code {
-	case "promotion_failed", "restart_failed", "restart_not_verified", "runtime_not_enabled",
+	case "interrupted_or_failed_mutation", "promotion_failed", "restart_failed", "restart_not_verified", "runtime_not_enabled",
 		"listener_not_verified", "applied_evidence_changed", "receipt_write_failed", "fence_clear_failed":
 	default:
 		return false

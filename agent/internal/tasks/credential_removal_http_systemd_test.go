@@ -84,14 +84,19 @@ func executeRemovalViaHTTP(t *testing.T, ctx context.Context, task tasks.ConfigT
 func TestCredentialRemovalHTTPPreservesRestartFailureAcrossLostAcknowledgement(t *testing.T) {
 	var task tasks.ConfigTask
 	var original []byte
-	results := 0
+	results, claims := 0, 0
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer isolated-failure-agent" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		if r.URL.Path == "/api/v1/agent/credential-removals/claim" {
-			_ = json.NewEncoder(w).Encode(client.NextWorkResponse{Task: &task})
+			claims++
+			if results >= 2 {
+				_ = json.NewEncoder(w).Encode(client.NextWorkResponse{})
+			} else {
+				_ = json.NewEncoder(w).Encode(client.NextWorkResponse{Task: &task})
+			}
 			return
 		}
 		if r.URL.Path != "/api/v1/agent/credential-removals/"+task.ID+"/result" {
@@ -124,7 +129,7 @@ func TestCredentialRemovalHTTPPreservesRestartFailureAcrossLostAcknowledgement(t
 		task = work
 		return agent.ProcessHeldRemoval(context.Background(), "isolated-failure-agent", executor)
 	})
-	if results != 2 {
-		t.Fatal("failure report was not delivered and replayed", results)
+	if results != 2 || claims != 2 {
+		t.Fatal("expected one execution claim, one outbox replay and one idle poll", results, claims)
 	}
 }

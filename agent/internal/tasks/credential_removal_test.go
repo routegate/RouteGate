@@ -365,8 +365,14 @@ func RunCredentialRemovalFailureHTTPFixture(t *testing.T, process func(ConfigTas
 	if err == nil || first != nil || adapter.restarts != 1 {
 		t.Fatal("first result must be unacknowledged after one failed restart", err, adapter.restarts)
 	}
-	replay, err := process(task, executor)
+	expired := time.Now().Add(-time.Minute)
+	task.DeliveryExpiresAt = &expired
+	restarted := NewCredentialRemovalExecutor(executor.activePath, executor.receiptDir, executor.serverID, executor.agentID, adapter, true)
+	replay, err := process(task, restarted)
 	if err == nil || replay == nil || replay.State != "recovery_required" || replay.Code != "restart_failed" || adapter.restarts != 1 {
 		t.Fatal("failure replay did not retain its original report and single restart", replay, err, adapter.restarts)
+	}
+	if next, err := process(task, restarted); err != nil || next != nil || adapter.restarts != 1 {
+		t.Fatal("acknowledged report was sent again or expired execution resumed", next, err)
 	}
 }

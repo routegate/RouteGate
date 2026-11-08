@@ -78,7 +78,7 @@ func VerifyRecoveryRequired(data []byte, b EvidenceBinding) (CredentialRemovalRe
 		return CredentialRemovalReport{}, err
 	}
 	switch r.Code {
-	case "promotion_failed", "restart_failed", "restart_not_verified", "runtime_not_enabled",
+	case "interrupted_or_failed_mutation", "promotion_failed", "restart_failed", "restart_not_verified", "runtime_not_enabled",
 		"listener_not_verified", "applied_evidence_changed", "receipt_write_failed", "fence_clear_failed":
 	default:
 		return CredentialRemovalReport{}, ErrCredentialRemoval
