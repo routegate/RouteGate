@@ -171,6 +171,10 @@ func testCredentialRemovalAgentExchange(t *testing.T, failureCode string) {
  JOIN servers s ON s.id=r.server_id WHERE h.operation_id=$1::uuid`, f.operation, body).Scan(&retained); err != nil || !retained {
 		t.Fatal("result changed held state, active config, reservation or retained evidence", err)
 	}
+	if recovery {
+		testFreshRemovalRecoveryApproval(t, f, decision, private, body, failureCode == "interrupted_or_failed_mutation")
+		return
+	}
 	downgradeEmptyRetirementGuard(t, f.ctx, f.pool)
 	down, err := os.ReadFile("../../migrations/000177_credential_removal_agent_exchange.down.sql")
 	if err != nil {
