@@ -299,6 +299,11 @@ attempt requires its signed expiry and predecessor to match. Checkpoints,
 original failure evidence, active config and the mutation fence are retained.
 Collection also has a monotonic context deadline.
 
+Recovery execution must also establish that previously submitted systemd jobs
+have settled. The Agent mutation lock covers the local worker; an already
+submitted service-control job can outlive that worker. The observation itself
+therefore cannot establish service-control quiescence.
+
 The observation lease retains the lock for the caller and closes it explicitly.
 It provides diagnostics only. Service restart, Manager consumption and terminal
 confirmation must use their own checked transition while the lock is held.
