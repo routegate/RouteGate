@@ -433,6 +433,10 @@ export function getVpnAccountCredentials(
   );
 }
 
+export function getV2rayNRoutingRules(vpnAccountId: string): Promise<unknown[]> {
+  return apiGet<unknown[]>(`/api/v1/vpn-accounts/${encodeURIComponent(vpnAccountId)}/routing-policy/v2rayn`);
+}
+
 export function getVpnAccountRoutingPolicy(vpnAccountId: string): Promise<VpnAccountRoutingPolicy> {
   return apiGet<VpnAccountRoutingPolicy>(
     `/api/v1/vpn-accounts/${encodeURIComponent(vpnAccountId)}/routing-policy`,
