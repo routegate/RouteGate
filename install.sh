@@ -16,6 +16,7 @@ ROUTEGATE_BUNDLE_URL="${ROUTEGATE_BUNDLE_URL:-}"
 ROUTEGATE_CHECKSUM_URL="${ROUTEGATE_CHECKSUM_URL:-}"
 ROUTEGATE_ASSUME_YES="${ROUTEGATE_ASSUME_YES:-0}"
 ROUTEGATE_INSTALL_PROMETHEUS="${ROUTEGATE_INSTALL_PROMETHEUS:-}"
+ROUTEGATE_VERIFY_BUNDLE=0
 
 ROUTEGATE_STATE_DIR="/var/lib/routegate-installer"
 ROUTEGATE_STATE_FILE="/etc/routegate/install-state.env"
@@ -71,6 +72,7 @@ Options:
   --admin-email EMAIL       First administrator email. Defaults to --email.
   --server-name NAME        Local All-in-One server name. Defaults to the FQDN.
   --version VERSION         Release tag to install. Defaults to latest.
+  --verify-bundle           Check bundle checksum and compatibility without installing.
   --bundle-file PATH        Use a local release bundle instead of GitHub Releases.
   --checksum-file PATH      SHA256SUMS file for --bundle-file.
   --bundle-url URL          Use an explicit bundle URL.
@@ -178,6 +180,10 @@ parse_args() {
         (($# >= 2)) || die "--checksum-url requires a value."
         ROUTEGATE_CHECKSUM_URL="$2"
         shift 2
+        ;;
+      --verify-bundle)
+        ROUTEGATE_VERIFY_BUNDLE=1
+        shift
         ;;
       --with-prometheus)
         ROUTEGATE_INSTALL_PROMETHEUS=1
@@ -361,6 +367,24 @@ initialize_logging() {
   chmod 0600 "$ROUTEGATE_LOG_FILE"
 }
 
+validate_bundle_options() {
+    if [[ -n "$ROUTEGATE_BUNDLE_FILE" || -n "$ROUTEGATE_CHECKSUM_FILE" ]]; then
+      [[ -n "$ROUTEGATE_BUNDLE_FILE" && -n "$ROUTEGATE_CHECKSUM_FILE" ]] \
+        || die "--bundle-file and --checksum-file must be supplied together."
+    fi
+    if [[ -n "$ROUTEGATE_BUNDLE_URL" || -n "$ROUTEGATE_CHECKSUM_URL" ]]; then
+      [[ -n "$ROUTEGATE_BUNDLE_URL" && -n "$ROUTEGATE_CHECKSUM_URL" ]] \
+        || die "--bundle-url and --checksum-url must be supplied together."
+      validate_artifact_url "$ROUTEGATE_BUNDLE_URL" \
+        || die "--bundle-url must be an HTTPS URL without credentials, fragments, or whitespace."
+      validate_artifact_url "$ROUTEGATE_CHECKSUM_URL" \
+        || die "--checksum-url must be an HTTPS URL without credentials, fragments, or whitespace."
+    fi
+    [[ -z "$ROUTEGATE_BUNDLE_FILE" || -z "$ROUTEGATE_BUNDLE_URL" ]] \
+      || die "Choose either a local bundle or an explicit bundle URL, not both."
+  }
+}
+
 validate_inputs() {
   [[ -n "$ROUTEGATE_DOMAIN" ]] || die "--domain is required."
   [[ -n "$ROUTEGATE_EMAIL" ]] || die "--email is required for HTTPS."
@@ -375,21 +399,7 @@ validate_inputs() {
   [[ "$ROUTEGATE_SERVER_NAME" != *$'\n'* && "$ROUTEGATE_SERVER_NAME" != *$'\r'* ]] \
     || die "Server name cannot contain a line break."
 
-  if [[ -n "$ROUTEGATE_BUNDLE_FILE" || -n "$ROUTEGATE_CHECKSUM_FILE" ]]; then
-    [[ -n "$ROUTEGATE_BUNDLE_FILE" && -n "$ROUTEGATE_CHECKSUM_FILE" ]] \
-      || die "--bundle-file and --checksum-file must be supplied together."
-  fi
-  if [[ -n "$ROUTEGATE_BUNDLE_URL" || -n "$ROUTEGATE_CHECKSUM_URL" ]]; then
-    [[ -n "$ROUTEGATE_BUNDLE_URL" && -n "$ROUTEGATE_CHECKSUM_URL" ]] \
-      || die "--bundle-url and --checksum-url must be supplied together."
-    validate_artifact_url "$ROUTEGATE_BUNDLE_URL" \
-      || die "--bundle-url must be an HTTPS URL without credentials, fragments, or whitespace."
-    validate_artifact_url "$ROUTEGATE_CHECKSUM_URL" \
-      || die "--checksum-url must be an HTTPS URL without credentials, fragments, or whitespace."
-  fi
-  [[ -z "$ROUTEGATE_BUNDLE_FILE" || -z "$ROUTEGATE_BUNDLE_URL" ]] \
-    || die "Choose either a local bundle or an explicit bundle URL, not both."
-}
+  validate_bundle_options
 
 read_os_release_value() {
   local key=$1
@@ -1061,6 +1071,22 @@ artifact_urls() {
   printf '%s\n' \
     "https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${version}/${bundle_name}" \
     "https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${version}/SHA256SUMS"
+}
+
+verify_release_bundle_only() {
+  # Non-mutating operator preflight: no root, service changes or install-state.
+  # Downloads/extraction happen only under a private temporary directory.
+  ROUTEGATE_LOG_FILE=""
+  validate_release_version "$ROUTEGATE_VERSION" || die "Invalid release version: $ROUTEGATE_VERSION"
+  validate_bundle_options
+  local command
+  for command in curl python3 tar sha256sum awk sed dpkg; do
+    command -v "$command" >/dev/null 2>&1 || die "Bundle verification requires $command."
+  done
+  ROUTEGATE_ARCH=$(dpkg --print-architecture 2>/dev/null || true)
+  [[ "$ROUTEGATE_ARCH" == "amd64" ]] || die "Bundle verification currently supports Ubuntu amd64 packages only."
+  prepare_bundle
+  log "Bundle verified: ${ROUTEGATE_RESOLVED_VERSION} (linux/${ROUTEGATE_ARCH}). No packages, services or RouteGate installation state were changed."
 }
 
 prepare_bundle() {
@@ -1774,6 +1800,11 @@ main() {
   trap cleanup EXIT
 
   parse_args "$@"
+  if [[ "$ROUTEGATE_VERIFY_BUNDLE" == "1" ]]; then
+    set_install_stage bundle_verification
+    verify_release_bundle_only
+    return 0
+  fi
   set_install_stage host_preflight
   require_root
   initialize_logging
