@@ -460,7 +460,7 @@ jobs:
       - name: Build website
         run: npm run build
 
-hybrid-native-e2e:
+  hybrid-native-e2e:
     name: Disposable native Hybrid installer
     runs-on: ubuntu-24.04
     timeout-minutes: 35
