@@ -142,8 +142,8 @@ It does **not** require root privileges, DNS, PostgreSQL or an administrator
 email. No packages, services or RouteGate installation-state files are changed.
 
 ```bash
-# Example only: select an actually published, reviewed tag.
-VERSION=v0.1.0
+# Example template: replace with a new reviewed release supporting --verify-bundle.
+VERSION='<reviewed-new-release-tag>'
 curl -fL --proto '=https' --tlsv1.2 \
   "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
   -o routegate-install.sh
