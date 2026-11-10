@@ -146,7 +146,13 @@ sudo grep -Fq 'data-theme="dark"' /var/www/routegate/index.html || die "Stale fr
 curl -fsS --max-time 10 "https://$DOMAIN/api/admin/health" >/dev/null || die "HTTPS health failed"
 curl -fsS --max-time 10 "https://$DOMAIN/" >/dev/null || die "HTTPS frontend failed"
 
-ADMIN_PASSWORD=$(sudo sed -n 's/^ADMIN_PASSWORD=//p' /var/lib/routegate-installer/secrets.env)
+# Completed installs deliberately remove transient secrets.env. Retrieve the
+# owner-only recovery password instead, then prove the temporary secret is gone.
+[[ ! -e /var/lib/routegate-installer/secrets.env ]] || die "Transient bootstrap secret not deleted"
+if sudo grep -q '^ROUTEGATE_BOOTSTRAP_ADMIN_' /etc/routegate/manager.env; then
+  die "Bootstrap values still present in Manager environment"
+fi
+ADMIN_PASSWORD=$(sudo sed -n 's/^Bootstrap password: //p' /root/routegate-first-login.txt)
 [[ -n "$ADMIN_PASSWORD" ]] || die "Missing bootstrap password"
 LOGIN=$(jq -nc --arg login routegate-ci@example.invalid --arg password "$ADMIN_PASSWORD" \
   '{login:$login,password:$password}' |
