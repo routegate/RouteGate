@@ -180,20 +180,13 @@ jobs:
           if [[ "$TAG_NAME" == *-rc.* ]]; then
             release_flags+=(--prerelease)
           fi
+          # Tag builds create candidates only; release publication requires
+          # verified Hybrid deployment and an explicit RG-140 release decision.
+          # Never overwrite assets already associated with a version/tag.
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release upload "$TAG_NAME" \
-              dist/routegate-*.tar.gz \
-              dist/SHA256SUMS \
-              dist/INSTALLER_SHA256SUMS \
-              dist/install.sh \
-              dist/install-agent.sh \
-              dist/install-grafana.sh \
-              dist/release-manifest.json \
-              dist/release-manifest.attestation.json \
-              dist/release-bundles.attestation.json \
-              dist/installer-scripts.attestation.json \
-              --clobber
-          else
+            echo "::error::Release $TAG_NAME already exists. Refusing to replace assets; choose a new version/tag."
+            exit 1
+          fi
             notes_file="docs/release/${TAG_NAME}.md"
             if [[ -f "$notes_file" ]]; then
               gh release create "$TAG_NAME" \
@@ -209,6 +202,7 @@ jobs:
                 dist/installer-scripts.attestation.json \
                 --verify-tag \
                 --notes-file "$notes_file" \
+                --draft \ \
                 "${release_flags[@]}" \
                 --title "RouteGate $TAG_NAME"
             else
@@ -225,7 +219,7 @@ jobs:
                 dist/installer-scripts.attestation.json \
                 --verify-tag \
                 --generate-notes \
+                --draft \ \
                 "${release_flags[@]}" \
                 --title "RouteGate $TAG_NAME"
             fi
-          fi
