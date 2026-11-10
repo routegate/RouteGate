@@ -87,8 +87,8 @@ export const content: Record<Locale, SiteContent> = {
         { title: 'Безопасный первый вход', text: 'Одноразовая ссылка /setup создаёт первого администратора без заводского пароля.' },
       ],
       commandLabel: 'БЫСТРЫЙ СТАРТ',
-      commandTitle: 'Скачать, проверить и установить v0.1.0',
-      commandNote: 'Команда ниже фиксирует стабильный v0.1.0. Возможности ветки main могут опережать стабильный релиз. Не запускайте удалённый скрипт вслепую через curl | sudo bash.',
+      commandTitle: 'Архивный стабильный выпуск v0.1.0',
+      commandNote: 'Это исторический MVP v0.1.0, а не актуальная сборка ветки main: обновлённый интерфейс и новые протоколы в нём отсутствуют. Используйте install.sh только из того же тега, что и архив; не смешивайте с main. Подготовка нового проверенного релиза отслеживается в GitHub issue #715.',
     },
     roadmap: {
       eyebrow: 'ДОРОЖНАЯ КАРТА',
@@ -191,8 +191,8 @@ export const content: Record<Locale, SiteContent> = {
         { title: 'Secure first access', text: 'A single-use /setup link creates the first administrator without a factory password.' },
       ],
       commandLabel: 'QUICK START',
-      commandTitle: 'Download, review, and install v0.1.0',
-      commandNote: 'The command below pins stable v0.1.0. The main branch may contain capabilities that have not reached a stable release yet. Do not blindly pipe a remote script into sudo bash.',
+      commandTitle: 'Legacy stable release v0.1.0',
+      commandNote: 'This is the historical v0.1.0 MVP, not the current main build: the newer UI and protocols are not included. Use the installer from the same tag as the release bundle; never mix it with main. A new verified release is tracked in GitHub issue #715.',
     },
     roadmap: {
       eyebrow: 'ROADMAP',

@@ -4,7 +4,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-ROUTEGATE_REPOSITORY="${ROUTEGATE_REPOSITORY:-ikaevus/RouteGate}"
+ROUTEGATE_REPOSITORY="${ROUTEGATE_REPOSITORY:-routegate/RouteGate}"
 ROUTEGATE_VERSION="${ROUTEGATE_VERSION:-latest}"
 ROUTEGATE_DOMAIN="${ROUTEGATE_DOMAIN:-}"
 ROUTEGATE_EMAIL="${ROUTEGATE_EMAIL:-}"
@@ -16,6 +16,7 @@ ROUTEGATE_BUNDLE_URL="${ROUTEGATE_BUNDLE_URL:-}"
 ROUTEGATE_CHECKSUM_URL="${ROUTEGATE_CHECKSUM_URL:-}"
 ROUTEGATE_ASSUME_YES="${ROUTEGATE_ASSUME_YES:-0}"
 ROUTEGATE_INSTALL_PROMETHEUS="${ROUTEGATE_INSTALL_PROMETHEUS:-}"
+ROUTEGATE_VERIFY_BUNDLE=0
 
 ROUTEGATE_STATE_DIR="/var/lib/routegate-installer"
 ROUTEGATE_STATE_FILE="/etc/routegate/install-state.env"
@@ -71,6 +72,7 @@ Options:
   --admin-email EMAIL       First administrator email. Defaults to --email.
   --server-name NAME        Local All-in-One server name. Defaults to the FQDN.
   --version VERSION         Release tag to install. Defaults to latest.
+  --verify-bundle           Check bundle checksum and compatibility without installing.
   --bundle-file PATH        Use a local release bundle instead of GitHub Releases.
   --checksum-file PATH      SHA256SUMS file for --bundle-file.
   --bundle-url URL          Use an explicit bundle URL.
@@ -178,6 +180,10 @@ parse_args() {
         (($# >= 2)) || die "--checksum-url requires a value."
         ROUTEGATE_CHECKSUM_URL="$2"
         shift 2
+        ;;
+      --verify-bundle)
+        ROUTEGATE_VERIFY_BUNDLE=1
+        shift
         ;;
       --with-prometheus)
         ROUTEGATE_INSTALL_PROMETHEUS=1
@@ -361,20 +367,7 @@ initialize_logging() {
   chmod 0600 "$ROUTEGATE_LOG_FILE"
 }
 
-validate_inputs() {
-  [[ -n "$ROUTEGATE_DOMAIN" ]] || die "--domain is required."
-  [[ -n "$ROUTEGATE_EMAIL" ]] || die "--email is required for HTTPS."
-  validate_domain "$ROUTEGATE_DOMAIN" || die "Invalid FQDN: $ROUTEGATE_DOMAIN"
-  validate_email "$ROUTEGATE_EMAIL" || die "Invalid Let's Encrypt email address."
-  validate_email "$ROUTEGATE_ADMIN_EMAIL" || die "Invalid administrator email address."
-  validate_release_version "$ROUTEGATE_VERSION" || die "Invalid release version: $ROUTEGATE_VERSION"
-  [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "0" || "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] \
-    || die "Prometheus installation choice is invalid."
-  [[ -n "$ROUTEGATE_SERVER_NAME" ]] || die "Server name cannot be empty."
-  [[ ${#ROUTEGATE_SERVER_NAME} -le 128 ]] || die "Server name must be 128 characters or fewer."
-  [[ "$ROUTEGATE_SERVER_NAME" != *$'\n'* && "$ROUTEGATE_SERVER_NAME" != *$'\r'* ]] \
-    || die "Server name cannot contain a line break."
-
+validate_bundle_options() {
   if [[ -n "$ROUTEGATE_BUNDLE_FILE" || -n "$ROUTEGATE_CHECKSUM_FILE" ]]; then
     [[ -n "$ROUTEGATE_BUNDLE_FILE" && -n "$ROUTEGATE_CHECKSUM_FILE" ]] \
       || die "--bundle-file and --checksum-file must be supplied together."
@@ -389,6 +382,23 @@ validate_inputs() {
   fi
   [[ -z "$ROUTEGATE_BUNDLE_FILE" || -z "$ROUTEGATE_BUNDLE_URL" ]] \
     || die "Choose either a local bundle or an explicit bundle URL, not both."
+}
+
+validate_inputs() {
+  [[ -n "$ROUTEGATE_DOMAIN" ]] || die "--domain is required."
+  [[ -n "$ROUTEGATE_EMAIL" ]] || die "--email is required for HTTPS."
+  validate_domain "$ROUTEGATE_DOMAIN" || die "Invalid FQDN: $ROUTEGATE_DOMAIN"
+  validate_email "$ROUTEGATE_EMAIL" || die "Invalid Let's Encrypt email address."
+  validate_email "$ROUTEGATE_ADMIN_EMAIL" || die "Invalid administrator email address."
+  validate_release_version "$ROUTEGATE_VERSION" || die "Invalid release version: $ROUTEGATE_VERSION"
+  [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "0" || "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] \
+    || die "Prometheus installation choice is invalid."
+  [[ -n "$ROUTEGATE_SERVER_NAME" ]] || die "Server name cannot be empty."
+  [[ ${#ROUTEGATE_SERVER_NAME} -le 128 ]] || die "Server name must be 128 characters or fewer."
+  [[ "$ROUTEGATE_SERVER_NAME" != *$'\n'* && "$ROUTEGATE_SERVER_NAME" != *$'\r'* ]] \
+    || die "Server name cannot contain a line break."
+
+  validate_bundle_options
 }
 
 read_os_release_value() {
@@ -569,6 +579,10 @@ validate_platform() {
   command -v runuser >/dev/null 2>&1 || die "runuser is required."
   command -v ss >/dev/null 2>&1 || die "the ss command is required."
   command -v flock >/dev/null 2>&1 || die "flock is required."
+  # Verify the complete pinned release bundle before installing packages or writing ownership state.
+  command -v python3 >/dev/null 2>&1 || die "python3 is required for release metadata preflight."
+  command -v tar >/dev/null 2>&1 || die "tar is required for release archive preflight."
+  command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required for release integrity preflight."
 
   ROUTEGATE_ARCH="$arch"
 }
@@ -959,6 +973,7 @@ confirm_installation() {
   log "  Domain: ${ROUTEGATE_DOMAIN}"
   log "  Administrator: ${ROUTEGATE_ADMIN_EMAIL}"
   log "  Platform: Ubuntu 24.04 LTS / ${ROUTEGATE_ARCH}"
+  log "  Release: ${ROUTEGATE_VERSION} (repository: ${ROUTEGATE_REPOSITORY})"
   log "  TLS: Let's Encrypt"
   if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
     log "  Prometheus: install and manage locally (loopback only)"
@@ -1043,8 +1058,10 @@ resolve_release_version() {
 
   ROUTEGATE_RESOLVED_VERSION=$(curl -fsSL --max-time 30 \
     "https://api.github.com/repos/${ROUTEGATE_REPOSITORY}/releases/latest" \
-    | jq -er '.tag_name') \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])') \
     || die "No published RouteGate release could be resolved."
+  validate_release_version "$ROUTEGATE_RESOLVED_VERSION" \
+    || die "GitHub returned an invalid release version."
 }
 
 artifact_urls() {
@@ -1054,6 +1071,22 @@ artifact_urls() {
   printf '%s\n' \
     "https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${version}/${bundle_name}" \
     "https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${version}/SHA256SUMS"
+}
+
+verify_release_bundle_only() {
+  # Non-mutating operator preflight: no root, service changes or install-state.
+  # Downloads/extraction happen only under a private temporary directory.
+  ROUTEGATE_LOG_FILE=""
+  validate_release_version "$ROUTEGATE_VERSION" || die "Invalid release version: $ROUTEGATE_VERSION"
+  validate_bundle_options
+  local command
+  for command in curl python3 tar sha256sum awk sed dpkg; do
+    command -v "$command" >/dev/null 2>&1 || die "Bundle verification requires $command."
+  done
+  ROUTEGATE_ARCH=$(dpkg --print-architecture 2>/dev/null || true)
+  [[ "$ROUTEGATE_ARCH" == "amd64" ]] || die "Bundle verification currently supports Ubuntu amd64 packages only."
+  prepare_bundle
+  log "Bundle verified: ${ROUTEGATE_RESOLVED_VERSION} (linux/${ROUTEGATE_ARCH}). No packages, services or RouteGate installation state were changed."
 }
 
 prepare_bundle() {
@@ -1131,7 +1164,7 @@ extract_bundle() {
     nginx/routegate.conf.example \
     tools/routegate-recovery \
     metadata/manifest.env; do
-    [[ -e "$extract_dir/$required" ]] || die "Release bundle is missing ${required}."
+    [[ -e "$extract_dir/$required" ]] || die "Release ${ROUTEGATE_RESOLVED_VERSION:-unknown} is incompatible with this installer: missing ${required}. Download install.sh from the SAME pinned release tag and pass --version with that tag; do not mix main and old release bundles."
   done
 
   local updater_file
@@ -1143,7 +1176,7 @@ extract_bundle() {
     routegate-update-transaction.sh \
     routegate-update-verified.sh; do
     [[ -f "$extract_dir/tools/$updater_file" && ! -L "$extract_dir/tools/$updater_file" ]] \
-      || die "Release bundle is missing updater component tools/${updater_file}."
+      || die "Release ${ROUTEGATE_RESOLVED_VERSION:-unknown} is incompatible with this installer: missing tools/${updater_file}. Use a version-matched installer and release bundle, not main plus an older stable release."
   done
 
   local manifest_format manifest_version manifest_os manifest_arch
@@ -1767,6 +1800,11 @@ main() {
   trap cleanup EXIT
 
   parse_args "$@"
+  if [[ "$ROUTEGATE_VERIFY_BUNDLE" == "1" ]]; then
+    set_install_stage bundle_verification
+    verify_release_bundle_only
+    return 0
+  fi
   set_install_stage host_preflight
   require_root
   initialize_logging
@@ -1784,11 +1822,12 @@ main() {
   set_install_stage dns_preflight
   validate_dns
   confirm_installation
+  # Download, checksum and validate the full bundle BEFORE apt/services/RouteGate ownership mutations.
+  set_install_stage bundle
+  prepare_bundle
   initialize_install_state
   set_install_stage dependencies
   install_dependencies
-  set_install_stage bundle
-  prepare_bundle
   set_install_stage platform_files
   install_files
   load_or_create_secrets
