@@ -4,7 +4,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-ROUTEGATE_REPOSITORY="${ROUTEGATE_REPOSITORY:-ikaevus/RouteGate}"
+ROUTEGATE_REPOSITORY="${ROUTEGATE_REPOSITORY:-routegate/RouteGate}"
 ROUTEGATE_VERSION="${ROUTEGATE_VERSION:-latest}"
 ROUTEGATE_DOMAIN="${ROUTEGATE_DOMAIN:-}"
 ROUTEGATE_EMAIL="${ROUTEGATE_EMAIL:-}"
@@ -569,6 +569,10 @@ validate_platform() {
   command -v runuser >/dev/null 2>&1 || die "runuser is required."
   command -v ss >/dev/null 2>&1 || die "the ss command is required."
   command -v flock >/dev/null 2>&1 || die "flock is required."
+  # Verify the complete pinned release bundle before installing packages or writing ownership state.
+  command -v python3 >/dev/null 2>&1 || die "python3 is required for release metadata preflight."
+  command -v tar >/dev/null 2>&1 || die "tar is required for release archive preflight."
+  command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required for release integrity preflight."
 
   ROUTEGATE_ARCH="$arch"
 }
@@ -959,6 +963,7 @@ confirm_installation() {
   log "  Domain: ${ROUTEGATE_DOMAIN}"
   log "  Administrator: ${ROUTEGATE_ADMIN_EMAIL}"
   log "  Platform: Ubuntu 24.04 LTS / ${ROUTEGATE_ARCH}"
+  log "  Release: ${ROUTEGATE_VERSION} (repository: ${ROUTEGATE_REPOSITORY})"
   log "  TLS: Let's Encrypt"
   if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
     log "  Prometheus: install and manage locally (loopback only)"
@@ -1043,8 +1048,10 @@ resolve_release_version() {
 
   ROUTEGATE_RESOLVED_VERSION=$(curl -fsSL --max-time 30 \
     "https://api.github.com/repos/${ROUTEGATE_REPOSITORY}/releases/latest" \
-    | jq -er '.tag_name') \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])') \
     || die "No published RouteGate release could be resolved."
+  validate_release_version "$ROUTEGATE_RESOLVED_VERSION" \
+    || die "GitHub returned an invalid release version."
 }
 
 artifact_urls() {
@@ -1131,7 +1138,7 @@ extract_bundle() {
     nginx/routegate.conf.example \
     tools/routegate-recovery \
     metadata/manifest.env; do
-    [[ -e "$extract_dir/$required" ]] || die "Release bundle is missing ${required}."
+    [[ -e "$extract_dir/$required" ]] || die "Release ${ROUTEGATE_RESOLVED_VERSION:-unknown} is incompatible with this installer: missing ${required}. Download install.sh from the SAME pinned release tag and pass --version with that tag; do not mix main and old release bundles."
   done
 
   local updater_file
@@ -1143,7 +1150,7 @@ extract_bundle() {
     routegate-update-transaction.sh \
     routegate-update-verified.sh; do
     [[ -f "$extract_dir/tools/$updater_file" && ! -L "$extract_dir/tools/$updater_file" ]] \
-      || die "Release bundle is missing updater component tools/${updater_file}."
+      || die "Release ${ROUTEGATE_RESOLVED_VERSION:-unknown} is incompatible with this installer: missing tools/${updater_file}. Use a version-matched installer and release bundle, not main plus an older stable release."
   done
 
   local manifest_format manifest_version manifest_os manifest_arch
@@ -1784,11 +1791,12 @@ main() {
   set_install_stage dns_preflight
   validate_dns
   confirm_installation
+  # Download, checksum and validate the full bundle BEFORE apt/services/RouteGate ownership mutations.
+  set_install_stage bundle
+  prepare_bundle
   initialize_install_state
   set_install_stage dependencies
   install_dependencies
-  set_install_stage bundle
-  prepare_bundle
   set_install_stage platform_files
   install_files
   load_or_create_secrets
