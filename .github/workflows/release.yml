@@ -187,7 +187,7 @@ jobs:
             echo "::error::Release $TAG_NAME already exists. Refusing to replace assets; choose a new version/tag."
             exit 1
           fi
-            notes_file="docs/release/${TAG_NAME}.md"
+          notes_file="docs/release/${TAG_NAME}.md"
             if [[ -f "$notes_file" ]]; then
               gh release create "$TAG_NAME" \
                 dist/routegate-*.tar.gz \
@@ -202,7 +202,7 @@ jobs:
                 dist/installer-scripts.attestation.json \
                 --verify-tag \
                 --notes-file "$notes_file" \
-                --draft \ \
+                --draft \
                 "${release_flags[@]}" \
                 --title "RouteGate $TAG_NAME"
             else
@@ -219,7 +219,7 @@ jobs:
                 dist/installer-scripts.attestation.json \
                 --verify-tag \
                 --generate-notes \
-                --draft \ \
+                --draft \
                 "${release_flags[@]}" \
                 --title "RouteGate $TAG_NAME"
             fi
