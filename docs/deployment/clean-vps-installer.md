@@ -131,6 +131,33 @@ ownership record. A failed bundle compatibility check must not leave an
 ambiguous partial RouteGate installation. This does not replace a full clean-host
 Hybrid deployment test.
 
+### Verify release compatibility without installing
+
+Before installing on a newly provisioned VPS, use the `--verify-bundle` mode
+from the **same intended installer source**. It downloads the archive and
+SHA256SUMS (or uses local `--bundle-file` and `--checksum-file`), checks the
+archive checksum, safe extraction rules, required components, manifest
+version/architecture and CLI compatibility, then deletes its temporary files.
+It does **not** require root privileges, DNS, PostgreSQL or an administrator
+email. No packages, services or RouteGate installation-state files are changed.
+
+```bash
+# Example only: select an actually published, reviewed tag.
+VERSION=v0.1.0
+curl -fL --proto '=https' --tlsv1.2 \
+  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
+  -o routegate-install.sh
+less routegate-install.sh
+bash routegate-install.sh --verify-bundle --version "${VERSION}"
+```
+
+**Note:** `v0.1.0` contains an older bundle contract, so a modern
+`main/install.sh --verify-bundle --version v0.1.0` should report an
+incompatibility rather than modifying the VPS. A matching old tag installer
+may not itself support `--verify-bundle`; this flag is for newer candidate
+installers going forward. Passing this check is **not** full Hybrid E2E
+acceptance, which also requires real DNS/TLS/Agent/runtime tests.
+
 ### Interactive installation
 
 Choose the release first. Download its installer to a file, inspect the exact
