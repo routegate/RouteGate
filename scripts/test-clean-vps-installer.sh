@@ -149,7 +149,7 @@ test_artifact_urls() {
   output=$(artifact_urls v1.2.3 amd64 | paste -sd '|')
   assert_equal \
     "constructs versioned release URLs" \
-    "https://github.com/ikaevus/RouteGate/releases/download/v1.2.3/routegate-v1.2.3-linux-amd64.tar.gz|https://github.com/ikaevus/RouteGate/releases/download/v1.2.3/SHA256SUMS" \
+    "https://github.com/routegate/RouteGate/releases/download/v1.2.3/routegate-v1.2.3-linux-amd64.tar.gz|https://github.com/routegate/RouteGate/releases/download/v1.2.3/SHA256SUMS" \
     "$output"
 }
 
@@ -182,6 +182,62 @@ test_checksum_verification() {
     "rejects a tampered release bundle" \
     bash -c 'source "$1"; ROUTEGATE_LOG_FILE="$2"; verify_bundle_checksum "$3" "$4" "$5"' \
       _ "$ROOT_DIR/install.sh" "$ROUTEGATE_LOG_FILE" "$bundle" "$checksums" "$bundle_name"
+}
+
+test_release_bundle_precedes_host_mutation() {
+  local main_body bundle_line state_line dependencies_line files_line
+  main_body=$(sed -n '/^main() {/,/^}/p' "$ROOT_DIR/install.sh")
+  bundle_line=$(grep -n 'prepare_bundle' <<<"$main_body" | head -n1 | cut -d: -f1)
+  state_line=$(grep -n 'initialize_install_state' <<<"$main_body" | head -n1 | cut -d: -f1)
+  dependencies_line=$(grep -n 'install_dependencies' <<<"$main_body" | head -n1 | cut -d: -f1)
+  files_line=$(grep -n 'install_files' <<<"$main_body" | head -n1 | cut -d: -f1)
+
+  assert_true "release bundle is verified before RouteGate ownership state is written" \
+    test "$bundle_line" -lt "$state_line"
+  assert_true "release bundle is verified before apt mutates the host" \
+    test "$bundle_line" -lt "$dependencies_line"
+  assert_true "release bundle is verified before manager binaries are installed" \
+    test "$bundle_line" -lt "$files_line"
+  assert_true "preflight checks Python before installing packages" \
+    grep -Fq 'command -v python3 >/dev/null' "$ROOT_DIR/install.sh"
+}
+
+test_legacy_bundle_rejected_before_platform_install() {
+  local source_dir="$TEST_TMP/legacy-bundle-source"
+  local archive="$TEST_TMP/legacy-bundle.tar.gz"
+  local work_dir="$TEST_TMP/legacy-bundle-work"
+  local error_file="$TEST_TMP/legacy-bundle.err"
+  local name
+  mkdir -p "$source_dir"/{bin,manager/migrations,frontend,systemd,nginx,tools,metadata}
+  for name in \
+    bin/routegate-manager \
+    bin/routegate-agent \
+    frontend/index.html \
+    systemd/routegate-manager.service \
+    systemd/routegate-agent.service \
+    nginx/routegate.conf.example \
+    tools/routegate-recovery; do
+    printf 'fixture\n' >"$source_dir/$name"
+  done
+  printf 'FORMAT_VERSION=1\nVERSION=v0.1.0\nOS=linux\nARCH=amd64\n' \
+    >"$source_dir/metadata/manifest.env"
+  tar -czf "$archive" -C "$source_dir" .
+  mkdir -p "$work_dir"
+
+  if (
+    ROUTEGATE_WORK_DIR="$work_dir"
+    ROUTEGATE_RESOLVED_VERSION=v0.1.0
+    ROUTEGATE_ARCH=amd64
+    extract_bundle "$archive"
+  ) >"$TEST_TMP/legacy-bundle.out" 2>"$error_file"; then
+    fail "legacy bundle without updater contract is rejected"
+    return
+  fi
+
+  assert_true "legacy release is rejected with an actionable version mismatch error" \
+    grep -Fq 'incompatible with this installer' "$error_file"
+  assert_true "legacy release error explicitly requires a version-matched installer" \
+    grep -Fq 'Use a version-matched installer' "$error_file"
 }
 
 test_piped_entrypoint_guard() {
@@ -529,6 +585,8 @@ test_argument_parsing
 test_artifact_urls
 test_checksum_verification
 test_archive_entry_policy
+test_release_bundle_precedes_host_mutation
+test_legacy_bundle_rejected_before_platform_install
 test_piped_entrypoint_guard
 test_setup_url_contract
 test_manager_environment_public_url
