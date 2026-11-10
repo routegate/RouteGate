@@ -238,6 +238,36 @@ test_legacy_bundle_rejected_before_platform_install() {
     grep -Fq 'incompatible with this installer' "$error_file"
   assert_true "legacy release error explicitly requires a version-matched installer" \
     grep -Fq 'Use a version-matched installer' "$error_file"
+
+  # Exercise the CLI entrypoint as a non-root user, with no DNS name, database,
+  # apt changes, service changes, sudo or RouteGate installation state.
+  local checksum_file="$TEST_TMP/legacy-checksums"
+  (cd "$TEST_TMP" && sha256sum "$(basename "$archive")") >"$checksum_file"
+  if bash "$ROOT_DIR/install.sh" --verify-bundle --version v0.1.0 \
+      --bundle-file "$archive" --checksum-file "$checksum_file" \
+      >"$TEST_TMP/verify-legacy.out" 2>"$TEST_TMP/verify-legacy.err"; then
+    fail "verify-only mode rejects a legacy bundle without mutating the host"
+  else
+    assert_true "verify-only CLI rejects a legacy release before installation" \
+      grep -Fq 'incompatible with this installer' "$TEST_TMP/verify-legacy.err"
+  fi
+
+  local updater
+  for updater in release_manifest.py routegate-update-bootstrap.sh \
+      routegate-update-core.sh routegate-update-role.sh \
+      routegate-update-transaction.sh routegate-update-verified.sh; do
+    printf 'fixture\n' >"$source_dir/tools/$updater"
+  done
+  tar -czf "$archive" -C "$source_dir" .
+  (cd "$TEST_TMP" && sha256sum "$(basename "$archive")") >"$checksum_file"
+  if bash "$ROOT_DIR/install.sh" --verify-bundle --version v0.1.0 \
+      --bundle-file "$archive" --checksum-file "$checksum_file" \
+      >"$TEST_TMP/verify-valid.out" 2>"$TEST_TMP/verify-valid.err"; then
+    assert_true "verify-only CLI reports verified version without installing" \
+      grep -Fq 'No packages, services or RouteGate installation state were changed' "$TEST_TMP/verify-valid.out"
+  else
+    fail "verify-only CLI validates a matching bundle (see $TEST_TMP/verify-valid.err)"
+  fi
 }
 
 test_piped_entrypoint_guard() {
