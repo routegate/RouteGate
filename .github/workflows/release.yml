@@ -188,38 +188,38 @@ jobs:
             exit 1
           fi
           notes_file="docs/release/${TAG_NAME}.md"
-            if [[ -f "$notes_file" ]]; then
-              gh release create "$TAG_NAME" \
-                dist/routegate-*.tar.gz \
-                dist/SHA256SUMS \
-                dist/INSTALLER_SHA256SUMS \
-                dist/install.sh \
-                dist/install-agent.sh \
-                dist/install-grafana.sh \
-                dist/release-manifest.json \
-                dist/release-manifest.attestation.json \
-                dist/release-bundles.attestation.json \
-                dist/installer-scripts.attestation.json \
-                --verify-tag \
-                --notes-file "$notes_file" \
-                --draft \
-                "${release_flags[@]}" \
-                --title "RouteGate $TAG_NAME"
-            else
-              gh release create "$TAG_NAME" \
-                dist/routegate-*.tar.gz \
-                dist/SHA256SUMS \
-                dist/INSTALLER_SHA256SUMS \
-                dist/install.sh \
-                dist/install-agent.sh \
-                dist/install-grafana.sh \
-                dist/release-manifest.json \
-                dist/release-manifest.attestation.json \
-                dist/release-bundles.attestation.json \
-                dist/installer-scripts.attestation.json \
-                --verify-tag \
-                --generate-notes \
-                --draft \
-                "${release_flags[@]}" \
-                --title "RouteGate $TAG_NAME"
-            fi
+          if [[ -f "$notes_file" ]]; then
+            gh release create "$TAG_NAME" \
+              dist/routegate-*.tar.gz \
+              dist/SHA256SUMS \
+              dist/INSTALLER_SHA256SUMS \
+              dist/install.sh \
+              dist/install-agent.sh \
+              dist/install-grafana.sh \
+              dist/release-manifest.json \
+              dist/release-manifest.attestation.json \
+              dist/release-bundles.attestation.json \
+              dist/installer-scripts.attestation.json \
+              --verify-tag \
+              --notes-file "$notes_file" \
+              --draft \
+              "${release_flags[@]}" \
+              --title "RouteGate $TAG_NAME"
+          else
+            gh release create "$TAG_NAME" \
+              dist/routegate-*.tar.gz \
+              dist/SHA256SUMS \
+              dist/INSTALLER_SHA256SUMS \
+              dist/install.sh \
+              dist/install-agent.sh \
+              dist/install-grafana.sh \
+              dist/release-manifest.json \
+              dist/release-manifest.attestation.json \
+              dist/release-bundles.attestation.json \
+              dist/installer-scripts.attestation.json \
+              --verify-tag \
+              --generate-notes \
+              --draft \
+              "${release_flags[@]}" \
+              --title "RouteGate $TAG_NAME"
+          fi
