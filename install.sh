@@ -368,21 +368,20 @@ initialize_logging() {
 }
 
 validate_bundle_options() {
-    if [[ -n "$ROUTEGATE_BUNDLE_FILE" || -n "$ROUTEGATE_CHECKSUM_FILE" ]]; then
-      [[ -n "$ROUTEGATE_BUNDLE_FILE" && -n "$ROUTEGATE_CHECKSUM_FILE" ]] \
-        || die "--bundle-file and --checksum-file must be supplied together."
-    fi
-    if [[ -n "$ROUTEGATE_BUNDLE_URL" || -n "$ROUTEGATE_CHECKSUM_URL" ]]; then
-      [[ -n "$ROUTEGATE_BUNDLE_URL" && -n "$ROUTEGATE_CHECKSUM_URL" ]] \
-        || die "--bundle-url and --checksum-url must be supplied together."
-      validate_artifact_url "$ROUTEGATE_BUNDLE_URL" \
-        || die "--bundle-url must be an HTTPS URL without credentials, fragments, or whitespace."
-      validate_artifact_url "$ROUTEGATE_CHECKSUM_URL" \
-        || die "--checksum-url must be an HTTPS URL without credentials, fragments, or whitespace."
-    fi
-    [[ -z "$ROUTEGATE_BUNDLE_FILE" || -z "$ROUTEGATE_BUNDLE_URL" ]] \
-      || die "Choose either a local bundle or an explicit bundle URL, not both."
-  }
+  if [[ -n "$ROUTEGATE_BUNDLE_FILE" || -n "$ROUTEGATE_CHECKSUM_FILE" ]]; then
+    [[ -n "$ROUTEGATE_BUNDLE_FILE" && -n "$ROUTEGATE_CHECKSUM_FILE" ]] \
+      || die "--bundle-file and --checksum-file must be supplied together."
+  fi
+  if [[ -n "$ROUTEGATE_BUNDLE_URL" || -n "$ROUTEGATE_CHECKSUM_URL" ]]; then
+    [[ -n "$ROUTEGATE_BUNDLE_URL" && -n "$ROUTEGATE_CHECKSUM_URL" ]] \
+      || die "--bundle-url and --checksum-url must be supplied together."
+    validate_artifact_url "$ROUTEGATE_BUNDLE_URL" \
+      || die "--bundle-url must be an HTTPS URL without credentials, fragments, or whitespace."
+    validate_artifact_url "$ROUTEGATE_CHECKSUM_URL" \
+      || die "--checksum-url must be an HTTPS URL without credentials, fragments, or whitespace."
+  fi
+  [[ -z "$ROUTEGATE_BUNDLE_FILE" || -z "$ROUTEGATE_BUNDLE_URL" ]] \
+    || die "Choose either a local bundle or an explicit bundle URL, not both."
 }
 
 validate_inputs() {
@@ -400,6 +399,7 @@ validate_inputs() {
     || die "Server name cannot contain a line break."
 
   validate_bundle_options
+}
 
 read_os_release_value() {
   local key=$1
