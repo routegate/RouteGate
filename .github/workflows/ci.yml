@@ -217,8 +217,8 @@ jobs:
           bash scripts/routegate-update-transaction.sh --help >/dev/null
           bash scripts/routegate-update-verified.sh --help >/dev/null
 
-      - name: Run release manifest tests
-        run: python3 -m unittest scripts/test_release_manifest.py
+      - name: Run release manifest and publication safety tests
+        run: python3 -m unittest scripts/test_release_manifest.py scripts/test_release_publication_gate.py
 
       - name: Test UI publication recovery
         run: python3 -m unittest scripts/test_rg140_session_ui.py
