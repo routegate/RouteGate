@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# GitHub-hosted, disposable Ubuntu 24.04 ONLY. Executes the real install.sh.
+# A local trusted test CA replaces external ACME via a process-local certbot
+# shim. This never tests public Let's Encrypt or a real external VPN client.
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+[[ "${GITHUB_ACTIONS:-}" == true ]] || { echo "GitHub Actions required" >&2; exit 2; }
+[[ "${RUNNER_TEMP:-}" == /home/runner/work/_temp* ]] || {
+  echo "Refusing to touch a non-disposable host" >&2; exit 2;
+}
+[[ $(id -u) != 0 && $(lsb_release -rs) == 24.04 ]] || {
+  echo "Run as unprivileged user on Ubuntu 24.04" >&2; exit 2;
+}
+DOMAIN=routegate-hybrid-ci.invalid
+WORK="$RUNNER_TEMP/routegate-hybrid-clean-host-e2e"
+VERSION=ci-hybrid-e2e
+COMMIT=$(git -C "$ROOT" rev-parse HEAD)
+export ROUTEGATE_E2E_DOMAIN="$DOMAIN" ROUTEGATE_E2E_WORK_DIR="$WORK"
+mkdir -m 0700 "$WORK" "$WORK/bin"
+: >"$WORK/install.stdout"
+chmod 0600 "$WORK/install.stdout"
+log() { printf '[hybrid-e2e] %s\n' "$*"; }
+die() { printf '[hybrid-e2e] ERROR: %s\n' "$*" >&2; exit 1; }
+
+# A fresh runner is mandatory; never take over an existing system.
+[[ ! -e /etc/routegate/install-state.env &&
+   ! -e /usr/local/bin/routegate-manager &&
+   ! -e /etc/nginx/sites-available/routegate ]] ||
+  die "Runner already has RouteGate state"
+for svc in postgresql nginx apache2; do
+  sudo systemctl is-active --quiet "$svc" && die "Existing $svc service" || true
+done
+if sudo ss -ltnH | awk '{split($4,a,":"); p=a[length(a)]; if (p=="80" || p=="443") found=1} END {exit !found}'; then
+  die "TCP 80/443 is already owned"
+fi
+
+log "Preparing official Ubuntu repositories on this one-use runner."
+sudo rm -f /etc/apt/sources.list
+sudo find /etc/apt/sources.list.d -maxdepth 1 -type f -delete
+sudo tee /etc/apt/sources.list.d/ubuntu.sources >/dev/null <<'APT'
+Types: deb
+URIs: http://archive.ubuntu.com/ubuntu
+Suites: noble noble-updates noble-backports
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+Types: deb
+URIs: http://security.ubuntu.com/ubuntu
+Suites: noble-security
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+APT
+
+HOST_IP=$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')
+[[ "$HOST_IP" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || die "Missing test host IP"
+printf '%s %s\n' "$HOST_IP" "$DOMAIN" | sudo tee -a /etc/hosts >/dev/null
+export NO_PROXY="$DOMAIN,localhost,127.0.0.1" no_proxy="$DOMAIN,localhost,127.0.0.1"
+
+# The shim is NOT installed globally or shipped with RouteGate. It only runs
+# inside the isolated GitHub installer process with an exact invalid DNS name.
+cat >"$WORK/bin/certbot" <<'CERTBOT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+[[ "${GITHUB_ACTIONS:-}" == true &&
+   "${ROUTEGATE_E2E_DOMAIN:-}" == routegate-hybrid-ci.invalid &&
+   "${ROUTEGATE_E2E_WORK_DIR:-}" == /home/runner/work/_temp/routegate-hybrid-clean-host-e2e ]] || exit 70
+[[ " $* " == *" --nginx "* && " $* " == *" --redirect "* &&
+   " $* " == *" -d routegate-hybrid-ci.invalid "* ]] || exit 71
+TLS="$ROUTEGATE_E2E_WORK_DIR/tls"
+mkdir -p "$TLS"
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
+  -subj '/CN=RouteGate disposable CI CA' \
+  -keyout "$TLS/ca.key" -out "$TLS/ca.crt" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -nodes -sha256 \
+  -subj '/CN=routegate-hybrid-ci.invalid' \
+  -keyout "$TLS/key.pem" -out "$TLS/request.csr" >/dev/null 2>&1
+printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:routegate-hybrid-ci.invalid\n' >"$TLS/ext"
+openssl x509 -req -sha256 -days 1 \
+  -in "$TLS/request.csr" -CA "$TLS/ca.crt" -CAkey "$TLS/ca.key" \
+  -CAcreateserial -extfile "$TLS/ext" -out "$TLS/cert.pem" >/dev/null 2>&1
+install -m 0644 "$TLS/ca.crt" /usr/local/share/ca-certificates/routegate-disposable-ci.crt
+update-ca-certificates >/dev/null
+install -d -m 0700 /etc/letsencrypt/live/routegate-hybrid-ci.invalid
+install -m 0644 "$TLS/cert.pem" /etc/letsencrypt/live/routegate-hybrid-ci.invalid/fullchain.pem
+install -m 0600 "$TLS/key.pem" /etc/letsencrypt/live/routegate-hybrid-ci.invalid/privkey.pem
+python3 - <<'PY'
+from pathlib import Path
+p = Path('/etc/nginx/sites-available/routegate')
+src = p.read_text()
+mark = '\n# Hybrid Hysteria2'
+assert src.count(mark) == 1
+http, rest = src.split(mark, 1)
+assert http.count('server {') == 1
+domain = 'routegate-hybrid-ci.invalid'
+assert f'server_name {domain};' in http
+tls = http.replace('listen 80;', 'listen 443 ssl;', 1).replace('listen [::]:80;', 'listen [::]:443 ssl;', 1)
+tls = tls.replace(f'server_name {domain};', f'server_name {domain};\n    ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;', 1)
+p.write_text(http + '\n' + tls + mark + rest)
+PY
+nginx -t >/dev/null 2>&1
+systemctl reload nginx
+CERTBOT
+chmod 0700 "$WORK/bin/certbot"
+
+log "Building native exact-commit Manager + Agent + frontend bundle."
+if ! OUTPUT_DIR="$WORK/dist" VERSION="$VERSION" COMMIT="$COMMIT" ARCHITECTURES=amd64 \
+  "$ROOT/scripts/build-release-bundle.sh" >"$WORK/build.log" 2>&1; then
+  die "Native bundle build failed (private runner log)"
+fi
+BUNDLE="$WORK/dist/routegate-$VERSION-linux-amd64.tar.gz"
+CHECKSUM="$WORK/dist/SHA256SUMS"
+[[ -s "$BUNDLE" && -s "$CHECKSUM" ]] || die "Release bundle/checksum missing"
+
+log "Installing all-in-one Hybrid on disposable Ubuntu with test TLS."
+if ! sudo -n env \
+  "PATH=$WORK/bin:$PATH" "GITHUB_ACTIONS=true" "RUNNER_TEMP=$RUNNER_TEMP" \
+  "ROUTEGATE_E2E_DOMAIN=$DOMAIN" "ROUTEGATE_E2E_WORK_DIR=$WORK" \
+  "NO_PROXY=$NO_PROXY" "no_proxy=$no_proxy" \
+  bash "$ROOT/install.sh" \
+    --domain "$DOMAIN" --email routegate-ci@example.invalid \
+    --admin-email routegate-ci@example.invalid --server-name "$DOMAIN" \
+    --version "$VERSION" --bundle-file "$BUNDLE" --checksum-file "$CHECKSUM" \
+    --without-prometheus --yes >"$WORK/install.stdout" 2>&1; then
+  # Installer stdout can contain a first-login bearer token: never display it.
+  sudo grep -E 'ERROR at stage|stage=.*ERROR' /var/log/routegate-installer.log |
+    sed -E 's@https?://[^[:space:]]+@[redacted-url]@g' >&2 || true
+  die "Hybrid install failed; private diagnostics remain on disposable runner"
+fi
+
+log "Checking real systemd services, persistent Agent and HTTPS frontend."
+sudo grep -Fxq 'STATUS=complete' /etc/routegate/install-state.env || die "Install not complete"
+sudo grep -Fxq "VERSION=$VERSION" /etc/routegate/install-state.env || die "Wrong version"
+sudo grep -q '^agent_id:' /etc/routegate/agent.yaml || die "Agent not registered"
+sudo grep -q '^agent_token:' /etc/routegate/agent.yaml || die "Agent has no persistent token"
+if sudo grep -q '^registration_token:' /etc/routegate/agent.yaml; then
+  die "One-use registration token still present"
+fi
+for svc in postgresql nginx routegate-manager routegate-agent certbot.timer; do
+  sudo systemctl is-active --quiet "$svc" || die "$svc inactive"
+done
+sudo grep -Fq 'data-theme="dark"' /var/www/routegate/index.html || die "Stale frontend"
+curl -fsS --max-time 10 "https://$DOMAIN/api/admin/health" >/dev/null || die "HTTPS health failed"
+curl -fsS --max-time 10 "https://$DOMAIN/" >/dev/null || die "HTTPS frontend failed"
+
+ADMIN_PASSWORD=$(sudo sed -n 's/^ADMIN_PASSWORD=//p' /var/lib/routegate-installer/secrets.env)
+[[ -n "$ADMIN_PASSWORD" ]] || die "Missing bootstrap password"
+LOGIN=$(jq -nc --arg login routegate-ci@example.invalid --arg password "$ADMIN_PASSWORD" \
+  '{login:$login,password:$password}' |
+  curl -fsS --max-time 15 -H 'Content-Type: application/json' \
+  --data-binary @- "https://$DOMAIN/api/v1/auth/login") || die "HTTPS admin login failed"
+ADMIN_TOKEN=$(jq -er '.token' <<<"$LOGIN") || die "Admin token missing"
+SERVER=$(curl -fsS --max-time 15 -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://$DOMAIN/api/v1/servers?search=$DOMAIN") || die "Cannot list servers"
+SERVER_ID=$(jq -er --arg name "$DOMAIN" '.items[] | select(.name == $name) | .id' <<<"$SERVER" | head -n1) ||
+  die "Local Hybrid server missing"
+[[ -n "$SERVER_ID" ]] || die "Hybrid server ID empty"
+DETAIL=$(curl -fsS --max-time 15 -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://$DOMAIN/api/v1/servers/$SERVER_ID") || die "Cannot inspect Agent"
+jq -e '.agent.id != null' <<<"$DETAIL" >/dev/null || die "Hybrid Agent not bound"
+unset ADMIN_PASSWORD LOGIN ADMIN_TOKEN SERVER DETAIL
+
+log "Restarting installed Manager and Agent."
+sudo systemctl restart routegate-manager routegate-agent
+for i in $(seq 1 30); do
+  if curl -fsS --max-time 3 "https://$DOMAIN/api/admin/health" >/dev/null 2>&1 &&
+    sudo systemctl is-active --quiet routegate-agent; then break; fi
+  sleep 2
+done
+curl -fsS --max-time 5 "https://$DOMAIN/api/admin/health" >/dev/null ||
+  die "Manager unhealthy after restart"
+sudo systemctl is-active --quiet routegate-agent || die "Agent inactive after restart"
+
+log "PASS: native Hybrid install -> PostgreSQL -> Manager -> HTTPS test cert -> Agent -> admin login -> restart"
+log "OUT OF SCOPE: public Let's Encrypt, actual one-use setup consumption, VPN runtime apply, external client."
