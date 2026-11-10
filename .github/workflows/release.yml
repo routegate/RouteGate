@@ -180,8 +180,9 @@ jobs:
           if [[ "$TAG_NAME" == *-rc.* ]]; then
             release_flags+=(--prerelease)
           fi
-          # Tag builds create candidates only; release publication requires
-          # verified Hybrid deployment and an explicit RG-140 release decision.
+          # Tag builds create candidates only; public release requires
+          # verified Hybrid E2E and explicit RG-140 review.
+          # See docs/release/promotion-gate.md before manually publishing.
           # Never overwrite assets already associated with a version/tag.
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
             echo "::error::Release $TAG_NAME already exists. Refusing to replace assets; choose a new version/tag."
