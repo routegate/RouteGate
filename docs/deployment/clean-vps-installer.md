@@ -116,6 +116,21 @@ project's supply-chain trust boundary.
 
 ## Install RouteGate
 
+> **Release parity notice (2026-11-11):** The public `v0.1.0` MVP is a historical
+> stable release. It does **not** include the newer dark-only UI or the extensive
+> `main` features. Always fetch `install.sh` from the **same immutable release
+> tag** as the bundle requested via `--version`. Do **not** combine a current
+> `main/install.sh` with `--version v0.1.0` or `latest`: current main requires
+> updated bundle components absent from the old stable archive. The next
+> current-version release and full clean-host Hybrid validation are tracked in
+> [issue #715](https://github.com/routegate/RouteGate/issues/715).
+
+The supported current-main installer verifies/downloads/extracts its entire
+release bundle *before* installing platform packages or creating an install-state
+ownership record. A failed bundle compatibility check must not leave an
+ambiguous partial RouteGate installation. This does not replace a full clean-host
+Hybrid deployment test.
+
 ### Interactive installation
 
 Choose the release first. Download its installer to a file, inspect the exact
