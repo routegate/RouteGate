@@ -167,6 +167,49 @@ SERVER_ID=$(jq -er --arg name "$DOMAIN" '.items[] | select(.name == $name) | .id
 DETAIL=$(curl -fsS --max-time 15 -H "Authorization: Bearer $ADMIN_TOKEN" \
   "https://$DOMAIN/api/v1/servers/$SERVER_ID") || die "Cannot inspect Agent"
 jq -e '.agent.id != null' <<<"$DETAIL" >/dev/null || die "Hybrid Agent not bound"
+# Complete the actual first-administrator /setup lifecycle through nginx HTTPS.
+# All bearer tokens and passwords stay in local process memory and the
+# owner-only recovery file; never echo them to GitHub Actions.
+[[ $(sudo stat -c '%a' /root/routegate-first-login.txt) == 600 ]] ||
+  die "First-login recovery file is not root-only"
+SETUP_URL=$(sudo sed -n 's/^Setup URL: //p' /root/routegate-first-login.txt)
+[[ "$SETUP_URL" == "https://$DOMAIN/setup#token="* ]] ||
+  die "Missing or malformed one-use setup URL"
+SETUP_TOKEN=${SETUP_URL#*#token=}
+curl -fsS --max-time 10 "https://$DOMAIN/setup" >/dev/null ||
+  die "Browser setup route is unavailable"
+INSPECT=$(jq -nc --arg token "$SETUP_TOKEN" '{token:$token}' |
+  curl -fsS --max-time 15 -H 'Content-Type: application/json' \
+    --data-binary @- "https://$DOMAIN/api/v1/auth/initial-setup/inspect") ||
+  die "Setup token cannot be inspected"
+jq -e '.email == "routegate-ci@example.invalid"' <<<"$INSPECT" >/dev/null ||
+  die "Setup token is bound to wrong administrator"
+NEW_PASSWORD="RouteGate-CI-$(openssl rand -hex 14)!"
+ACTIVATION=$(jq -nc --arg token "$SETUP_TOKEN" --arg password "$NEW_PASSWORD" \
+  '{token:$token,new_password:$password}' |
+  curl -fsS --max-time 15 -H 'Content-Type: application/json' \
+    --data-binary @- "https://$DOMAIN/api/v1/auth/initial-setup/complete") ||
+  die "First-administrator setup activation failed"
+SESSION_TOKEN=$(jq -er '.token' <<<"$ACTIVATION") ||
+  die "First-setup activation did not create a session"
+curl -fsS --max-time 15 -H "Authorization: Bearer $SESSION_TOKEN" \
+  "https://$DOMAIN/api/v1/auth/me" >/dev/null ||
+  die "New administrator session is invalid"
+# The one-use bearer must be consumed, not merely flagged in the UI.
+OLD_LINK_STATUS=$(jq -nc --arg token "$SETUP_TOKEN" '{token:$token}' |
+  curl -sS --max-time 15 -o /dev/null -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    --data-binary @- "https://$DOMAIN/api/v1/auth/initial-setup/inspect")
+[[ "$OLD_LINK_STATUS" == 410 ]] || die "Consumed setup token can still be used"
+# Old bootstrap password must be useless after activation.
+OLD_LOGIN_STATUS=$(jq -nc --arg login routegate-ci@example.invalid \
+  --arg password "$ADMIN_PASSWORD" '{login:$login,password:$password}' |
+  curl -sS --max-time 15 -o /dev/null -w '%{http_code}' \
+    -H 'Content-Type: application/json' --data-binary @- \
+    "https://$DOMAIN/api/v1/auth/login")
+[[ "$OLD_LOGIN_STATUS" == 401 ]] ||
+  die "Old bootstrap password still authenticates after setup"
+unset SETUP_URL SETUP_TOKEN INSPECT NEW_PASSWORD ACTIVATION SESSION_TOKEN OLD_LINK_STATUS OLD_LOGIN_STATUS
 unset ADMIN_PASSWORD LOGIN ADMIN_TOKEN SERVER DETAIL
 
 log "Restarting installed Manager and Agent."
@@ -180,5 +223,5 @@ curl -fsS --max-time 5 "https://$DOMAIN/api/admin/health" >/dev/null ||
   die "Manager unhealthy after restart"
 sudo systemctl is-active --quiet routegate-agent || die "Agent inactive after restart"
 
-log "PASS: native Hybrid install -> PostgreSQL -> Manager -> HTTPS test cert -> Agent -> admin login -> restart"
-log "OUT OF SCOPE: public Let's Encrypt, actual one-use setup consumption, VPN runtime apply, external client."
+log "PASS: native Hybrid install -> PostgreSQL -> Manager -> test HTTPS -> Agent -> one-use /setup -> restart"
+log "OUT OF SCOPE: public Let's Encrypt, VPN runtime apply, external client, full reboot."
