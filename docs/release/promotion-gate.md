@@ -1,6 +1,6 @@
 # RouteGate release promotion gate
 
-Status: **manual review required**. This gate applies to public stable tags as well as release candidates. The GitHub Release workflow creates a **draft**, not a publicly downloadable release. The website's historical v0.1.0 quick start is not automatically changed.
+Status: **manual review required**. This gate applies to public stable tags as well as release candidates. The GitHub Release workflow creates a **draft**, not a publicly downloadable release. The public Quick Start must be independently checked against the **published** stable release. The legacy v0.1.0 MVP must not be offered as a default automatic install while the current release is unverified (see #720).
 
 ## Why
 
