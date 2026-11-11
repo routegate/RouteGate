@@ -46,6 +46,9 @@ jobs:
           test -s scripts/check-release-tag-identity.sh
           test -s scripts/test-release-tag-identity.sh
           grep -Fq 'bash scripts/test-release-tag-identity.sh' .github/workflows/ci.yml
+          test -s scripts/check-manual-release-source.sh
+          test -s scripts/test-manual-release-source.sh
+          grep -Fq 'bash scripts/test-manual-release-source.sh' .github/workflows/ci.yml
 
       - name: Reject tags not in canonical main history
         if: github.event_name == 'push'
@@ -65,6 +68,17 @@ jobs:
           # The tag may have been moved or deleted after triggering CI.
           # Compare the live origin ref, not the locally checked out tag.
           bash scripts/check-release-tag-identity.sh "$REF_NAME" "$SOURCE_SHA"
+
+      - name: Require manual rehearsal from the current main commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EVENT_NAME: ${{ github.event_name }
+          EVENT_REF: ${{ github.ref }
+          SOURCE_SHA: ${{ github.sha }
+          MANUAL_VERSION: ${{ inputs.version }
+        run: |
+          bash scripts/check-manual-release-source.sh \
+            "$EVENT_NAME" "$EVENT_REF" "$SOURCE_SHA" "$MANUAL_VERSION"
 
   ci:
     name: Same-commit RouteGate CI including native Hybrid E2E
@@ -98,6 +112,17 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Recheck manual release origin before building
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EVENT_NAME: ${{ github.event_name }
+          EVENT_REF: ${{ github.ref }
+          SOURCE_SHA: ${{ github.sha }
+          MANUAL_VERSION: ${{ inputs.version }
+        run: |
+          bash scripts/check-manual-release-source.sh \
+            "$EVENT_NAME" "$EVENT_REF" "$SOURCE_SHA" "$MANUAL_VERSION"
 
       - name: Resolve bundle version
         id: version
@@ -213,6 +238,17 @@ jobs:
               --predicate-type "$PREDICATE_TYPE" \
               --bundle dist/installer-scripts.attestation.json
           done
+
+      - name: Recheck manual main before preserving attested artifacts
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EVENT_NAME: ${{ github.event_name }
+          EVENT_REF: ${{ github.ref }
+          SOURCE_SHA: ${{ github.sha }
+          MANUAL_VERSION: ${{ inputs.version }
+        run: |
+          bash scripts/check-manual-release-source.sh \
+            "$EVENT_NAME" "$EVENT_REF" "$SOURCE_SHA" "$MANUAL_VERSION"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
