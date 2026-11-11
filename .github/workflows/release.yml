@@ -18,8 +18,54 @@ permissions:
   artifact-metadata: write
 
 jobs:
+  source-policy:
+    name: Enforce tagged source and Hybrid CI policy
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Require included native Hybrid acceptance test
+        run: |
+          # Fail CLOSED when a release tag references a commit that predates
+          # the tested Clean VPS/Hybrid pipeline. The reusable CI must contain
+          # the exact disposable native smoke job, not just source-unit tests.
+          test -s scripts/hybrid-disposable-installer-e2e.sh
+          test -s scripts/hybrid-vpn-e2e.py
+          grep -Eq '^  hybrid-native-e2e:' .github/workflows/ci.yml
+          grep -Fq 'bash scripts/hybrid-disposable-installer-e2e.sh' .github/workflows/ci.yml
+          grep -Fq 'python3 "$ROOT/scripts/hybrid-vpn-e2e.py"' scripts/hybrid-disposable-installer-e2e.sh
+
+      - name: Reject tags not in canonical main history
+        if: github.event_name == 'push'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || {
+            echo "::error::Release tags must be semantic vX.Y.Z or vX.Y.Z-rc.N."
+            exit 1
+          }
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main || {
+            echo "::error::Refusing to build a release tag outside reviewed main history."
+            exit 1
+          }
+
+  ci:
+    name: Same-commit RouteGate CI including native Hybrid E2E
+    needs: source-policy
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   bundles:
     name: Build native release bundles
+    needs: ci
     runs-on: ubuntu-24.04
 
     steps:
