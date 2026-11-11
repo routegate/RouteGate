@@ -1442,19 +1442,31 @@ prepare_verified_grafana_installer() {
     || die "Grafana installer requires a resolved pinned RouteGate release."
   validate_release_version "$ROUTEGATE_RESOLVED_VERSION" \
     || die "Grafana installer release version is invalid."
-  [[ -z "$ROUTEGATE_BUNDLE_FILE" && -z "$ROUTEGATE_BUNDLE_URL" ]] \
-    || die "Combined Grafana install currently requires a published release, not local or custom bundle paths."
+  [[ -z "$ROUTEGATE_BUNDLE_URL" ]] \
+    || die "Custom bundle URLs cannot supply a verified Grafana sidecar; use a published release or a complete local candidate directory."
   [[ -n "$ROUTEGATE_WORK_DIR" ]] || ROUTEGATE_WORK_DIR=$(mktemp -d /tmp/routegate-installer.XXXXXX)
 
-  local url_base="https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${ROUTEGATE_RESOLVED_VERSION}"
   local checksums="$ROUTEGATE_WORK_DIR/INSTALLER_SHA256SUMS"
   ROUTEGATE_GRAFANA_SCRIPT="$ROUTEGATE_WORK_DIR/install-grafana.sh"
-  curl -fL --proto '=https' --tlsv1.2 --retry 3 --max-time 90 \
-    -o "$checksums" "$url_base/INSTALLER_SHA256SUMS" \
-    || die "Could not download pinned Grafana installer checksums."
-  curl -fL --proto '=https' --tlsv1.2 --retry 3 --max-time 90 \
-    -o "$ROUTEGATE_GRAFANA_SCRIPT" "$url_base/install-grafana.sh" \
-    || die "Could not download pinned Grafana installer."
+  if [[ -n "$ROUTEGATE_BUNDLE_FILE" ]]; then
+    # Disposable candidate E2E only: require the exact release builder's
+    # installer + checksums next to the candidate bundle. Never use a
+    # script from the current moving source tree as an implicit fallback.
+    local local_dir
+    local_dir=$(dirname -- "$ROUTEGATE_BUNDLE_FILE")
+    [[ -f "$local_dir/INSTALLER_SHA256SUMS" && -f "$local_dir/install-grafana.sh" ]] \
+      || die "Local candidate with Grafana requires colocated install-grafana.sh and INSTALLER_SHA256SUMS."
+    cp -- "$local_dir/INSTALLER_SHA256SUMS" "$checksums"
+    cp -- "$local_dir/install-grafana.sh" "$ROUTEGATE_GRAFANA_SCRIPT"
+  else
+    local url_base="https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${ROUTEGATE_RESOLVED_VERSION}"
+    curl -fL --proto '=https' --tlsv1.2 --retry 3 --max-time 90 \
+      -o "$checksums" "$url_base/INSTALLER_SHA256SUMS" \
+      || die "Could not download pinned Grafana installer checksums."
+    curl -fL --proto '=https' --tlsv1.2 --retry 3 --max-time 90 \
+      -o "$ROUTEGATE_GRAFANA_SCRIPT" "$url_base/install-grafana.sh" \
+      || die "Could not download pinned Grafana installer."
+  fi
   local expected actual
   expected=$(awk '$2 == "install-grafana.sh" || $2 == "*install-grafana.sh" {print $1; exit}' "$checksums")
   [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] \
