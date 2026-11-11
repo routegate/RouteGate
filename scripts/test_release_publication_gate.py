@@ -31,7 +31,7 @@ class ReleasePublicationGateTests(unittest.TestCase):
         self.assertIn("uses: ./.github/workflows/ci.yml", self.workflow)
         self.assertIn("    needs: ci", self.workflow)
         policy = self.workflow.split("  source-policy:", 1)[1].split(
-            "\\n  ci:", 1
+            "\n  ci:", 1
         )[0]
         self.assertIn("scripts/hybrid-disposable-installer-e2e.sh", policy)
         self.assertIn("scripts/hybrid-vpn-e2e.py", policy)
