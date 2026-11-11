@@ -66,6 +66,29 @@ class ReleasePublicationGateTests(unittest.TestCase):
         self.assertIn("exit 1", guard)
         self.assertIn("Refusing to replace assets", guard)
 
+    def test_published_bundle_has_dark_only_frontend_contract(self):
+        # A successful source-level UI test is insufficient if release
+        # packaging accidentally ships an older index.html. Enforce that
+        # the actual tarball is inspected BEFORE creating a draft.
+        extract = 'index_html=$(tar -xOzf "$bundle" ./frontend/index.html)'
+        self.assertIn(extract, self.workflow)
+        self.assertIn('data-theme="dark"', self.workflow)
+        self.assertIn('color-scheme: dark', self.workflow)
+        self.assertIn("stale frontend (dark-only UI contract missing)", self.workflow)
+        bundle_check = self.workflow.index(extract)
+        attest = self.workflow.index("Attest release manifest provenance")
+        publish = self.workflow.index("Publish GitHub release assets")
+        self.assertLess(bundle_check, attest)
+        self.assertLess(attest, publish)
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "index_html=$(tar -xOzf routegate-ci-test-linux-amd64.tar.gz ./frontend/index.html)",
+            ci,
+        )
+        self.assertIn("CI bundle contains outdated frontend appearance.", ci)
+
     def test_attestations_and_checksums_present_before_draft(self):
         verify = self.workflow.index(
             "Verify release manifest, checksums and bundle structure"
