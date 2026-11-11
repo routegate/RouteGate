@@ -248,6 +248,7 @@ func (r *Runner) reportTrafficUsage(ctx context.Context) error {
 }
 
 func (r *Runner) processNextTask(ctx context.Context) error {
+	r.replayRuntimeResult(ctx)
 	task, err := r.client.NextTask(ctx, r.cfg.AgentToken)
 	if err != nil {
 		return err
