@@ -13,6 +13,18 @@ import (
 )
 
 func Migrate(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, logger *slog.Logger) error {
+	// Check the entire migration catalog BEFORE any SQL, including CREATE TABLE.
+	// schema_migrations keys by full filename; two different 000160_* names
+	// would otherwise both be treated as unapplied and executed.
+	files, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
+	if err != nil {
+		return fmt.Errorf("list migration files: %w", err)
+	}
+	sort.Strings(files)
+	if err := validateMigrationOrdinals(files); err != nil {
+		return err
+	}
+
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version TEXT PRIMARY KEY,
@@ -21,13 +33,6 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, logg
 	`); err != nil {
 		return fmt.Errorf("create schema_migrations table: %w", err)
 	}
-
-	files, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
-	if err != nil {
-		return fmt.Errorf("list migration files: %w", err)
-	}
-
-	sort.Strings(files)
 
 	for _, file := range files {
 		version := strings.TrimSuffix(filepath.Base(file), ".up.sql")
@@ -68,6 +73,37 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, logg
 		logger.Info("applied migration", "version", version)
 	}
 
+	return nil
+}
+
+// validateMigrationOrdinals is a fail-closed upgrade gate. Migration names
+// record a unique, monotonically sortable decimal ordinal followed by "_"
+// and a descriptive suffix. Comparing canonical decimal prefixes also
+// refuses ambiguous padding (e.g. 000160_foo and 160_bar). Never rename an
+// already-applied migration to resolve a conflict: allocate a fresh ordinal.
+func validateMigrationOrdinals(files []string) error {
+	seen := make(map[string]string, len(files))
+	for _, path := range files {
+		name := filepath.Base(path)
+		version := strings.TrimSuffix(name, ".up.sql")
+		raw, suffix, ok := strings.Cut(version, "_")
+		if !ok || suffix == "" || raw == "" {
+			return fmt.Errorf("invalid migration name %q: require <decimal>_<description>.up.sql", name)
+		}
+		for _, digit := range raw {
+			if digit < '0' || digit > '9' {
+				return fmt.Errorf("invalid migration ordinal in %q: require decimal prefix", name)
+			}
+		}
+		ordinal := strings.TrimLeft(raw, "0")
+		if ordinal == "" {
+			ordinal = "0"
+		}
+		if original, conflict := seen[ordinal]; conflict {
+			return fmt.Errorf("ambiguous migration ordinal %s: %q conflicts with %q; assign a new forward-only ordinal", ordinal, original, name)
+		}
+		seen[ordinal] = name
+	}
 	return nil
 }
 
