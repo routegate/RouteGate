@@ -327,6 +327,9 @@ if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
       --admin-email routegate-ci@example.invalid --server-name "$DOMAIN" \
       --version "$VERSION" --bundle-file "$BUNDLE" --checksum-file "$CHECKSUM" \
       --with-grafana --yes >"$WORK/grafana-rerun.stdout" 2>&1; then
+    # Explicitly print only diagnostic stage/error lines. Never expose the
+    # private initial admin setup URL, Grafana password, or full stdout.
+    grep -E '^\\[RouteGate( Grafana)?\\] (ERROR|WARNING)' "$WORK/grafana-rerun.stdout" >&2 || true
     die "Completed RouteGate+Grafana installation was not idempotent"
   fi
   grep -Fq 'RouteGate is already installed and healthy.' "$WORK/grafana-rerun.stdout" ||
