@@ -80,6 +80,14 @@ class ReleasePublicationGateTests(unittest.TestCase):
         publish = self.workflow.index("Publish GitHub release assets")
         self.assertLess(bundle_check, attest)
         self.assertLess(attest, publish)
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "index_html=$(tar -xOzf routegate-ci-test-linux-amd64.tar.gz ./frontend/index.html)",
+            ci,
+        )
+        self.assertIn("CI bundle contains outdated frontend appearance.", ci)
 
     def test_attestations_and_checksums_present_before_draft(self):
         verify = self.workflow.index(
