@@ -72,10 +72,10 @@ jobs:
       - name: Require manual rehearsal from the current main commit
         if: github.event_name == 'workflow_dispatch'
         env:
-          EVENT_NAME: ${{ github.event_name }
-          EVENT_REF: ${{ github.ref }
-          SOURCE_SHA: ${{ github.sha }
-          MANUAL_VERSION: ${{ inputs.version }
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+          MANUAL_VERSION: ${{ inputs.version }}
         run: |
           bash scripts/check-manual-release-source.sh \
             "$EVENT_NAME" "$EVENT_REF" "$SOURCE_SHA" "$MANUAL_VERSION"
@@ -116,10 +116,10 @@ jobs:
       - name: Recheck manual release origin before building
         if: github.event_name == 'workflow_dispatch'
         env:
-          EVENT_NAME: ${{ github.event_name }
-          EVENT_REF: ${{ github.ref }
-          SOURCE_SHA: ${{ github.sha }
-          MANUAL_VERSION: ${{ inputs.version }
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+          MANUAL_VERSION: ${{ inputs.version }}
         run: |
           bash scripts/check-manual-release-source.sh \
             "$EVENT_NAME" "$EVENT_REF" "$SOURCE_SHA" "$MANUAL_VERSION"
@@ -242,10 +242,10 @@ jobs:
       - name: Recheck manual main before preserving attested artifacts
         if: github.event_name == 'workflow_dispatch'
         env:
-          EVENT_NAME: ${{ github.event_name }
-          EVENT_REF: ${{ github.ref }
-          SOURCE_SHA: ${{ github.sha }
-          MANUAL_VERSION: ${{ inputs.version }
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+          MANUAL_VERSION: ${{ inputs.version }}
         run: |
           bash scripts/check-manual-release-source.sh \
             "$EVENT_NAME" "$EVENT_REF" "$SOURCE_SHA" "$MANUAL_VERSION"
