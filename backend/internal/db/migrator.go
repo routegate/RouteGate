@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,12 +17,26 @@ import (
 // creating schema_migrations. Distinct names with the same ordinal (e.g.
 // 000160_traffic_* and 000160_revocation_*) would otherwise both apply because
 // the existing journal keys by complete filename rather than sequence.
-// Lettered ordinals like 000150a and 000150b are intentionally distinct.
+// Pre-160 duplicate numeric ordinals are grandfathered because they are
+// already part of RouteGate's released schema history. Starting at 000160,
+// lettered suffixes such as 000160a/000160b remain distinct sequence slots.
 func validateMigrationSequence(files []string) error {
 	seen := make(map[string]string, len(files))
 	for _, file := range files {
 		version := strings.TrimSuffix(filepath.Base(file), ".up.sql")
 		ordinal := strings.SplitN(version, "_", 2)[0]
+		// Earlier RouteGate migrations intentionally used the same numeric
+		// ordinal for multiple migrations (for example 000003). They are
+		// already deployed and must remain backward compatible. From the
+		// current published migration 000160 onward, never allow two
+		// different names at one ordinal. Lettered suffixes remain distinct.
+		if len(ordinal) < 6 {
+			continue
+		}
+		number, err := strconv.Atoi(ordinal[:6])
+		if err != nil || number < 160 {
+			continue
+		}
 		if previous, exists := seen[ordinal]; exists {
 			return fmt.Errorf("migration sequence %q reused by %q and %q", ordinal, previous, version)
 		}
