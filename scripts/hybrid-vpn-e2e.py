@@ -112,15 +112,19 @@ def public_subscription(url: str, client: str) -> tuple[int, dict, bytes]:
         with opener.open(request, timeout=15) as response:
             code = response.status
             headers = dict(response.headers.items())
+            policy_values = tuple(response.headers.get_all("Referrer-Policy", []))
             body = response.read(16385)
     except HTTPError as error:
         code = error.code
         headers = dict(error.headers.items())
+        policy_values = tuple(error.headers.get_all("Referrer-Policy", []))
         body = error.read(16385)
     except (URLError, TimeoutError):
         raise RuntimeError("Canonical HTTPS subscription request failed") from None
     require(len(body) <= 16384, "Subscription response unexpectedly large")
-    return code, {k.lower(): v for k, v in headers.items()}, body
+    safe_headers = {k.lower(): v for k, v in headers.items()}
+    safe_headers["_referrer_policies"] = policy_values
+    return code, safe_headers, body
 
 
 def require_deployed_subscription(url: str, client: str, applied_link: str) -> bytes:
@@ -129,8 +133,8 @@ def require_deployed_subscription(url: str, client: str, applied_link: str) -> b
             f"Applied account subscription returned HTTP {code} instead of 200")
     require(headers.get("cache-control") == "no-store, max-age=0",
             "Subscription response is cacheable")
-    require(headers.get("referrer-policy") == "no-referrer",
-            "Subscription response can leak a bearer through referrers")
+    require(headers.get("_referrer_policies") == ("no-referrer",),
+            "Subscription HTTPS response has absent, conflicting or duplicate referrer policies")
     require(headers.get("x-routegate-delivery-format") == "base64",
             "Third-party client subscription is not portable Base64")
     require(headers.get("x-routegate-protocols") == "vless",
@@ -147,8 +151,10 @@ def require_deployed_subscription(url: str, client: str, applied_link: str) -> b
 
 
 def require_unavailable_subscription(url: str, client: str, expected: int) -> None:
-    code, _, body = public_subscription(url, client)
+    code, headers, body = public_subscription(url, client)
     require(code == expected, f"Subscription expected HTTP {expected}, got {code}")
+    require(headers.get("_referrer_policies") == ("no-referrer",),
+            "Unready or revoked subscription has conflicting referrer policies")
     require(b"vless://" not in body and b"reality" not in body.lower(),
             "Unready or revoked subscription leaked VPN credentials")
 
