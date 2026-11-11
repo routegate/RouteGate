@@ -160,6 +160,53 @@ func TestCredentialRemovalSystemdRealityTraffic(t *testing.T) {
 		t.Fatal("zero-user runtime accepted UUID")
 	}
 	t.Log("last-account removal retains listener and rejects both cached UUIDs")
+	// A historical result must not become unlock permission after a restart.
+	// Reuse only this disposable unit to exercise the production observer.
+	lease, err := BeginRuntimeMutation(e.receiptDir, task.ID, TaskKindVPNCoreService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := CaptureRuntimeRecoveryWitness(ctx, e.activePath, adapter)
+	if err != nil {
+		lease.Close()
+		t.Fatal(err)
+	}
+	if _, err := adapter.Restart(ctx); err != nil {
+		lease.Close()
+		t.Fatal(err)
+	}
+	witness, err := CaptureRuntimeRecoveryWitness(ctx, e.activePath, adapter)
+	if err != nil {
+		lease.Close()
+		t.Fatal(err)
+	}
+	witness.PreviousGeneration = previous.Generation
+	binding := RuntimeResultBinding{ManagerURL: "https://isolated.invalid", AgentID: task.AgentID, ServerID: task.ServerID}
+	if err := lease.SaveResultWithRuntimeWitness(binding, task.ID, []byte(`{"status":"succeeded","resultPayload":{"kind":"vpn_core_service","operation":"restart"}}`), &witness); err != nil {
+		lease.Close()
+		t.Fatal(err)
+	}
+	lease.Close()
+	if err := ReplayRuntimeResult(e.receiptDir, binding, func(string, []byte) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	observation, err := ObserveRuntimeRecovery(ctx, e.receiptDir, binding, task.ID, e.activePath, adapter)
+	if err != nil || observation.Witness != witness {
+		t.Fatal("production runtime witness did not match", err)
+	}
+	if _, err := adapter.Restart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.CheckHealth(ctx, e.activePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ObserveRuntimeRecovery(ctx, e.receiptDir, binding, task.ID, e.activePath, adapter); err == nil {
+		t.Fatal("new process accepted old recovery witness")
+	}
+	if runtimeMarkerAbsent(filepath.Join(e.receiptDir, "mutation-inflight.json")) {
+		t.Fatal("observation cleared fence")
+	}
+	t.Log("recovery observation matches real process, rejects subsequent restart and retains fence")
 }
 func bindRemovalCandidate(t *testing.T, task *ConfigTask, object map[string]any) {
 	runtime := removalMarshal(t, object)

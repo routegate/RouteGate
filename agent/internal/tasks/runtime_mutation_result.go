@@ -20,12 +20,13 @@ type RuntimeResultBinding struct {
 }
 
 type runtimeResultReceipt struct {
-	SchemaVersion int                  `json:"schemaVersion"`
-	Binding       RuntimeResultBinding `json:"binding"`
-	MarkerHash    string               `json:"markerHash"`
-	TaskID        string               `json:"taskId"`
-	Envelope      json.RawMessage      `json:"envelope"`
-	Acknowledged  bool                 `json:"acknowledged"`
+	SchemaVersion  int                     `json:"schemaVersion"`
+	Binding        RuntimeResultBinding    `json:"binding"`
+	MarkerHash     string                  `json:"markerHash"`
+	TaskID         string                  `json:"taskId"`
+	Envelope       json.RawMessage         `json:"envelope"`
+	Acknowledged   bool                    `json:"acknowledged"`
+	RuntimeWitness *RuntimeRecoveryWitness `json:"runtimeWitness,omitempty"`
 }
 
 func markerDigest(data []byte) string {
@@ -44,9 +45,18 @@ func validRuntimeResult(data []byte) bool {
 // SaveResult must run before delivery while the original mutation lease is held.
 // A crash before this call leaves only intent, which cannot be replayed.
 func (m *RuntimeMutation) SaveResult(binding RuntimeResultBinding, taskID string, data []byte) error {
+	return m.SaveResultWithRuntimeWitness(binding, taskID, data, nil)
+}
+
+// SaveResultWithRuntimeWitness binds a locally observed checkpoint to the same
+// atomic receipt as the result. Nil keeps old receipts deliverable, not recoverable.
+func (m *RuntimeMutation) SaveResultWithRuntimeWitness(binding RuntimeResultBinding, taskID string, data []byte, witness *RuntimeRecoveryWitness) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.lock == nil || m.completed || binding.ManagerURL == "" || !canonicalTaskIDPattern.MatchString(binding.AgentID) || !canonicalTaskIDPattern.MatchString(binding.ServerID) || !validRuntimeResult(data) {
+		return ErrRuntimeMutationBlocked
+	}
+	if witness != nil && !validRuntimeWitness(*witness) {
 		return ErrRuntimeMutationBlocked
 	}
 	var marker struct {
@@ -60,7 +70,7 @@ func (m *RuntimeMutation) SaveResult(binding RuntimeResultBinding, taskID string
 		return ErrRuntimeMutationBlocked
 	}
 	path := filepath.Join(filepath.Dir(m.path), runtimeResultFile)
-	receipt := runtimeResultReceipt{SchemaVersion: 1, Binding: binding, MarkerHash: markerDigest(m.marker), TaskID: taskID, Envelope: append(json.RawMessage(nil), data...)}
+	receipt := runtimeResultReceipt{SchemaVersion: 1, Binding: binding, MarkerHash: markerDigest(m.marker), TaskID: taskID, Envelope: append(json.RawMessage(nil), data...), RuntimeWitness: witness}
 	encoded, err := json.Marshal(receipt)
 	if err != nil || len(encoded) > runtimeResultLimit {
 		return ErrRuntimeMutationBlocked
