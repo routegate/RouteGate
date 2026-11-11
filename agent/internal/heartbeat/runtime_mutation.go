@@ -58,8 +58,34 @@ func (r *Runner) withRuntimeMutation(ctx context.Context, task tasks.ConfigTask,
 		}
 		return ctx.Err()
 	}
+	var before *tasks.RuntimeRecoveryWitness
+	recoveryAdapter := r.runtimeRecoveryAdapter(task)
+	expectedHash := ""
+	if recoveryAdapter != nil {
+		observed, err := tasks.CaptureRuntimeRecoveryWitness(ctx, r.cfg.ActiveConfigPath, recoveryAdapter)
+		if err != nil {
+			return errRuntimeMutationRecovery
+		}
+		before = &observed
+		expectedHash = observed.RuntimeHash
+		if task.EffectiveKind() == tasks.TaskKindConfigApply {
+			expectedHash, err = tasks.RuntimeRecoveryTargetHash(task)
+			if err != nil {
+				return errRuntimeMutationRecovery
+			}
+		}
+	}
 	if execute(client.WithDurableTaskResult(ctx, func(taskID string, data []byte) error {
-		return lease.SaveResult(r.runtimeResultBinding(), taskID, data)
+		var witness *tasks.RuntimeRecoveryWitness
+		if before != nil {
+			observed, err := tasks.CaptureRuntimeRecoveryWitness(ctx, r.cfg.ActiveConfigPath, recoveryAdapter)
+			if err != nil || observed.Generation.InvocationID == before.Generation.InvocationID || observed.RuntimeHash != expectedHash {
+				return tasks.ErrRuntimeMutationBlocked
+			}
+			observed.PreviousGeneration = before.Generation
+			witness = &observed
+		}
+		return lease.SaveResultWithRuntimeWitness(r.runtimeResultBinding(), taskID, data, witness)
 	})) != nil {
 		// Includes post-mutation errors and unacknowledged results. Even an
 		// apparent validation failure stays fenced until its phase is proven.
@@ -70,6 +96,26 @@ func (r *Runner) withRuntimeMutation(ctx context.Context, task tasks.ConfigTask,
 		return errRuntimeMutationRecovery
 	}
 	return nil
+}
+
+func (r *Runner) runtimeRecoveryAdapter(task tasks.ConfigTask) tasks.VPNCoreAdapter {
+	if !r.cfg.ServiceControlEnabled || !tasks.SupportsRuntimeRecovery(r.vpnCoreAdapter) {
+		return nil
+	}
+	switch task.EffectiveKind() {
+	case tasks.TaskKindVPNCoreService:
+		if task.Operation != "restart" {
+			return nil
+		}
+	case tasks.TaskKindConfigApply:
+		adapters, err := tasks.SelectVPNCoreAdapters(task, r.vpnCoreAdapter, r.wireGuardAdapter, r.hysteria2Adapter, r.shadowsocksAdapter, r.mtprotoAdapter)
+		if err != nil || len(adapters) != 1 || !tasks.SupportsRuntimeRecovery(adapters[0]) {
+			return nil
+		}
+	default:
+		return nil
+	}
+	return r.vpnCoreAdapter
 }
 
 func (r *Runner) runtimeResultBinding() tasks.RuntimeResultBinding {
