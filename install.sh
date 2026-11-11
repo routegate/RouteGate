@@ -1196,6 +1196,7 @@ prepare_bundle() {
 
   verify_bundle_checksum "$bundle_path" "$checksum_path" "$ROUTEGATE_BUNDLE_NAME"
   extract_bundle "$bundle_path"
+  prepare_verified_grafana_installer
 }
 
 verify_bundle_checksum() {
@@ -1273,6 +1274,55 @@ extract_bundle() {
   elif [[ "$ROUTEGATE_RESOLVED_VERSION" != "$manifest_version" ]]; then
     die "Release bundle version (${manifest_version}) does not match the requested version (${ROUTEGATE_RESOLVED_VERSION})."
   fi
+}
+
+prepare_verified_grafana_installer() {
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] || return 0
+  [[ -n "$ROUTEGATE_RESOLVED_VERSION" && "$ROUTEGATE_RESOLVED_VERSION" != "latest" ]] \
+    || die "Grafana installer requires a resolved pinned RouteGate release."
+  validate_release_version "$ROUTEGATE_RESOLVED_VERSION" \
+    || die "Grafana installer release version is invalid."
+  [[ -z "$ROUTEGATE_BUNDLE_FILE" && -z "$ROUTEGATE_BUNDLE_URL" ]] \
+    || die "Combined Grafana install currently requires a published release, not local or custom bundle paths."
+  [[ -n "$ROUTEGATE_WORK_DIR" ]] || ROUTEGATE_WORK_DIR=$(mktemp -d /tmp/routegate-installer.XXXXXX)
+
+  local url_base="https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${ROUTEGATE_RESOLVED_VERSION}"
+  local checksums="$ROUTEGATE_WORK_DIR/INSTALLER_SHA256SUMS"
+  ROUTEGATE_GRAFANA_SCRIPT="$ROUTEGATE_WORK_DIR/install-grafana.sh"
+  curl -fL --proto '=https' --tlsv1.2 --retry 3 --max-time 90 \
+    -o "$checksums" "$url_base/INSTALLER_SHA256SUMS" \
+    || die "Could not download pinned Grafana installer checksums."
+  curl -fL --proto '=https' --tlsv1.2 --retry 3 --max-time 90 \
+    -o "$ROUTEGATE_GRAFANA_SCRIPT" "$url_base/install-grafana.sh" \
+    || die "Could not download pinned Grafana installer."
+  local expected actual
+  expected=$(awk '$2 == "install-grafana.sh" || $2 == "*install-grafana.sh" {print $1; exit}' "$checksums")
+  [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] \
+    || die "Missing valid Grafana installer checksum in pinned release."
+  actual=$(sha256sum "$ROUTEGATE_GRAFANA_SCRIPT" | awk '{print $1}')
+  [[ "$actual" == "$expected" ]] \
+    || die "Grafana installer SHA-256 verification failed."
+  [[ -s "$ROUTEGATE_GRAFANA_SCRIPT" && ! -L "$ROUTEGATE_GRAFANA_SCRIPT" ]] \
+    || die "Grafana installer is missing or unsafe."
+  bash -n "$ROUTEGATE_GRAFANA_SCRIPT" \
+    || die "Verified Grafana installer failed shell syntax validation."
+  log "Grafana installer from pinned ${ROUTEGATE_RESOLVED_VERSION} verified before execution."
+}
+
+install_selected_grafana() {
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] || return 0
+  [[ "$(state_value STATUS || true)" == "complete" ]] \
+    || die "Grafana installation requires a completed RouteGate platform."
+  [[ "$(state_value PROMETHEUS_MANAGED || true)" == "1" ]] \
+    || die "Grafana installation requires RouteGate-managed Prometheus."
+  [[ -s "$ROUTEGATE_GRAFANA_SCRIPT" ]] \
+    || die "Verified Grafana installer was not staged."
+  set_install_stage grafana
+  log "Core RouteGate is complete; installing selected Grafana dashboard component."
+  if ! bash "$ROUTEGATE_GRAFANA_SCRIPT"; then
+    die "Core RouteGate remains complete, but Grafana failed. Review the add-on output and retry with the SAME pinned release and --with-grafana."
+  fi
+  log "Grafana installation completed: https://${ROUTEGATE_DOMAIN}/grafana/"
 }
 
 install_files() {
