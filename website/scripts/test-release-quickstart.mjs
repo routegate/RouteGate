@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
-import { buildInstallCommand, publishedStableTag, stableReleaseApi } from '../src/release.ts'
+import { buildInstallCommand, isSupportedQuickStartTag, publishedStableTag, stableReleaseApi } from '../src/release.ts'
 
 test('published stable tag is validated and not mutable, injected or prerelease', () => {
   assert.equal(publishedStableTag({ tag_name: 'v0.1.0' }), 'v0.1.0')
@@ -26,6 +26,9 @@ test('quick start is pinned to the exact published tag', () => {
   assert.ok(command.includes("curl -fL --proto '=https' --tlsv1.2"))
   assert.ok(command.includes('\nless routegate-install.sh\n'))
   assert.ok(!command.includes('curl | sudo bash'))
+  assert.equal(isSupportedQuickStartTag('v0.1.0'), false)
+  assert.equal(isSupportedQuickStartTag('v1.2.3'), true)
+  assert.throws(() => buildInstallCommand('v0.1.0'))
   assert.throws(() => buildInstallCommand('main'))
   assert.throws(() => buildInstallCommand('v1.2.3-rc.1'))
 })
@@ -41,5 +44,7 @@ test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   assert.ok(!prerender.includes('Стабильный v0.1.0'))
   assert.match(app, /disabled=\{!installCommand\}/)
   assert.match(app, /status: 'unavailable'/)
+  assert.match(app, /status: tag === 'v0.1.0' \? 'legacy' : 'ready'/)
+  assert.match(app, /legacyReleaseDisabled/)
   assert.match(app, /publishedStableTag\(payload\)/)
 })
