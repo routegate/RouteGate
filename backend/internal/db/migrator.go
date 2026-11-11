@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -76,31 +77,41 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, logg
 	return nil
 }
 
-// validateMigrationOrdinals is a fail-closed upgrade gate. Migration names
-// record a unique, monotonically sortable decimal ordinal followed by "_"
-// and a descriptive suffix. Comparing canonical decimal prefixes also
-// refuses ambiguous padding (e.g. 000160_foo and 160_bar). Never rename an
-// already-applied migration to resolve a conflict: allocate a fresh ordinal.
+// Historical migrations (below 160) contain intentional duplicate numeric
+// prefixes (for example, both 000003_auth_foundation and 000003_config_apply_jobs)
+// and legacy suffixed versions such as 000150b. Their full filenames are
+// already persisted in production schema_migrations and MUST remain unchanged.
+//
+// Starting with current-main's 000160_traffic_report_checkpoints, reject
+// duplicate numeric ordinals before any SQL. Never rename an applied 000160
+// to accommodate the old, unmerged RG-140 000160 revocation preparation.
 func validateMigrationOrdinals(files []string) error {
-	seen := make(map[string]string, len(files))
+	const forwardOnlyBoundary uint64 = 160
+	seen := make(map[uint64]string, len(files))
 	for _, path := range files {
 		name := filepath.Base(path)
 		version := strings.TrimSuffix(name, ".up.sql")
-		raw, suffix, ok := strings.Cut(version, "_")
-		if !ok || suffix == "" || raw == "" {
-			return fmt.Errorf("invalid migration name %q: require <decimal>_<description>.up.sql", name)
+		// Extract the leading decimal ordinal while retaining historical
+		// letter-suffix variants, which predate this preflight.
+		prefixLen := 0
+		for prefixLen < len(version) && version[prefixLen] >= '0' && version[prefixLen] <= '9' {
+			prefixLen++
 		}
-		for _, digit := range raw {
-			if digit < '0' || digit > '9' {
-				return fmt.Errorf("invalid migration ordinal in %q: require decimal prefix", name)
-			}
+		if prefixLen == 0 {
+			return fmt.Errorf("invalid migration name %q: no leading decimal ordinal", name)
 		}
-		ordinal := strings.TrimLeft(raw, "0")
-		if ordinal == "" {
-			ordinal = "0"
+		ordinal, err := strconv.ParseUint(version[:prefixLen], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid migration ordinal in %q: %w", name, err)
+		}
+		if ordinal < forwardOnlyBoundary {
+			continue // freeze established legacy identities verbatim
+		}
+		if prefixLen >= len(version)-1 || version[prefixLen] != '_' {
+			return fmt.Errorf("invalid migration name %q: new migrations require <decimal>_<description>.up.sql", name)
 		}
 		if original, conflict := seen[ordinal]; conflict {
-			return fmt.Errorf("ambiguous migration ordinal %s: %q conflicts with %q; assign a new forward-only ordinal", ordinal, original, name)
+			return fmt.Errorf("ambiguous migration ordinal %d: %q conflicts with %q; assign a new forward-only ordinal", ordinal, original, name)
 		}
 		seen[ordinal] = name
 	}
