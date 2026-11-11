@@ -10,14 +10,23 @@ const licenseUrl = `${githubUrl}/blob/main/LICENSE`
 const sourceCodeUrl = `${githubUrl}/blob/main/agent/internal/diagnostics/diagnostics.go#L22-L35`
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
 
-const installCommand = [
-  'VERSION=v0.1.0',
-  'curl -fL --proto \'=https\' --tlsv1.2 \\',
-  '  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \\',
-  '  -o routegate-install.sh',
-  'less routegate-install.sh',
-  'sudo bash routegate-install.sh --version "${VERSION}"',
-].join('\n')
+const stableReleaseApi = 'https://api.github.com/repos/routegate/RouteGate/releases/latest'
+const stableTagPattern = /^v(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$/
+
+type StableRelease = { status: 'loading' | 'ready' | 'unavailable'; tag: string | null }
+
+function buildInstallCommand(tag: string): string {
+  // Display an explicit immutable tag, never a mutable main/latest selector.
+  if (!stableTagPattern.test(tag)) throw new Error('Unexpected stable release tag')
+  return [
+    `VERSION=${tag}`,
+    'curl -fL --proto \'=https\' --tlsv1.2 \\',
+    '  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \\',
+    '  -o routegate-install.sh',
+    'less routegate-install.sh',
+    'sudo bash routegate-install.sh --version "${VERSION}"',
+  ].join('\\n')
+}
 
 function readStoredLocale(): Locale | null {
   try {
@@ -266,7 +275,47 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
   }, [requestedLocale])
   const [locale, setLocale] = useState<Locale>(initialLocale)
   const [installCopied, setInstallCopied] = useState(false)
+  const [stableRelease, setStableRelease] = useState<StableRelease>({ status: 'loading', tag: null })
   const t = content[locale]
+  const installCommand = stableRelease.status === 'ready' && stableRelease.tag
+    ? buildInstallCommand(stableRelease.tag)
+    : null
+
+  useEffect(() => {
+    let unmounted = false
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 8000)
+
+    const loadPublishedStable = async () => {
+      try {
+        const response = await fetch(stableReleaseApi, {
+          signal: controller.signal,
+          headers: { Accept: 'application/vnd.github+json' },
+        })
+        if (!response.ok) throw new Error('GitHub release lookup failed')
+        const payload: unknown = await response.json()
+        const tag = payload && typeof payload === 'object' && 'tag_name' in payload
+          ? (payload as { tag_name?: unknown }).tag_name
+          : null
+        if (typeof tag !== 'string' || !stableTagPattern.test(tag)) {
+          throw new Error('No valid published stable release')
+        }
+        if (!unmounted) setStableRelease({ status: 'ready', tag })
+      } catch {
+        // Fail closed: no silently outdated command or mutable branch fallback.
+        if (!unmounted) setStableRelease({ status: 'unavailable', tag: null })
+      } finally {
+        window.clearTimeout(timeout)
+      }
+    }
+
+    void loadPublishedStable()
+    return () => {
+      unmounted = true
+      controller.abort()
+      window.clearTimeout(timeout)
+    }
+  }, [])
 
   const handleLocaleChange = (nextLocale: Locale) => {
     setLocale(nextLocale)
@@ -277,6 +326,7 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
   }
 
   const handleCopyInstall = async () => {
+    if (!installCommand) return
     try {
       await copyText(installCommand)
       setInstallCopied(true)
@@ -387,12 +437,26 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
           </div>
           <div className="install-panel">
             <div className="install-panel-heading">
-              <div><span>{t.deployment.commandLabel}</span><strong>{t.deployment.commandTitle}</strong></div>
-              <button type="button" onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
+              <div><span>{t.deployment.commandLabel}</span><strong>{
+                stableRelease.status === 'ready' && stableRelease.tag
+                  ? t.deployment.commandTitle.replace('{version}', stableRelease.tag)
+                  : stableRelease.status === 'loading'
+                    ? t.deployment.releaseLoadingTitle
+                    : t.deployment.releaseUnavailableTitle
+              }</strong></div>
+              <button type="button" disabled={!installCommand} onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
             </div>
-            <pre><code>{installCommand}</code></pre>
+            <pre aria-live="polite"><code>{installCommand ?? (
+              stableRelease.status === 'loading'
+                ? t.deployment.releaseLoading
+                : t.deployment.releaseUnavailable
+            )}</code></pre>
             <div className="install-panel-footer">
-              <span>{t.deployment.commandNote}</span>
+              <span>{stableRelease.status === 'ready'
+                ? stableRelease.tag === 'v0.1.0'
+                  ? t.deployment.legacyReleaseNote
+                  : t.deployment.commandNote
+                : t.deployment.releaseUnavailableNote}</span>
               <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
             </div>
           </div>
