@@ -209,6 +209,11 @@ OLD_LOGIN_STATUS=$(jq -nc --arg login routegate-ci@example.invalid \
     "https://$DOMAIN/api/v1/auth/login")
 [[ "$OLD_LOGIN_STATUS" == 401 ]] ||
   die "Old bootstrap password still authenticates after setup"
+# Transfer only the post-activation session and local Hybrid server ID through
+# private runner files to the isolated data-plane acceptance test.
+printf '%s' "$SESSION_TOKEN" >"$WORK/admin.token"
+printf '%s' "$SERVER_ID" >"$WORK/server.id"
+chmod 0600 "$WORK/admin.token" "$WORK/server.id"
 unset SETUP_URL SETUP_TOKEN INSPECT NEW_PASSWORD ACTIVATION SESSION_TOKEN OLD_LINK_STATUS OLD_LOGIN_STATUS
 unset ADMIN_PASSWORD LOGIN ADMIN_TOKEN SERVER DETAIL
 
@@ -223,5 +228,24 @@ curl -fsS --max-time 5 "https://$DOMAIN/api/admin/health" >/dev/null ||
   die "Manager unhealthy after restart"
 sudo systemctl is-active --quiet routegate-agent || die "Agent inactive after restart"
 
-log "PASS: native Hybrid install -> PostgreSQL -> Manager -> test HTTPS -> Agent -> one-use /setup -> restart"
-log "OUT OF SCOPE: public Let's Encrypt, VPN runtime apply, external client, full reboot."
+log "Extending installed Hybrid with Agent-managed VLESS/Reality traffic."
+# Same disposable runner, installed Manager/Agent and database. No release
+# changes, remote endpoints, or production systems are involved.
+sudo -n env \
+  "GITHUB_ACTIONS=true" \
+  "RUNNER_ENVIRONMENT=github-hosted" \
+  "ROUTEGATE_E2E_ISOLATED=1" \
+  "RUNNER_TEMP=$RUNNER_TEMP" \
+  "NO_PROXY=$NO_PROXY" "no_proxy=$no_proxy" \
+  python3 "$ROOT/scripts/hybrid-vpn-e2e.py" ||
+  die "Native Hybrid Reality traffic/apply test failed on disposable runner"
+
+# Manager and nginx must survive all Agent runtime operations.
+sudo systemctl is-active --quiet routegate-manager || die "Manager stopped after VPN apply"
+sudo systemctl is-active --quiet nginx || die "nginx stopped after VPN apply"
+sudo systemctl is-active --quiet sing-box || die "VPN runtime stopped after apply"
+curl -fsS --max-time 5 "https://$DOMAIN/api/admin/health" >/dev/null ||
+  die "Manager HTTPS failed after Reality traffic test"
+rm -f "$WORK/admin.token" "$WORK/server.id" "$WORK/hybrid-client.json"
+log "PASS: native install -> /setup -> Reality config/apply -> real test client traffic -> fail-safe apply."
+log "OUT OF SCOPE: public Let's Encrypt, remote third-party client, full reboot."
