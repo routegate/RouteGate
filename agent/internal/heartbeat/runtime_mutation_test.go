@@ -119,6 +119,9 @@ func TestFencedDispatchPreservesUncertaintyAcrossRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantResults := int32(1)
+			if mode == "unacknowledged result" {
+				wantResults = 2 // Historical result replay; runtime stays fenced.
+			}
 			if mode == "handler failure" {
 				wantResults = 0
 			}

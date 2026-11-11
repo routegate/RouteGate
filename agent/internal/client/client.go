@@ -34,6 +34,14 @@ type Client struct {
 }
 
 type strictTaskAcknowledgementKey struct{}
+type durableTaskResultKey struct{}
+
+// WithDurableTaskResult persists the exact JSON envelope before any HTTP attempt.
+// The callback must be bound to the live task lease. It never receives a token.
+func WithDurableTaskResult(ctx context.Context, save func(string, []byte) error) context.Context {
+	return context.WithValue(WithStrictTaskAcknowledgement(ctx), durableTaskResultKey{}, save)
+}
+
 
 // WithStrictTaskAcknowledgement requires positive Manager acceptance for
 // safety-gated tasks. 404 after an uncertain attempt is not confirmation.
@@ -193,12 +201,35 @@ func (c *Client) NextTask(ctx context.Context, agentToken string) (*tasks.Config
 func (c *Client) CompleteTask(ctx context.Context, agentToken, jobID string, req completeTaskRequest) error {
 	strict, _ := ctx.Value(strictTaskAcknowledgementKey{}).(bool)
 	if strict && req.Status != "succeeded" {
-		// A failed envelope cannot resolve an uncertain runtime mutation.
+		// An ordinary failed envelope cannot represent an uncertain mutation.
+		// Retain Manager's active job until explicit reconciliation exists.
 		return errors.New("fenced task requires runtime reconciliation")
 	}
 	if strings.TrimSpace(jobID) == "" {
 		return fmt.Errorf("job id is required")
 	}
+	if save, ok := ctx.Value(durableTaskResultKey{}).(func(string, []byte) error); ok {
+		data, err := json.Marshal(req)
+		if err != nil || save(jobID, data) != nil {
+			return errors.New("durable task result unavailable")
+		}
+		// Freeze the envelope so retries match the durable bytes exactly.
+		return c.deliverTaskResult(ctx, agentToken, jobID, json.RawMessage(data), true)
+	}
+	return c.deliverTaskResult(ctx, agentToken, jobID, req, strict)
+}
+
+// ReplayTaskResult reports a historical success without executing its task.
+// A 404 is never acknowledgement, including after an uncertain HTTP attempt.
+func (c *Client) ReplayTaskResult(ctx context.Context, agentToken, jobID string, data []byte) error {
+	var envelope completeTaskRequest
+	if json.Unmarshal(data, &envelope) != nil || envelope.Status != "succeeded" || envelope.ErrorMessage != "" || strings.TrimSpace(jobID) == "" {
+		return errors.New("invalid durable task result")
+	}
+	return c.deliverTaskResult(ctx, agentToken, jobID, json.RawMessage(data), true)
+}
+
+func (c *Client) deliverTaskResult(ctx context.Context, agentToken, jobID string, req any, strict bool) error {
 	path := "/api/v1/agent/tasks/" + url.PathEscape(jobID) + "/result"
 
 	var lastErr error

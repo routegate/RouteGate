@@ -3,6 +3,7 @@ package heartbeat
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/ikaevus/routegate/agent/internal/client"
 	"github.com/ikaevus/routegate/agent/internal/systeminfo"
@@ -57,7 +58,9 @@ func (r *Runner) withRuntimeMutation(ctx context.Context, task tasks.ConfigTask,
 		}
 		return ctx.Err()
 	}
-	if execute(client.WithStrictTaskAcknowledgement(ctx)) != nil {
+	if execute(client.WithDurableTaskResult(ctx, func(taskID string, data []byte) error {
+		return lease.SaveResult(r.runtimeResultBinding(), taskID, data)
+	})) != nil {
 		// Includes post-mutation errors and unacknowledged results. Even an
 		// apparent validation failure stays fenced until its phase is proven.
 		// Do not log a raw handler error which may include config/command data.
@@ -67,6 +70,26 @@ func (r *Runner) withRuntimeMutation(ctx context.Context, task tasks.ConfigTask,
 		return errRuntimeMutationRecovery
 	}
 	return nil
+}
+
+func (r *Runner) runtimeResultBinding() tasks.RuntimeResultBinding {
+	return tasks.RuntimeResultBinding{ManagerURL: strings.TrimRight(r.cfg.ManagerURL, "/"), AgentID: r.cfg.AgentID, ServerID: r.cfg.ServerID}
+}
+
+func (r *Runner) replayRuntimeResult(ctx context.Context) {
+	if !r.runtimeMutationManagerReady {
+		return
+	}
+	dir := r.runtimeMutationDir
+	if dir == "" {
+		dir = tasks.DefaultRuntimeMutationDir
+	}
+	if err := tasks.ReplayRuntimeResult(dir, r.runtimeResultBinding(), func(taskID string, data []byte) error {
+		return r.client.ReplayTaskResult(ctx, r.cfg.AgentToken, taskID, data)
+	}); err != nil {
+		// Keep polling for read-only diagnostics; admission remains fenced.
+		r.logger.Warn("durable task result requires reconciliation")
+	}
 }
 
 func (r *Runner) prepareRuntimeMutationHeartbeat(info *systeminfo.Info) {

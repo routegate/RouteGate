@@ -109,3 +109,45 @@ No production migrations, Agent restarts, token rotations, FI tests or
 Manager updates are approved by this document. The first PR improves
 only the warnings/status UX; follow-on backend work requires review
 and isolated end-to-end validation.
+
+## Forward-port checkpoint (2026-11-12, draft only)
+
+The v0.2.0 reconciliation carries dormant implementation slices in draft
+PRs [#742](https://github.com/routegate/RouteGate/pull/742),
+[#743](https://github.com/routegate/RouteGate/pull/743),
+[#744](https://github.com/routegate/RouteGate/pull/744) and
+[#745](https://github.com/routegate/RouteGate/pull/745).
+They do **not** establish an operational credential-revocation lifecycle.
+The public Agent and Manager have no enabled credential-removal route.
+
+### Experimental fencing and durable result delivery
+
+The Agent's `experimental_runtime_mutation_fencing` option is deliberately
+disabled in normal configuration and is not part of the installer. An Agent
+which explicitly opts in negotiates the Manager's persisted
+`runtimeMutationFencingV1` capability before executing fenced mutations.
+The Manager then preserves uncertain jobs rather than marking them failed
+by elapsed time alone. An existing local runtime-mutation state keeps the
+protection active across restarts and configuration changes.
+
+Under a private, exclusive runtime state lock, the Agent saves its successful
+completion envelope **before** the first HTTP delivery attempt. The bounded,
+fsynced receipt is bound to the Manager URL, Agent and server identities,
+job ID and exact mutation-intent digest. The receipt may include sensitive
+operation output and must never be logged or exposed to the browser. HTTP
+500→404 is **not** positive result acceptance. The Agent may retransmit the
+exact saved report without re-executing the runtime handler, but it cannot
+use that historical result to unlock the fence or certify current VPN
+configuration or terminated sessions.
+
+These drafts provide no authenticated operator reconciliation, no verified
+current-runtime observation, no complete scoped credential removal dispatcher
+and no detached-worker handoff. After an uncertain outcome, **do not delete
+the local state, reset the database job, or force-restart a runtime to
+work around the fence**. The supported recovery protocol is still to be
+designed, independently reviewed and tested.
+
+Only isolated disposable host / PostgreSQL / HTTP-fixture tests are
+authorized at this stage. Successful CI is not permission to activate
+this experiment on US/FI/NL/RU, merge into `main`, publish v0.2.0 or
+claim that a cached VPN credential has been revoked.
