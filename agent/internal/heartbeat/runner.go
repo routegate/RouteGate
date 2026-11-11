@@ -32,6 +32,8 @@ type Runner struct {
 	shadowsocksAdapter tasks.VPNCoreAdapter
 	mtprotoAdapter     tasks.VPNCoreAdapter
 	runtimeCleaner     runtimecleanup.Cleaner
+	runtimeMutationDir string
+	runtimeMutationManagerReady bool
 }
 
 func NewRunner(cfg config.Config, configPath string, logger *slog.Logger) *Runner {
@@ -71,6 +73,7 @@ func NewRunner(cfg config.Config, configPath string, logger *slog.Logger) *Runne
 			cfg.MTProtoServiceName,
 		),
 		runtimeCleaner: runtimecleanup.New(cfg),
+		runtimeMutationDir: tasks.DefaultRuntimeMutationDir,
 	}
 	if cfg.TrafficCollectionEnabled {
 		runner.trafficCollector = traffic.NewRuntimeCollector(cfg.ActiveConfigPath, cfg.TrafficUsageFilePath)
@@ -189,10 +192,13 @@ func (r *Runner) ensureRegistered(ctx context.Context) error {
 func (r *Runner) sendHeartbeat(ctx context.Context) error {
 	info := systeminfo.Collect()
 	info.Capabilities["trafficAccounting"] = map[string]any{"enabled": r.cfg.TrafficCollectionEnabled, "source": "sing-box-v2ray-api"}
+	r.prepareRuntimeMutationHeartbeat(&info)
+	r.runtimeMutationManagerReady = false
 	res, err := r.client.Heartbeat(ctx, r.cfg.AgentToken, info)
 	if err != nil {
 		return err
 	}
+	r.runtimeMutationManagerReady = res.OK && res.AgentID == r.cfg.AgentID && res.ServerID == r.cfg.ServerID && res.RuntimeMutationFencingAccepted
 	r.logger.Info("heartbeat accepted", "agent_id", res.AgentID, "server_id", res.ServerID, "server_status", res.ServerStatus)
 	return nil
 }
@@ -251,19 +257,30 @@ func (r *Runner) processNextTask(ctx context.Context) error {
 		return nil
 	}
 
+	return r.dispatchTask(ctx, *task)
+}
+
+// dispatchTask is the single admission boundary for polled tasks.
+func (r *Runner) dispatchTask(ctx context.Context, task tasks.ConfigTask) error {
+	return r.withRuntimeMutation(ctx, task, func(taskCtx context.Context) error {
+		return r.dispatchTaskUnfenced(taskCtx, task)
+	})
+}
+
+func (r *Runner) dispatchTaskUnfenced(ctx context.Context, task tasks.ConfigTask) error {
 	switch task.EffectiveKind() {
 	case tasks.TaskKindVPNCoreService:
-		return r.processVPNCoreServiceTask(ctx, *task)
+		return r.processVPNCoreServiceTask(ctx, task)
 	case tasks.TaskKindVPNCoreInstall:
-		return r.processVPNCoreInstallTask(ctx, *task)
+		return r.processVPNCoreInstallTask(ctx, task)
 	case tasks.TaskKindDiagnostic:
-		return r.processDiagnosticTask(ctx, *task)
+		return r.processDiagnosticTask(ctx, task)
 	case tasks.TaskKindPlatformUpdate:
-		return r.processPlatformUpdateReconciliationTask(ctx, *task)
+		return r.processPlatformUpdateReconciliationTask(ctx, task)
 	case tasks.TaskKindMaintenance:
-		return r.processMaintenanceTask(ctx, *task)
+		return r.processMaintenanceTask(ctx, task)
 	case tasks.TaskKindConfigApply:
-		return r.processConfigApplyTask(ctx, *task)
+		return r.processConfigApplyTask(ctx, task)
 	default:
 		err := fmt.Errorf("unsupported agent task kind %q", task.Kind)
 		report := map[string]any{"kind": task.Kind, "status": "rejected"}
