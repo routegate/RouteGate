@@ -209,11 +209,19 @@ Before installation:
 - make TCP ports 80 and 443 reachable;
 - connect as `root` or a user with working `sudo`.
 
-Choose the RouteGate release you intend to install, download the installer to a
-local file, review it, and only then run it with privileges. For example:
+Select a **published stable tag** from
+[GitHub Releases](https://github.com/routegate/RouteGate/releases/latest) or
+use the live, version-pinned quick-start on [routegate.org](https://routegate.org/).
+The installer and bundle **must come from the same immutable tag**; do not mix
+`main/install.sh` with a historical release. The old `v0.1.0` is an archived
+MVP and does not include newer UI/features (see [#715](https://github.com/routegate/RouteGate/issues/715)).
+
+When installing from the README, replace `REPLACE_WITH_STABLE_TAG` below with
+the exact published tag you reviewed. Download the installer locally, inspect
+it, then run it with privileges:
 
 ```bash
-VERSION=v0.1.0
+VERSION=REPLACE_WITH_STABLE_TAG
 curl -fL --proto '=https' --tlsv1.2 \
   "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
   -o routegate-install.sh
@@ -230,7 +238,7 @@ releases.
 
 Before any APT network operation, the installer also checks the host's active package sources and fails closed unless they are inside RouteGate's approved repository boundary. Approved provider mirrors are explicit; unrelated third-party sources are not silently trusted or rewritten.
 
-The installer downloads a published RouteGate release bundle and verifies it against `SHA256SUMS`. To install v0.1.0 explicitly, use `--version v0.1.0` as documented in the [Clean VPS Installer guide](docs/deployment/clean-vps-installer.md).
+The installer downloads the selected published RouteGate release bundle and verifies it against `SHA256SUMS`. Always match the pinned installer tag to its archive. For older v0.1.0 installations and recovery limitations, see the [Clean VPS Installer guide](docs/deployment/clean-vps-installer.md).
 
 After installation, open the single-use `/setup` link printed by the installer, choose the administrator password, and continue through the guided Dashboard workflow.
 
