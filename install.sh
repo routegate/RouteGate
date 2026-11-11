@@ -696,7 +696,18 @@ verify_existing_install() {
       || die "Existing installation is unhealthy: Prometheus readiness check failed."
   fi
 
-  log "RouteGate is already installed and healthy. No changes were made."
+  log "RouteGate is already installed and healthy. No core platform changes were made."
+  if [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+    local pinned_version
+    pinned_version=$(state_value VERSION || true)
+    validate_release_version "$pinned_version" || die "Installed RouteGate release version is invalid."
+    [[ "$pinned_version" != "latest" ]] || die "Installed release version is not pinned."
+    [[ "$ROUTEGATE_VERSION" == "latest" || "$ROUTEGATE_VERSION" == "$pinned_version" ]] \
+      || die "Grafana retry must use installed RouteGate version $pinned_version."
+    ROUTEGATE_RESOLVED_VERSION="$pinned_version"
+    prepare_verified_grafana_installer
+    install_selected_grafana
+  fi
   log "Open https://${ROUTEGATE_DOMAIN}/"
   exit 0
 }
@@ -1977,6 +1988,7 @@ main() {
   set_install_stage complete
   write_install_state
   print_success
+  install_selected_grafana
 }
 
 if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
