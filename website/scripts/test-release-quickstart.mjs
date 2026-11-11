@@ -3,15 +3,53 @@ import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { buildInstallCommand, isSupportedQuickStartTag, publishedStableTag, stableReleaseApi } from '../src/release.ts'
 
+const requiredAssets = tag => [
+  'install.sh',
+  'SHA256SUMS',
+  'INSTALLER_SHA256SUMS',
+  'release-manifest.json',
+  `routegate-${tag}-linux-amd64.tar.gz`,
+]
+
+const releaseFixture = (tag = 'v1.2.3') => ({
+  tag_name: tag,
+  draft: false,
+  prerelease: false,
+  assets: requiredAssets(tag).map(name => ({ name, size: 1024, state: 'uploaded' })),
+})
+
 test('published stable tag is validated and not mutable, injected or prerelease', () => {
   assert.equal(publishedStableTag({ tag_name: 'v0.1.0' }), 'v0.1.0')
-  assert.equal(publishedStableTag({ tag_name: 'v12.34.56' }), 'v12.34.56')
+  assert.equal(publishedStableTag(releaseFixture('v12.34.56')), 'v12.34.56')
   for (const malformed of [
     {}, null, undefined, [], { tag_name: 123 }, { tag_name: 'main' },
     { tag_name: 'latest' }, { tag_name: 'v0.2.0-rc.2' },
     { tag_name: 'v1.2.3;sudo rm -rf /' }, { tag_name: 'v1.02.3' },
     { tag_name: 'v0.1.0\ncurl example.com' }, { tag_name: 'refs/heads/main' },
   ]) assert.equal(publishedStableTag(malformed), null)
+})
+
+test('quick start refuses incomplete, draft, malformed or unavailable release assets', () => {
+  const valid = releaseFixture()
+  assert.equal(publishedStableTag(valid), 'v1.2.3')
+  for (const asset of requiredAssets('v1.2.3')) {
+    assert.equal(
+      publishedStableTag({ ...valid, assets: valid.assets.filter(item => item.name !== asset) }),
+      null,
+      `missing ${asset} must disable installation`,
+    )
+  }
+  for (const invalid of [
+    { ...valid, draft: true },
+    { ...valid, prerelease: true },
+    { ...valid, assets: [] },
+    { ...valid, assets: undefined },
+    { ...valid, assets: valid.assets.map(item => item.name === 'install.sh' ? { ...item, size: 0 } : item) },
+    { ...valid, assets: valid.assets.map(item => item.name === 'SHA256SUMS' ? { ...item, state: 'starter' } : item) },
+    { ...valid, assets: valid.assets.map(item => item.name === 'INSTALLER_SHA256SUMS' ? { ...item, size: '9999' } : item) },
+  ]) assert.equal(publishedStableTag(invalid), null)
+  // A legacy release is recognized only so the UI can show its disabled warning.
+  assert.equal(publishedStableTag({ tag_name: 'v0.1.0' }), 'v0.1.0')
 })
 
 test('quick start is pinned to the exact published tag', () => {
