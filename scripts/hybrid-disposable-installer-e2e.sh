@@ -313,6 +313,40 @@ if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
   done
   curl -fsS --max-time 5 "https://$DOMAIN/grafana/api/health" >/dev/null ||
     die "Grafana did not recover after restart"
+  log "Re-running completed installation with Grafana enabled to prove idempotency."
+  # Fingerprints only; never print the first-login or Grafana credentials.
+  CORE_STATE_SHA=$(sudo sha256sum /etc/routegate/install-state.env | awk '{print $1}')
+  FIRST_LOGIN_SHA=$(sudo sha256sum /root/routegate-first-login.txt | awk '{print $1}')
+  GRAFANA_ACCESS_SHA=$(sudo sha256sum /root/routegate-grafana-access.txt | awk '{print $1}')
+  if ! sudo -n env \
+    "PATH=$WORK/bin:$PATH" "GITHUB_ACTIONS=true" "RUNNER_TEMP=$RUNNER_TEMP" \
+    "ROUTEGATE_E2E_DOMAIN=$DOMAIN" "ROUTEGATE_E2E_WORK_DIR=$WORK" \
+    "NO_PROXY=$NO_PROXY" "no_proxy=$no_proxy" \
+    bash "$ROOT/install.sh" \
+      --domain "$DOMAIN" --email routegate-ci@example.invalid \
+      --admin-email routegate-ci@example.invalid --server-name "$DOMAIN" \
+      --version "$VERSION" --bundle-file "$BUNDLE" --checksum-file "$CHECKSUM" \
+      --with-grafana --yes >"$WORK/grafana-rerun.stdout" 2>&1; then
+    die "Completed RouteGate+Grafana installation was not idempotent"
+  fi
+  grep -Fq 'RouteGate is already installed and healthy.' "$WORK/grafana-rerun.stdout" ||
+    die "Completed install did not use the idempotent core verification path"
+  grep -Fq 'Grafana is already installed and healthy.' "$WORK/grafana-rerun.stdout" ||
+    die "Repeated Grafana install did not use the idempotent monitoring verification path"
+  [[ "$CORE_STATE_SHA" == "$(sudo sha256sum /etc/routegate/install-state.env | awk '{print $1}')" ]] ||
+    die "Idempotent retry unexpectedly rewrote RouteGate ownership"
+  [[ "$FIRST_LOGIN_SHA" == "$(sudo sha256sum /root/routegate-first-login.txt | awk '{print $1}')" ]] ||
+    die "Idempotent retry unexpectedly rotated first-login credentials"
+  [[ "$GRAFANA_ACCESS_SHA" == "$(sudo sha256sum /root/routegate-grafana-access.txt | awk '{print $1}')" ]] ||
+    die "Idempotent retry unexpectedly rotated Grafana initial credentials"
+  for svc in postgresql nginx routegate-manager routegate-agent prometheus grafana-server; do
+    sudo systemctl is-active --quiet "$svc" ||
+      die "Idempotent retry left $svc unhealthy"
+  done
+  curl -fsS --max-time 10 "https://$DOMAIN/grafana/api/health" >/dev/null ||
+    die "Idempotent retry broke Grafana HTTPS"
+  unset CORE_STATE_SHA FIRST_LOGIN_SHA GRAFANA_ACCESS_SHA
+  log "PASS: completed RouteGate/Grafana re-run was idempotent; ownership and credentials unchanged."
   log "PASS: real Hybrid + Prometheus + Grafana installed in same run; HTTPS, datasource, dashboard, restart healthy."
   log "OUT OF SCOPE: public Let's Encrypt, real external VPN client, physical reboot."
   exit 0
