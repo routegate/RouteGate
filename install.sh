@@ -29,6 +29,7 @@ ROUTEGATE_WORK_DIR=""
 ROUTEGATE_ARCH=""
 ROUTEGATE_RESOLVED_VERSION=""
 ROUTEGATE_BUNDLE_NAME=""
+ROUTEGATE_BUNDLE_SHA256=""
 ROUTEGATE_PUBLIC_IPV4=""
 ROUTEGATE_DB_PASSWORD=""
 ROUTEGATE_ADMIN_PASSWORD=""
@@ -603,6 +604,7 @@ STATUS=${status}
 DOMAIN=${ROUTEGATE_DOMAIN}
 VERSION=${version}
 ARCH=${ROUTEGATE_ARCH}
+BUNDLE_SHA256=${ROUTEGATE_BUNDLE_SHA256}
 PROMETHEUS_MANAGED=${ROUTEGATE_INSTALL_PROMETHEUS}
 UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF_STATE
@@ -890,9 +892,35 @@ detect_conflicts() {
   done
 }
 
+validate_resume_release_identity() {
+  local previous_version=$1
+  local previous_checksum=$2
+  local current_version=$3
+  local current_checksum=$4
+
+  # A legacy 'latest' selector is not an immutable version and cannot prove
+  # the same release is being resumed. Manual recovery is required instead.
+  [[ "$previous_version" != "latest" && -n "$previous_version" ]] ||
+    die "Interrupted installation has no pinned release version. Review ownership state and logs before manual recovery."
+  [[ "$previous_checksum" =~ ^[a-f0-9]{64}$ ]] ||
+    die "Interrupted installation has no valid pinned release SHA-256. Automatic resume is unsafe; review state and logs before recovery."
+  [[ "$current_checksum" =~ ^[a-f0-9]{64}$ ]] ||
+    die "The new release bundle was not integrity-verified; refusing to resume."
+  [[ "$previous_version" == "$current_version" ]] ||
+    die "Interrupted installation is pinned to release ${previous_version}; requested release ${current_version} differs. Use the original version and exact bundle or perform reviewed manual recovery."
+  [[ "$previous_checksum" == "$current_checksum" ]] ||
+    die "Interrupted installation release SHA-256 differs from the verified archive. Refusing to replace partially installed components; restore the original exact bundle."
+}
+
 initialize_install_state() {
-  if [[ "$ROUTEGATE_RESUME_INSTALL" == "0" ]]; then
-    write_install_state_status installing "$ROUTEGATE_VERSION"
+  if [[ "$ROUTEGATE_RESUME_INSTALL" == "1" ]]; then
+    # This assertion runs AFTER checksum/manifest verification but BEFORE apt
+    # and every platform file/service mutation.
+    validate_resume_release_identity       "$(state_value VERSION || true)" "$(state_value BUNDLE_SHA256 || true)"       "$ROUTEGATE_RESOLVED_VERSION" "$ROUTEGATE_BUNDLE_SHA256"
+  else
+    [[ "$ROUTEGATE_BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] ||
+      die "Release bundle SHA-256 is unavailable; refusing to create installation ownership state."
+    write_install_state_status installing "$ROUTEGATE_RESOLVED_VERSION"
   fi
   install -d -m 0700 "$ROUTEGATE_STATE_DIR"
 }
@@ -1137,6 +1165,7 @@ verify_bundle_checksum() {
     || die "No valid SHA-256 entry for ${bundle_name} was found."
   actual=$(sha256sum "$bundle_path" | awk '{print $1}')
   [[ "$actual" == "$expected" ]] || die "Release bundle checksum verification failed."
+  ROUTEGATE_BUNDLE_SHA256="$actual"
   log "Release bundle checksum verified."
 }
 
