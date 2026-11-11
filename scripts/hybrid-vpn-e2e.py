@@ -204,6 +204,34 @@ def run_install_and_traffic() -> None:
             api.call("PATCH", base + "/protocol-settings", {"realityServerName": TARGET})
             print("[hybrid-vpn-e2e] Failed apply preserved VPN runtime, client link and Admin HTTPS.", flush=True)
 
+            # A full host reboot is impossible inside a normal GitHub-hosted
+            # runner, but we can exercise the persisted services and credentials
+            # through an actual cold restart of the native stack. This proves
+            # rehydration of PostgreSQL, Manager, Agent, nginx, and sing-box.
+            for service in ("sing-box", "routegate-agent", "routegate-manager",
+                            "nginx", "postgresql"):
+                common.run("systemctl", "is-enabled", service)
+            for service in ("postgresql", "routegate-manager", "routegate-agent",
+                            "nginx", "sing-box"):
+                common.run("systemctl", "restart", service)
+            ready = False
+            for _ in range(50):
+                try:
+                    common.run("curl", "--fail", "--silent", "--show-error",
+                               "--max-time", "3", "--noproxy", "*",
+                               f"https://{DOMAIN}/api/admin/health")
+                    common.run("systemctl", "is-active", "routegate-agent")
+                    common.run("systemctl", "is-active", "sing-box")
+                    ready = True
+                    break
+                except RuntimeError:
+                    time.sleep(1)
+            require(ready, "Hybrid stack did not recover after full service restart")
+            require(api.call("GET", account_base + "/client-connection")["vlessLink"] == link,
+                    "Served VPN client profile changed after full service restart")
+            common.traffic(origin.server_port)
+            print("[hybrid-vpn-e2e] Full Hybrid services restarted; persisted credentials, link and real VPN traffic survived.", flush=True)
+
 
 if __name__ == "__main__":
     try:
