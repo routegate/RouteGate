@@ -144,6 +144,25 @@ test_argument_parsing() {
   assert_equal "parses explicit managed Prometheus opt-in" "1" "$output"
 }
 
+test_numbered_interactive_configuration_menu_contract() {
+  assert_true "numeric TUI menu offers main settings" \
+    grep -Fq '1. Main settings (domain, emails, server name)' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu offers Prometheus" \
+    grep -Fq '2. Prometheus' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu offers Grafana in the same setup" \
+    grep -Fq '3. Grafana' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu offers preflight and cancellation" \
+    grep -Fq '5. Continue to preflight and installation' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu has an exit before platform mutations" \
+    grep -Fq '0. Exit without installing' "$ROOT_DIR/install.sh"
+  assert_true "Grafana toggle enables Prometheus in menu" \
+    grep -Fq 'Prometheus enabled as a Grafana dependency.' "$ROOT_DIR/install.sh"
+  assert_true "noninteractive installations retain original input path" \
+    grep -Fq 'if [[ "$ROUTEGATE_ASSUME_YES" == "1" ]] || ! interactive_tty_available; then' "$ROOT_DIR/install.sh"
+  assert_true "menu uses /dev/tty rather than shell stdin" \
+    grep -Fq 'Choose [0-5]: ' "$ROOT_DIR/install.sh"
+}
+
 test_grafana_selection_and_install_contract() {
   local output
   output=$(
@@ -751,6 +770,7 @@ test_existing_install_precedes_repository_preflight
 test_validation_helpers
 test_argument_parsing
 test_grafana_selection_and_install_contract
+test_numbered_interactive_configuration_menu_contract
 test_artifact_urls
 test_checksum_verification
 test_archive_entry_policy
