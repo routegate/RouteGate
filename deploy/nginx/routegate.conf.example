@@ -15,7 +15,9 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # Access links are bearer secrets in the URL path. Never forward even
+    # the Manager origin as a referrer from this host.
+    add_header Referrer-Policy "no-referrer" always;
     add_header Content-Security-Policy "base-uri 'self'; frame-ancestors 'self'; object-src 'none'" always;
 
     # Commit-addressed Agent bootstrap artifacts are static release files.
@@ -32,6 +34,10 @@ server {
     # the default nginx access log.
     location /sub/ {
         access_log off;
+        # Manager already emits no-referrer. Suppress the upstream copy so
+        # nginx returns exactly one consistent site-wide no-referrer policy.
+        # This keeps inherited HSTS, CSP, X-Frame and nosniff headers intact.
+        proxy_hide_header Referrer-Policy;
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -43,6 +49,9 @@ server {
     }
 
     location /api/ {
+        # Avoid duplicate, possibly conflicting policies from sensitive API
+        # handlers. The server-level no-referrer header remains inherited.
+        proxy_hide_header Referrer-Policy;
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
