@@ -43,6 +43,9 @@ jobs:
           test -s scripts/test-release-candidate-dry-run.sh
           grep -Eq '^  tagless-release-candidate:' .github/workflows/ci.yml
           grep -Fq 'bash scripts/test-release-candidate-dry-run.sh' .github/workflows/ci.yml
+          test -s scripts/check-release-tag-identity.sh
+          test -s scripts/test-release-tag-identity.sh
+          grep -Fq 'bash scripts/test-release-tag-identity.sh' .github/workflows/ci.yml
 
       - name: Reject tags not in canonical main history
         if: github.event_name == 'push'
@@ -59,6 +62,9 @@ jobs:
             echo "::error::Refusing to build a release tag outside reviewed main history."
             exit 1
           }
+          # The tag may have been moved or deleted after triggering CI.
+          # Compare the live origin ref, not the locally checked out tag.
+          bash scripts/check-release-tag-identity.sh "$REF_NAME" "$SOURCE_SHA"
 
   ci:
     name: Same-commit RouteGate CI including native Hybrid E2E
@@ -237,6 +243,9 @@ jobs:
           if [[ "$TAG_NAME" == *-rc.* ]]; then
             release_flags+=(--prerelease)
           fi
+          # Recheck the live remote ref immediately before creating a
+          # draft. Do not publish if a tag was moved during this run.
+          bash scripts/check-release-tag-identity.sh "$TAG_NAME" "$GITHUB_SHA"
           # Tag builds create candidates only; public release requires
           # verified Hybrid E2E and explicit RG-140 review.
           # See docs/release/promotion-gate.md before manually publishing.
