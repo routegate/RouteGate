@@ -5,6 +5,8 @@ on:
     branches:
       - main
   pull_request:
+  # Release tags reuse exactly these tests before any release artifact is built.
+  workflow_call:
 
 jobs:
   backend:
