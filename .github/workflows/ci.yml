@@ -52,6 +52,9 @@ jobs:
       - name: Verify fenced Manager timeout preservation against PostgreSQL
         run: go test ./internal/db -run '^TestRuntimeMutationFencingPreservesUncertainJobs$' -count=1 -timeout=120s -v
 
+      - name: Verify historical result readback against PostgreSQL
+        run: go test ./internal/agents ./internal/db -run '^TestRuntimeMutationFencing(VerifyHandler|VerifyStoredResult)$' -count=1 -timeout=120s -v
+
       # RG-140 v0.2.0 integration: old #547 tests are now replayed from
       # current main, not substituted for the current backend/release CI.
       - name: Test scoped VLESS removal preflight against real sing-box
@@ -98,6 +101,9 @@ jobs:
 
       - name: Test opt-in Agent mutation dispatch and strict acknowledgements
         run: go test -race ./internal/config ./internal/client ./internal/heartbeat ./internal/tasks -run '(FencedDispatch|RuntimeMutation|CompleteTask|CredentialRemoval)' -count=1 -timeout=120s -v
+
+      - name: Check historical readback identity and digest with race detector
+        run: go test -race ./internal/client ./internal/heartbeat -run '^(TestRuntimeMutationResultVerification|TestRuntimeMutationVerifiedResultRetainsFence|TestFencedDurableReplayRefusesHistorical404AndRetainsFence)$' -count=1 -timeout=120s -v
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
         run: |
