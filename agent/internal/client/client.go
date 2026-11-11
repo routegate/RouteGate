@@ -3,6 +3,8 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -221,12 +223,47 @@ func (c *Client) CompleteTask(ctx context.Context, agentToken, jobID string, req
 
 // ReplayTaskResult reports a historical success without executing its task.
 // A 404 is never acknowledgement, including after an uncertain HTTP attempt.
-func (c *Client) ReplayTaskResult(ctx context.Context, agentToken, jobID string, data []byte) error {
+func (c *Client) ReplayTaskResult(ctx context.Context, agentToken, jobID string, data []byte, binding tasks.RuntimeResultBinding) error {
+	if binding.ManagerURL != c.managerURL || binding.AgentID == "" || binding.ServerID == "" {
+		return errors.New("result identity mismatch")
+	}
 	var envelope completeTaskRequest
 	if json.Unmarshal(data, &envelope) != nil || envelope.Status != "succeeded" || envelope.ErrorMessage != "" || strings.TrimSpace(jobID) == "" {
 		return errors.New("invalid durable task result")
 	}
-	return c.deliverTaskResult(ctx, agentToken, jobID, json.RawMessage(data), true)
+	err := c.deliverTaskResult(ctx, agentToken, jobID, json.RawMessage(data), true)
+	if err == nil {
+		return nil
+	}
+	// Manager may have committed before the response was lost. Read back the
+	// exact historical result; a missing task alone is never acknowledgement.
+	if ctx.Err() != nil || c.verifyRuntimeResult(ctx, agentToken, jobID, data, binding) != nil {
+		return errors.New("historical runtime result remains unverified")
+	}
+	return nil
+}
+
+func (c *Client) verifyRuntimeResult(ctx context.Context, token, jobID string, data []byte, binding tasks.RuntimeResultBinding) error {
+	var result struct {
+		SchemaVersion  int    `json:"schemaVersion"`
+		Verified       bool   `json:"verified"`
+		TaskID         string `json:"taskId"`
+		AgentID        string `json:"agentId"`
+		ServerID       string `json:"serverId"`
+		EnvelopeSHA256 string `json:"envelopeSha256"`
+	}
+	if binding.ManagerURL != c.managerURL || binding.AgentID == "" || binding.ServerID == "" {
+		return errors.New("result identity mismatch")
+	}
+	path := "/api/v1/agent/tasks/" + url.PathEscape(jobID) + "/result/verify"
+	if err := c.doJSON(ctx, http.MethodPost, path, token, json.RawMessage(data), &result); err != nil {
+		return err
+	}
+	digest := sha256.Sum256(data)
+	if result.SchemaVersion != 1 || !result.Verified || result.TaskID != jobID || result.AgentID != binding.AgentID || result.ServerID != binding.ServerID || result.EnvelopeSHA256 != hex.EncodeToString(digest[:]) {
+		return errors.New("result evidence mismatch")
+	}
+	return nil
 }
 
 func (c *Client) deliverTaskResult(ctx context.Context, agentToken, jobID string, req any, strict bool) error {
