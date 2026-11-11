@@ -7,6 +7,7 @@ client traffic plus a rejected configuration apply. Never print credentials,
 subscription links, traffic configs or private Agent logs.
 """
 from contextlib import ExitStack
+import base64
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,8 @@ import sys
 import time
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
+from urllib.request import ProxyHandler, Request, build_opener
 
 # Reuse the already-proven remote-node data-plane helpers. Its filename
 # contains dashes (remote-node-vpn-e2e.py), so a regular import cannot work.
@@ -92,6 +95,64 @@ def wait_for_agent(api: common.API, base: str) -> None:
     raise RuntimeError("Hybrid Agent did not report a recent heartbeat")
 
 
+def public_subscription(url: str, client: str) -> tuple[int, dict, bytes]:
+    """Read the real canonical /sub bearer through nginx HTTPS, not internal API.
+
+    Never log the bearer URL, headers, returned credentials or response body.
+    Python's default TLS verifier uses the runner's installed *test-only* CA.
+    """
+    parsed = urlsplit(url)
+    require(parsed.scheme == "https" and parsed.hostname == DOMAIN
+            and parsed.port is None and parsed.path.startswith("/sub/")
+            and not parsed.query and not parsed.fragment and not parsed.username,
+            "Subscription URL is not on the canonical HTTPS Manager origin")
+    request = Request(url, headers={"User-Agent": client})
+    opener = build_opener(ProxyHandler({}))
+    try:
+        with opener.open(request, timeout=15) as response:
+            code = response.status
+            headers = dict(response.headers.items())
+            body = response.read(16385)
+    except HTTPError as error:
+        code = error.code
+        headers = dict(error.headers.items())
+        body = error.read(16385)
+    except (URLError, TimeoutError):
+        raise RuntimeError("Canonical HTTPS subscription request failed") from None
+    require(len(body) <= 16384, "Subscription response unexpectedly large")
+    return code, {k.lower(): v for k, v in headers.items()}, body
+
+
+def require_deployed_subscription(url: str, client: str, applied_link: str) -> bytes:
+    code, headers, payload = public_subscription(url, client)
+    require(code == 200,
+            f"Applied account subscription returned HTTP {code} instead of 200")
+    require(headers.get("cache-control") == "no-store, max-age=0",
+            "Subscription response is cacheable")
+    require(headers.get("referrer-policy") == "no-referrer",
+            "Subscription response can leak a bearer through referrers")
+    require(headers.get("x-routegate-delivery-format") == "base64",
+            "Third-party client subscription is not portable Base64")
+    require(headers.get("x-routegate-protocols") == "vless",
+            "Subscription advertises an unapplied or unexpected protocol")
+    require(headers.get("content-type", "").startswith("text/plain"),
+            "Subscription has an unexpected content type")
+    try:
+        decoded = base64.b64decode(payload, validate=True).decode("utf-8").strip()
+    except (ValueError, UnicodeDecodeError):
+        raise RuntimeError("Subscription is not valid UTF-8 Base64") from None
+    require(decoded == applied_link,
+            "Subscription does not match the exact last-applied VLESS client profile")
+    return payload
+
+
+def require_unavailable_subscription(url: str, client: str, expected: int) -> None:
+    code, _, body = public_subscription(url, client)
+    require(code == expected, f"Subscription expected HTTP {expected}, got {code}")
+    require(b"vless://" not in body and b"reality" not in body.lower(),
+            "Unready or revoked subscription leaked VPN credentials")
+
+
 def run_install_and_traffic() -> None:
     # Double guard: never allow a workstation, self-hosted GitHub runner, or VPS.
     common.isolated(MANAGER)
@@ -149,6 +210,20 @@ def run_install_and_traffic() -> None:
         api.call("POST", account_base + "/activate", {})
         api.call("GET", account_base + "/client-connection", expected=409)
 
+        # RG-140: issue genuine per-device bearer links before first Apply.
+        # HTTP 503 is a *not-ready* response, never a valid subscription.
+        ios = api.call("POST", account_base + "/devices",
+                       {"name": "CI Hiddify iPhone", "clientType": "hiddify",
+                        "deviceType": "ios"}, expected=201)
+        android = api.call("POST", account_base + "/devices",
+                           {"name": "CI v2rayNG Android", "clientType": "v2rayng",
+                            "deviceType": "android"}, expected=201)
+        ios_url = ios["subscriptionUrl"]
+        android_url = android["subscriptionUrl"]
+        require(ios_url != android_url, "Device bearers are not independent")
+        require_unavailable_subscription(ios_url, "Hiddify", 503)
+        require_unavailable_subscription(android_url, "v2rayNG", 503)
+
         def render_apply(expected: str) -> dict:
             rendered = api.call("POST", base + "/config/render", {}, expected=201)
             version = rendered["configVersion"]["id"]
@@ -169,6 +244,14 @@ def run_install_and_traffic() -> None:
         config = common.client_config(link)
         require(config["outbounds"][0]["tls"]["server_name"] == TARGET,
                 "Client Reality name disagrees with applied Hybrid config")
+
+        # This is the actual public HTTPS /sub endpoint, not an admin-only
+        # client-connection API. The bearer is never copied to CI logs.
+        ios_subscription = require_deployed_subscription(ios_url, "Hiddify", link)
+        android_subscription = require_deployed_subscription(android_url, "v2rayNG", link)
+        require(ios_subscription == android_subscription,
+                "Equivalent VLESS devices received inconsistent applied profiles")
+        print("[hybrid-vpn-e2e] Device-scoped Hiddify and v2rayNG /sub delivery returned applied VLESS over HTTPS.", flush=True)
 
         client_config_path = WORK / "hybrid-client.json"
         client_config_path.write_text(json.dumps(config))
@@ -191,6 +274,10 @@ def run_install_and_traffic() -> None:
                      {"realityServerName": common.BAD_TARGET})
             require(api.call("GET", account_base + "/client-connection")["vlessLink"] == link,
                     "Draft settings changed published client connection")
+            require(require_deployed_subscription(ios_url, "Hiddify", link) == ios_subscription,
+                    "Saving un-applied settings changed the Hiddify subscription")
+            require(require_deployed_subscription(android_url, "v2rayNG", link) == android_subscription,
+                    "Saving un-applied settings changed the Android subscription")
             failed = render_apply("failed")
             require(failed.get("resultPayload", {}).get("failedStage") == "validate",
                     "Bad Reality target was not rejected before active apply")
@@ -198,6 +285,10 @@ def run_install_and_traffic() -> None:
                     "Failed apply modified active VPN or restarted the runtime")
             require(api.call("GET", account_base + "/client-connection")["vlessLink"] == link,
                     "Failed apply changed current client link")
+            require(require_deployed_subscription(ios_url, "Hiddify", link) == ios_subscription,
+                    "Failed apply changed the established Hiddify subscription")
+            require(require_deployed_subscription(android_url, "v2rayNG", link) == android_subscription,
+                    "Failed apply changed the established v2rayNG subscription")
             common.traffic(origin.server_port)
             common.run("curl", "--fail", "--silent", "--show-error", "--max-time", "10",
                        "--noproxy", "*", f"https://{DOMAIN}/api/admin/health")
@@ -229,8 +320,26 @@ def run_install_and_traffic() -> None:
             require(ready, "Hybrid stack did not recover after full service restart")
             require(api.call("GET", account_base + "/client-connection")["vlessLink"] == link,
                     "Served VPN client profile changed after full service restart")
+            require(require_deployed_subscription(ios_url, "Hiddify", link) == ios_subscription,
+                    "Hiddify subscription changed after service restart")
+            require(require_deployed_subscription(android_url, "v2rayNG", link) == android_subscription,
+                    "v2rayNG subscription changed after service restart")
             common.traffic(origin.server_port)
             print("[hybrid-vpn-e2e] Full Hybrid services restarted; persisted credentials, link and real VPN traffic survived.", flush=True)
+
+            # Revoke only the Android device *subscription bearer*, not the
+            # shared VLESS runtime credential. The other imported URL must
+            # remain valid, and existing VPN traffic must still work. Do NOT
+            # claim this proves runtime credential revocation (RG-140 #545).
+            api.call("POST", account_base + "/devices/" + android["device"]["id"]
+                     + "/revoke", {}, expected=200)
+            require_unavailable_subscription(android_url, "v2rayNG", 404)
+            require(require_deployed_subscription(ios_url, "Hiddify", link) == ios_subscription,
+                    "Revoking one device bearer unexpectedly broke another device")
+            require(api.call("GET", account_base + "/client-connection")["vlessLink"] == link,
+                    "Device bearer revocation changed shared VPN credentials")
+            common.traffic(origin.server_port)
+            print("[hybrid-vpn-e2e] Unready=503, applied=200, pending/failed/restarted=unchanged; revoked bearer=404, unaffected device and VPN survive.", flush=True)
 
 
 if __name__ == "__main__":
