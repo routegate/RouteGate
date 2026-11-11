@@ -114,7 +114,7 @@ def run_install_and_traffic() -> None:
     base = f"/api/v1/servers/{server_id}"
 
     info = api.call("GET", base)
-    require(info["server"]["deploymentRole"] == "hybrid",
+    require(info.get("deploymentRole") == "hybrid",
             "Installed server is not a Hybrid deployment")
     wait_for_agent(api, base)
 
@@ -140,7 +140,7 @@ def run_install_and_traffic() -> None:
         api.call("PATCH", base, {"publicIp": "127.0.0.1"})
         recommended = api.call("POST", base + "/protocol-settings/recommended",
                                {"serverName": TARGET})
-        require(recommended.get("vlessPort") == 8443,
+        require(recommended.get("vless", {}).get("port") == 8443,
                 "Hybrid recommended VLESS listener must use TCP 8443, not HTTPS 443")
         account = api.call("POST", "/api/v1/vpn-accounts",
                            {"displayName": "Hybrid CI VLESS", "serverId": server_id},
