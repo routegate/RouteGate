@@ -33,6 +33,9 @@ test('quick start is pinned to the exact published tag', () => {
 test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.ok(!app.includes("VERSION=v0.1.0"))
+  const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8')
+  assert.ok(!readme.includes('VERSION=v0.1.0'))
+  assert.ok(readme.includes('VERSION=REPLACE_WITH_STABLE_TAG'))
   assert.match(app, /disabled=\{!installCommand\}/)
   assert.match(app, /status: 'unavailable'/)
   assert.match(app, /publishedStableTag\(payload\)/)
