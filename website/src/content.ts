@@ -23,7 +23,7 @@ export type SiteContent = {
     commandLabel: string; commandTitle: string; commandNote: string
     releaseLoadingTitle: string; releaseUnavailableTitle: string
     releaseLoading: string; releaseUnavailable: string; releaseUnavailableNote: string
-    legacyReleaseNote: string
+    legacyReleaseNote: string; releaseListLabel: string
   }
   roadmap: { eyebrow: string; title: string; intro: string; columns: RoadmapColumn[] }
   faq: {
@@ -93,6 +93,7 @@ export const content: Record<Locale, SiteContent> = {
       commandTitle: 'Опубликованная стабильная версия {version}',
       commandNote: 'Команда привязана к конкретному опубликованному тегу. Просмотри install.sh перед запуском и проверь контрольные суммы релизного архива.',
       legacyReleaseNote: 'Последний публичный стабильный выпуск — v0.1.0 (устаревший MVP). Новые функции ветки main в него не входят. Подготовка актуального релиза: GitHub Issue #715.',
+      releaseListLabel: 'Опубликованные релизы',
       releaseLoadingTitle: 'Проверяем актуальный стабильный релиз…',
       releaseUnavailableTitle: 'Не удалось проверить стабильный релиз',
       releaseLoading: 'Получаем опубликованную версию из GitHub Releases…',
@@ -203,6 +204,7 @@ export const content: Record<Locale, SiteContent> = {
       commandTitle: 'Published stable release {version}',
       commandNote: 'This command is pinned to the exact published release tag. Review install.sh before running it and verify release bundle checksums.',
       legacyReleaseNote: 'The latest published stable is v0.1.0 (legacy MVP). Features developed on main are not in this release. Current release preparation: GitHub Issue #715.',
+      releaseListLabel: 'Published releases',
       releaseLoadingTitle: 'Checking the published stable release…',
       releaseUnavailableTitle: 'Cannot verify a stable release',
       releaseLoading: 'Retrieving the published stable version from GitHub Releases…',
