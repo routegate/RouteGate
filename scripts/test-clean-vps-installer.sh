@@ -144,6 +144,53 @@ test_argument_parsing() {
   assert_equal "parses explicit managed Prometheus opt-in" "1" "$output"
 }
 
+test_numbered_interactive_configuration_menu_contract() {
+  assert_true "numeric TUI menu offers main settings" \
+    grep -Fq '1. Main settings (domain, emails, server name)' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu offers Prometheus" \
+    grep -Fq '2. Prometheus' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu offers Grafana in the same setup" \
+    grep -Fq '3. Grafana' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu offers preflight and cancellation" \
+    grep -Fq '5. Continue to preflight and installation' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu has an exit before platform mutations" \
+    grep -Fq '0. Exit without installing' "$ROOT_DIR/install.sh"
+  assert_true "Grafana toggle enables Prometheus in menu" \
+    grep -Fq 'Prometheus enabled as a Grafana dependency.' "$ROOT_DIR/install.sh"
+  assert_true "noninteractive installations retain original input path" \
+    grep -Fq 'if [[ "$ROUTEGATE_ASSUME_YES" == "1" ]] || ! interactive_tty_available; then' "$ROOT_DIR/install.sh"
+  assert_true "menu uses /dev/tty rather than shell stdin" \
+    grep -Fq 'Choose [0-5]: ' "$ROOT_DIR/install.sh"
+}
+
+test_interactive_menu_pseudoterminal_smoke() {
+  command -v script >/dev/null 2>&1 || { fail "interactive SSH menu requires util-linux script in CI"; return; }
+  command -v timeout >/dev/null 2>&1 || { fail "interactive SSH menu smoke needs timeout"; return; }
+  cat >"$TEST_TMP/interactive-menu-smoke.sh" <<EOF_MENU
+#!/usr/bin/env bash
+source "$ROOT_DIR/install.sh"
+ROUTEGATE_STATE_FILE="$TEST_TMP/does-not-exist.env"
+ROUTEGATE_LOG_FILE="$TEST_TMP/menu-smoke.log"
+ROUTEGATE_DOMAIN=""
+ROUTEGATE_EMAIL=""
+ROUTEGATE_ADMIN_EMAIL=""
+ROUTEGATE_SERVER_NAME=""
+ROUTEGATE_INSTALL_PROMETHEUS=""
+ROUTEGATE_INSTALL_GRAFANA=""
+ROUTEGATE_ASSUME_YES=0
+installer_configuration_menu
+printf 'MENU_RESULT=%s|%s|%s|%s\\n' "\$ROUTEGATE_DOMAIN" "\$ROUTEGATE_EMAIL" "\$ROUTEGATE_INSTALL_PROMETHEUS" "\$ROUTEGATE_INSTALL_GRAFANA"
+EOF_MENU
+  local output
+  if ! output=$(printf '1\nvpn.example.org\nowner@example.org\nowner@example.org\n\n3\n5\n' \
+       | timeout 20 script -q -e -c "bash $TEST_TMP/interactive-menu-smoke.sh" /dev/null 2>&1); then
+    fail "real /dev/tty menu completes a scripted numbered selection"
+    return
+  fi
+  assert_true "real /dev/tty numbered menu selects Grafana and required Prometheus" \
+    grep -Fq 'MENU_RESULT=vpn.example.org|owner@example.org|1|1' <<<"$output"
+}
+
 test_grafana_selection_and_install_contract() {
   local output
   output=$(
@@ -751,6 +798,8 @@ test_existing_install_precedes_repository_preflight
 test_validation_helpers
 test_argument_parsing
 test_grafana_selection_and_install_contract
+test_numbered_interactive_configuration_menu_contract
+test_interactive_menu_pseudoterminal_smoke
 test_artifact_urls
 test_checksum_verification
 test_archive_entry_policy

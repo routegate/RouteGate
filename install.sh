@@ -327,6 +327,155 @@ prompt_for_grafana() {
   fi
 }
 
+wizard_prompt_value() {
+  local label=$1 kind=$2 current=$3 value=""
+  while true; do
+    read -r -p "$label [$current]: " value </dev/tty \
+      || die "Terminal input ended while editing installation settings."
+    [[ -n "$value" ]] || value="$current"
+    if [[ "$kind" == "domain" ]]; then
+      value="${value,,}"
+      if validate_domain "$value"; then
+        printf '%s' "$value"
+        return 0
+      fi
+    elif validate_email "$value"; then
+      printf '%s' "$value"
+      return 0
+    fi
+    printf 'Invalid %s. Try again.\n' "$kind" >/dev/tty
+  done
+}
+
+wizard_install_plan() {
+  {
+    printf '\n  Install plan:\n'
+    printf '    RouteGate Manager + Agent + PostgreSQL + nginx/HTTPS : required\n'
+    printf '    Prometheus : %s\n' "$([[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] && echo YES || echo NO)"
+    printf '    Grafana    : %s\n' "$([[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] && echo YES || echo NO)"
+    printf '    VPN runtimes: configured later using the Admin UI\n'
+    printf '    Release: %s (must be pinned to a verified bundle)\n\n' "$ROUTEGATE_VERSION"
+  } >/dev/tty
+}
+
+installer_configuration_menu() {
+  # Read only TTY; do not interfere with non-interactive CI and --yes.
+  interactive_tty_available || die "Installer menu requires an interactive terminal."
+  [[ "$ROUTEGATE_ASSUME_YES" != "1" ]] || die "Installer menu is disabled with --yes."
+  ROUTEGATE_DOMAIN="${ROUTEGATE_DOMAIN,,}"
+  [[ -n "$ROUTEGATE_ADMIN_EMAIL" ]] || ROUTEGATE_ADMIN_EMAIL="$ROUTEGATE_EMAIL"
+  [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
+
+  local status="" saved_prom="" saved_grafana=""
+  if [[ -f "$ROUTEGATE_STATE_FILE" ]]; then
+    status=$(state_value STATUS || true)
+    saved_prom=$(state_value PROMETHEUS_MANAGED || true)
+    saved_grafana=$(state_value GRAFANA_REQUESTED || true)
+    if [[ "$status" == "installing" || "$status" == "complete" ]]; then
+      [[ -n "$ROUTEGATE_DOMAIN" ]] || ROUTEGATE_DOMAIN=$(state_value DOMAIN || true)
+      [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
+      [[ -n "$saved_prom" ]] && ROUTEGATE_INSTALL_PROMETHEUS="$saved_prom"
+      if [[ "$status" == "installing" && -n "$saved_grafana" ]]; then
+        ROUTEGATE_INSTALL_GRAFANA="$saved_grafana"
+      fi
+    fi
+  fi
+  [[ -n "$ROUTEGATE_INSTALL_PROMETHEUS" ]] || ROUTEGATE_INSTALL_PROMETHEUS=0
+  [[ -n "$ROUTEGATE_INSTALL_GRAFANA" ]] || ROUTEGATE_INSTALL_GRAFANA=0
+  ROUTEGATE_INSTALL_PROMETHEUS=$(normalize_prometheus_choice "$ROUTEGATE_INSTALL_PROMETHEUS") \
+    || die "Invalid Prometheus selection."
+  if [[ "$status" == "complete" && "$ROUTEGATE_INSTALL_GRAFANA" == "1" && "$ROUTEGATE_INSTALL_PROMETHEUS" != "1" ]]; then
+    die "Existing RouteGate installation has no managed Prometheus; cannot add Grafana in this run."
+  fi
+  prompt_for_grafana
+
+  local choice="" domain_label=""
+  while true; do
+    domain_label="$ROUTEGATE_DOMAIN"
+    [[ -n "$domain_label" ]] || domain_label="not configured"
+    {
+      printf '\n\033[1;36m+----------------------------------------------------------+\033[0m\n'
+      printf '\033[1;36m|               RouteGate VPN Installer                    |\033[0m\n'
+      printf '\033[1;36m+----------------------------------------------------------+\033[0m\n'
+      printf '  Target: %-42s\n' "$domain_label"
+      printf '  1. Main settings (domain, emails, server name)\n'
+      printf '  2. Prometheus       [%s]\n' "$([[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] && echo ON || echo OFF)"
+      printf '  3. Grafana          [%s]\n' "$([[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] && echo ON || echo OFF)"
+      printf '  4. View installation plan\n'
+      printf '  5. Continue to preflight and installation\n'
+      printf '  0. Exit without installing\n'
+      if [[ "$status" == "installing" ]]; then
+        printf '  Note: interrupted installation; original components are locked.\n'
+      elif [[ "$status" == "complete" ]]; then
+        printf '  Note: existing core installation; only Grafana add-on may be retried.\n'
+      fi
+      printf '\n'
+    } >/dev/tty
+    read -r -p "Choose [0-5]: " choice </dev/tty \
+      || die "Terminal input ended before installation confirmation."
+    case "$choice" in
+      1)
+        if [[ "$status" == "installing" || "$status" == "complete" ]]; then
+          printf 'Existing domain is pinned: %s. Contact values may still be supplied.\n' "$ROUTEGATE_DOMAIN" >/dev/tty
+          ROUTEGATE_EMAIL=$(wizard_prompt_value "Let's Encrypt contact email" email "$ROUTEGATE_EMAIL")
+          ROUTEGATE_ADMIN_EMAIL=$(wizard_prompt_value "Administrator email" email "$ROUTEGATE_ADMIN_EMAIL")
+          continue
+        fi
+        ROUTEGATE_DOMAIN=$(wizard_prompt_value "RouteGate public domain" domain "$ROUTEGATE_DOMAIN")
+        ROUTEGATE_EMAIL=$(wizard_prompt_value "Let's Encrypt contact email" email "$ROUTEGATE_EMAIL")
+        [[ -n "$ROUTEGATE_ADMIN_EMAIL" ]] || ROUTEGATE_ADMIN_EMAIL="$ROUTEGATE_EMAIL"
+        ROUTEGATE_ADMIN_EMAIL=$(wizard_prompt_value "Administrator email" email "$ROUTEGATE_ADMIN_EMAIL")
+        [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
+        read -r -p "Server display name [$ROUTEGATE_SERVER_NAME]: " choice </dev/tty \
+          || die "Terminal input ended while editing server name."
+        [[ -z "$choice" ]] || ROUTEGATE_SERVER_NAME="$choice"
+        ;;
+      2)
+        if [[ "$status" == "installing" || "$status" == "complete" ]]; then
+          printf 'Prometheus ownership cannot change during resume or after installation.\n' >/dev/tty
+        elif [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
+          if [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+            printf 'Disable Grafana first: it requires Prometheus.\n' >/dev/tty
+          else
+            ROUTEGATE_INSTALL_PROMETHEUS=0
+          fi
+        else
+          ROUTEGATE_INSTALL_PROMETHEUS=1
+          ROUTEGATE_PROMETHEUS_EXPLICIT_NO=0
+        fi
+        ;;
+      3)
+        if [[ "$status" == "installing" ]]; then
+          printf 'Grafana selection is pinned during recovery.\n' >/dev/tty
+        elif [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+          ROUTEGATE_INSTALL_GRAFANA=0
+        elif [[ "$ROUTEGATE_PROMETHEUS_EXPLICIT_NO" == "1" ]]; then
+          printf 'Grafana conflicts with explicitly disabled Prometheus.\n' >/dev/tty
+        elif [[ "$status" == "complete" && "$ROUTEGATE_INSTALL_PROMETHEUS" != "1" ]]; then
+          printf 'Cannot add Grafana: existing platform was installed without managed Prometheus.\n' >/dev/tty
+        else
+          ROUTEGATE_INSTALL_GRAFANA=1
+          ROUTEGATE_INSTALL_PROMETHEUS=1
+          printf 'Prometheus enabled as a Grafana dependency.\n' >/dev/tty
+        fi
+        ;;
+      4) wizard_install_plan ;;
+      5)
+        if ! validate_domain "$ROUTEGATE_DOMAIN" || ! validate_email "$ROUTEGATE_EMAIL" \
+            || ! validate_email "$ROUTEGATE_ADMIN_EMAIL"; then
+          printf 'Main settings are incomplete. Choose 1 before continuing.\n' >/dev/tty
+          continue
+        fi
+        [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
+        wizard_install_plan
+        return 0
+        ;;
+      0) printf 'RouteGate installation cancelled.\n' >/dev/tty; exit 0 ;;
+      *) printf 'Choose a number from 0 to 5.\n' >/dev/tty ;;
+    esac
+  done
+}
+
 prompt_for_inputs() {
   if [[ -z "$ROUTEGATE_DOMAIN" || -z "$ROUTEGATE_EMAIL" ]]; then
     [[ "$ROUTEGATE_ASSUME_YES" != "1" ]] \
@@ -1944,7 +2093,11 @@ main() {
   initialize_logging
   acquire_install_lock
   set_install_stage input_preflight
-  prompt_for_inputs
+  if [[ "$ROUTEGATE_ASSUME_YES" == "1" ]] || ! interactive_tty_available; then
+    prompt_for_inputs
+  else
+    installer_configuration_menu
+  fi
   validate_inputs
   validate_platform
   verify_completed_install_before_repository_preflight
