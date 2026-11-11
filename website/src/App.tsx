@@ -11,7 +11,7 @@ const sourceCodeUrl = `${githubUrl}/blob/main/agent/internal/diagnostics/diagnos
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
 
 const stableReleaseApi = 'https://api.github.com/repos/routegate/RouteGate/releases/latest'
-const stableTagPattern = /^v(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$/
+const stableTagPattern = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/
 
 type StableRelease = { status: 'loading' | 'ready' | 'unavailable'; tag: string | null }
 
@@ -25,7 +25,7 @@ function buildInstallCommand(tag: string): string {
     '  -o routegate-install.sh',
     'less routegate-install.sh',
     'sudo bash routegate-install.sh --version "${VERSION}"',
-  ].join('\\n')
+  ].join('\n')
 }
 
 function readStoredLocale(): Locale | null {
