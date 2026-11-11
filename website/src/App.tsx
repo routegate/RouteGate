@@ -11,7 +11,7 @@ const licenseUrl = `${githubUrl}/blob/main/LICENSE`
 const sourceCodeUrl = `${githubUrl}/blob/main/agent/internal/diagnostics/diagnostics.go#L22-L35`
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
 
-type StableRelease = { status: 'loading' | 'ready' | 'unavailable'; tag: string | null }
+type StableRelease = { status: 'loading' | 'legacy' | 'ready' | 'unavailable'; tag: string | null }
 
 function readStoredLocale(): Locale | null {
   try {
@@ -281,7 +281,7 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
         const payload: unknown = await response.json()
         const tag = publishedStableTag(payload)
         if (!tag) throw new Error('No valid published stable release')
-        if (!unmounted) setStableRelease({ status: 'ready', tag })
+        if (!unmounted) setStableRelease({ status: tag === 'v0.1.0' ? 'legacy' : 'ready', tag })
       } catch {
         // Fail closed: no silently outdated command or mutable branch fallback.
         if (!unmounted) setStableRelease({ status: 'unavailable', tag: null })
@@ -421,23 +421,27 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
               <div><span>{t.deployment.commandLabel}</span><strong>{
                 stableRelease.status === 'ready' && stableRelease.tag
                   ? t.deployment.commandTitle.replace('{version}', stableRelease.tag)
-                  : stableRelease.status === 'loading'
-                    ? t.deployment.releaseLoadingTitle
-                    : t.deployment.releaseUnavailableTitle
+                  : stableRelease.status === 'legacy'
+                    ? t.deployment.legacyReleaseTitle
+                    : stableRelease.status === 'loading'
+                      ? t.deployment.releaseLoadingTitle
+                      : t.deployment.releaseUnavailableTitle
               }</strong></div>
               <button type="button" disabled={!installCommand} onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
             </div>
             <pre aria-live="polite"><code>{installCommand ?? (
               stableRelease.status === 'loading'
                 ? t.deployment.releaseLoading
-                : t.deployment.releaseUnavailable
+                : stableRelease.status === 'legacy'
+                  ? t.deployment.legacyReleaseDisabled
+                  : t.deployment.releaseUnavailable
             )}</code></pre>
             <div className="install-panel-footer">
-              <span>{stableRelease.status === 'ready'
-                ? stableRelease.tag === 'v0.1.0'
-                  ? t.deployment.legacyReleaseNote
-                  : t.deployment.commandNote
-                : t.deployment.releaseUnavailableNote}</span>
+              <span>{stableRelease.status === 'legacy'
+                ? t.deployment.legacyReleaseNote
+                : stableRelease.status === 'ready'
+                  ? t.deployment.commandNote
+                  : t.deployment.releaseUnavailableNote}</span>
               <a href={releasesUrl} target="_blank" rel="noreferrer">{t.deployment.releaseListLabel}<span>↗</span></a>
               <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
             </div>
