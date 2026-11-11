@@ -163,24 +163,28 @@ test_security_contract() {
 }
 
 test_loopback_socket_policy() {
+  # shellcheck disable=SC2016 -- the single-quoted script is expanded by the child bash, not this shell.
   assert_true "Grafana accepts only IPv4 loopback listener" bash -c '
     source "$1"
     ss() { printf "LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*\\n"; }
     validate_loopback_listener 3000 Grafana 1
   ' _ "$ROOT_DIR/install-grafana.sh"
 
+  # shellcheck disable=SC2016 -- the single-quoted script is expanded by the child bash, not this shell.
   assert_true "Grafana accepts only IPv6 loopback listener" bash -c '
     source "$1"
     ss() { printf "LISTEN 0 128 [::1]:3000 [::]:*\\n"; }
     validate_loopback_listener 3000 Grafana 1
   ' _ "$ROOT_DIR/install-grafana.sh"
 
+  # shellcheck disable=SC2016 -- the single-quoted script is expanded by the child bash, not this shell.
   assert_false "Grafana rejects wildcard port exposure" bash -c '
     source "$1"
     ss() { printf "LISTEN 0 128 0.0.0.0:3000 0.0.0.0:*\\n"; }
     validate_loopback_listener 3000 Grafana 1
   ' _ "$ROOT_DIR/install-grafana.sh"
 
+  # shellcheck disable=SC2016 -- the single-quoted script is expanded by the child bash, not this shell.
   assert_false "Grafana rejects concrete non-loopback even alongside loopback" bash -c '
     source "$1"
     ss() {
@@ -190,12 +194,14 @@ test_loopback_socket_policy() {
     validate_loopback_listener 3000 Grafana 1
   ' _ "$ROOT_DIR/install-grafana.sh"
 
+  # shellcheck disable=SC2016 -- the single-quoted script is expanded by the child bash, not this shell.
   assert_false "Grafana rejects missing loopback listener" bash -c '
     source "$1"
     ss() { :; }
     validate_loopback_listener 3000 Grafana 1
   ' _ "$ROOT_DIR/install-grafana.sh"
 
+  # shellcheck disable=SC2016 -- the single-quoted script is expanded by the child bash, not this shell.
   assert_true "Grafana tolerates transient startup delay with bounded retries" bash -c '
     source "$1"
     counter="$2"
