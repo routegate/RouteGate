@@ -18,6 +18,16 @@ func TestValidateMigrationSequence(t *testing.T) {
 		}
 	})
 
+	t.Run("grandfather_existing_shared_000003_history", func(t *testing.T) {
+		files := []string{
+			"backend/migrations/000003_auth_foundation.up.sql",
+			"backend/migrations/000003_config_apply_jobs.up.sql",
+		}
+		if err := validateMigrationSequence(files); err != nil {
+			t.Fatalf("legacy migration history must remain usable: %v", err)
+		}
+	})
+
 	t.Run("preserve_lettered_migration_history", func(t *testing.T) {
 		files := []string{
 			"backend/migrations/000150a_client_profile_schema_repair.up.sql",
