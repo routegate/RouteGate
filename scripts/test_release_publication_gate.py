@@ -72,8 +72,8 @@ class ReleasePublicationGateTests(unittest.TestCase):
         # the actual tarball is inspected BEFORE creating a draft.
         extract = 'index_html=$(tar -xOzf "$bundle" ./frontend/index.html)'
         self.assertIn(extract, self.workflow)
-        self.assertIn("""data-theme="dark"""", self.workflow)
-        self.assertIn("""color-scheme: dark""", self.workflow)
+        self.assertIn('data-theme="dark"', self.workflow)
+        self.assertIn('color-scheme: dark', self.workflow)
         self.assertIn("stale frontend (dark-only UI contract missing)", self.workflow)
         bundle_check = self.workflow.index(extract)
         attest = self.workflow.index("Attest release manifest provenance")
