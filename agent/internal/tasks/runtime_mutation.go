@@ -36,6 +36,7 @@ type RuntimeMutation struct {
 	lock      *os.File
 	path      string
 	marker    []byte
+	result    []byte
 	completed bool
 }
 
@@ -57,7 +58,7 @@ func BeginRuntimeMutation(dir, taskID, kind string) (*RuntimeMutation, error) {
 		return nil, ErrRuntimeMutationBlocked
 	}
 	lease := &RuntimeMutation{lock: lock, path: filepath.Join(dir, "mutation-inflight.json")}
-	for _, path := range []string{lease.path, filepath.Join(dir, "inflight.json")} {
+	for _, path := range []string{lease.path, filepath.Join(dir, "inflight.json"), filepath.Join(dir, runtimeResultFile)} {
 		if !runtimeMarkerAbsent(path) {
 			_ = lease.Close()
 			return nil, ErrRuntimeMutationBlocked
@@ -97,6 +98,17 @@ func (m *RuntimeMutation) Complete() error {
 	if err != nil || string(marker) != string(m.marker) || !runtimeMarkerAbsent(filepath.Join(filepath.Dir(m.path), "inflight.json")) {
 		return ErrRuntimeMutationBlocked
 	}
+	resultPath := filepath.Join(filepath.Dir(m.path), runtimeResultFile)
+	if len(m.result) > 0 {
+		result, err := readRemovalFile(resultPath, runtimeResultLimit, true)
+		if err != nil || string(result) != string(m.result) || removeRemovalFile(resultPath) != nil {
+			return ErrRuntimeMutationBlocked
+		}
+	} else if !runtimeMarkerAbsent(resultPath) {
+		return ErrRuntimeMutationBlocked
+	}
+	// A crash after removing the receipt but before removing intent remains
+	// blocked: delivery was acknowledged, but recovery still needs evidence.
 	if removeRemovalFile(m.path) != nil {
 		return ErrRuntimeMutationBlocked
 	}
