@@ -1116,10 +1116,22 @@ validate_resume_release_identity() {
     die "Interrupted installation release SHA-256 differs from the verified archive. Refusing to replace partially installed components; restore the original exact bundle."
 }
 
+validate_resume_grafana_intent() {
+  local persisted_choice
+  persisted_choice=$(state_value GRAFANA_REQUESTED || true)
+  # Fail closed for incomplete or older ownership state. Changing the
+  # requested add-ons during an interrupted install is not a safe retry.
+  [[ "$persisted_choice" == "0" || "$persisted_choice" == "1" ]] ||
+    die "Interrupted installation has no valid pinned Grafana selection. Review ownership state before recovery."
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" == "$persisted_choice" ]] ||
+    die "Interrupted installation is pinned to Grafana choice $persisted_choice; requested choice $ROUTEGATE_INSTALL_GRAFANA differs. Retry with the originally selected options."
+}
+
 initialize_install_state() {
   if [[ "$ROUTEGATE_RESUME_INSTALL" == "1" ]]; then
     # This assertion runs AFTER checksum/manifest verification but BEFORE apt
     # and every platform file/service mutation.
+    validate_resume_grafana_intent
     validate_resume_release_identity       "$(state_value VERSION || true)" "$(state_value BUNDLE_SHA256 || true)"       "$ROUTEGATE_RESOLVED_VERSION" "$ROUTEGATE_BUNDLE_SHA256"
   else
     [[ "$ROUTEGATE_BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] ||
