@@ -39,6 +39,10 @@ jobs:
           grep -Eq '^  hybrid-native-e2e:' .github/workflows/ci.yml
           grep -Fq 'bash scripts/hybrid-disposable-installer-e2e.sh' .github/workflows/ci.yml
           grep -Fq 'python3 "$ROOT/scripts/hybrid-vpn-e2e.py"' scripts/hybrid-disposable-installer-e2e.sh
+          # Both supported platforms must be tested from the tagged source.
+          test -s scripts/test-release-candidate-dry-run.sh
+          grep -Eq '^  tagless-release-candidate:' .github/workflows/ci.yml
+          grep -Fq 'bash scripts/test-release-candidate-dry-run.sh' .github/workflows/ci.yml
 
       - name: Reject tags not in canonical main history
         if: github.event_name == 'push'
