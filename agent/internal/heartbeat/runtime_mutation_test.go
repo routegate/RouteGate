@@ -57,6 +57,8 @@ func fencedRunnerFixture(t *testing.T, kind string, resultCodes ...int) (*Runner
 		case "/api/v1/agent/tasks/" + fencedTaskID + "/result":
 			attempt := int(results.Add(1)) - 1
 			w.WriteHeader(resultCodes[min(attempt, len(resultCodes)-1)])
+		case "/api/v1/agent/tasks/" + fencedTaskID + "/result/verify":
+			w.WriteHeader(http.StatusNotFound) // Older/unverifiable Manager fixture.
 		default:
 			t.Errorf("unexpected path %s", req.URL.Path)
 			w.WriteHeader(404)
