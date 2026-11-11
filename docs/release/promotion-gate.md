@@ -29,6 +29,18 @@ Record evidence, including exact artifact version and source commit, in the rele
 3. Review the draft and all evidence. A green CI badge alone is **insufficient**; recording a real external Hybrid E2E is mandatory for the supported current release. The release reviewer explicitly decides whether RG-140 blocks promotion.
 4. Publish the draft **manually** using the GitHub Releases interface only after the checks above. For release candidates, retain the prerelease designation. Publishing is intentionally a separate operator action, not part of CI.
 5. Never replace release assets or re-point an existing published tag. If anything changes, cut a **new** version and regenerate artifacts/attestations. The workflow refuses to upload into an existing draft or release.
+## Manual release-artifact rehearsal
+
+`workflow_dispatch` is **not** a way to publish a release. It may build and
+attest development artifacts only when started from the **current remote
+`main` HEAD**, using an explicit label `dev` or `dev-...` (bounded,
+lowercase, filename-safe). The source commit and label are validated before CI,
+again before bundling and once more before persisting attested artifacts.
+Starting manually from a feature branch, using a stale main SHA, or supplying
+a published-looking `vX.Y.Z` label is intentionally blocked. For an actual
+versioned candidate, use the separately gated `v*` tag path; it creates only
+a draft and requires external acceptance before public promotion.
+
 ## Operational boundaries
 
 - The US production Manager, FI node, and NL candidate VPS are **not** CI test targets.
