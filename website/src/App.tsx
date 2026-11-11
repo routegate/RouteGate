@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { content, type CardIcon, type Locale, type SiteContent } from './content'
+import { buildInstallCommand, publishedStableTag, stableReleaseApi } from './release'
 
 const githubUrl = 'https://github.com/routegate/RouteGate'
 const docsUrl = `${githubUrl}/tree/main/docs`
@@ -10,23 +11,7 @@ const licenseUrl = `${githubUrl}/blob/main/LICENSE`
 const sourceCodeUrl = `${githubUrl}/blob/main/agent/internal/diagnostics/diagnostics.go#L22-L35`
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
 
-const stableReleaseApi = 'https://api.github.com/repos/routegate/RouteGate/releases/latest'
-const stableTagPattern = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/
-
 type StableRelease = { status: 'loading' | 'ready' | 'unavailable'; tag: string | null }
-
-function buildInstallCommand(tag: string): string {
-  // Display an explicit immutable tag, never a mutable main/latest selector.
-  if (!stableTagPattern.test(tag)) throw new Error('Unexpected stable release tag')
-  return [
-    `VERSION=${tag}`,
-    'curl -fL --proto \'=https\' --tlsv1.2 \\',
-    '  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \\',
-    '  -o routegate-install.sh',
-    'less routegate-install.sh',
-    'sudo bash routegate-install.sh --version "${VERSION}"',
-  ].join('\n')
-}
 
 function readStoredLocale(): Locale | null {
   try {
@@ -294,12 +279,8 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
         })
         if (!response.ok) throw new Error('GitHub release lookup failed')
         const payload: unknown = await response.json()
-        const tag = payload && typeof payload === 'object' && 'tag_name' in payload
-          ? (payload as { tag_name?: unknown }).tag_name
-          : null
-        if (typeof tag !== 'string' || !stableTagPattern.test(tag)) {
-          throw new Error('No valid published stable release')
-        }
+        const tag = publishedStableTag(payload)
+        if (!tag) throw new Error('No valid published stable release')
         if (!unmounted) setStableRelease({ status: 'ready', tag })
       } catch {
         // Fail closed: no silently outdated command or mutable branch fallback.
