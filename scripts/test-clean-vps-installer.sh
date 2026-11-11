@@ -191,6 +191,57 @@ EOF_MENU
     grep -Fq 'MENU_RESULT=vpn.example.org|owner@example.org|1|1' <<<"$output"
 }
 
+test_completed_grafana_menu_state() {
+  command -v script >/dev/null 2>&1 || { fail "completed menu requires util-linux script"; return; }
+  command -v timeout >/dev/null 2>&1 || { fail "completed menu requires timeout"; return; }
+  local status state helper output
+  for status in installed retry; do
+    state="$TEST_TMP/menu-grafana-$status.env"
+    cat >"$state" <<EOF_STATE
+STATUS=complete
+DOMAIN=vpn.example.org
+VERSION=v1.2.3
+PROMETHEUS_MANAGED=1
+GRAFANA_REQUESTED=1
+EOF_STATE
+    if [[ "$status" == "installed" ]]; then
+      printf 'GRAFANA_MANAGED=1\n' >>"$state"
+    fi
+    helper="$TEST_TMP/menu-grafana-$status.sh"
+    cat >"$helper" <<EOF_MENU
+#!/usr/bin/env bash
+source "$ROOT_DIR/install.sh"
+ROUTEGATE_STATE_FILE="$state"
+ROUTEGATE_LOG_FILE="$TEST_TMP/menu-grafana-$status.log"
+ROUTEGATE_DOMAIN=""
+ROUTEGATE_EMAIL="owner@example.org"
+ROUTEGATE_ADMIN_EMAIL="owner@example.org"
+ROUTEGATE_SERVER_NAME=""
+ROUTEGATE_INSTALL_PROMETHEUS=""
+ROUTEGATE_INSTALL_GRAFANA=""
+ROUTEGATE_ASSUME_YES=0
+installer_configuration_menu
+EOF_MENU
+    if ! output=$(printf '3\n0\n' | timeout 20 script -q -e -c "bash $helper" /dev/null 2>&1); then
+      fail "completed $status menu must render and exit without host mutation"
+      continue
+    fi
+    if [[ "$status" == "installed" ]]; then
+      assert_true "completed Grafana shows INSTALLED rather than OFF" \
+        grep -Fq 'Grafana          [INSTALLED]' <<<"$output"
+      assert_true "completed Grafana cannot be toggled off as if uninstalled" \
+        grep -Fq 'This menu cannot uninstall an owned service.' <<<"$output"
+      assert_false "completed Grafana does not pretend to be OFF" \
+        grep -Fq 'Grafana          [OFF]' <<<"$output"
+    else
+      assert_true "failed post-core Grafana shows RETRY rather than OFF" \
+        grep -Fq 'Grafana          [RETRY]' <<<"$output"
+      assert_true "pending Grafana can be skipped explicitly without uninstall" \
+        grep -Fq 'Grafana          [OFF]' <<<"$output"
+    fi
+  done
+}
+
 test_local_grafana_sidecar_preflight() {
   local candidate="$TEST_TMP/local-grafana-candidate"
   local script_path="$candidate/install-grafana.sh"
@@ -941,6 +992,7 @@ test_grafana_selection_and_install_contract
 test_local_grafana_sidecar_preflight
 test_numbered_interactive_configuration_menu_contract
 test_interactive_menu_pseudoterminal_smoke
+test_completed_grafana_menu_state
 test_artifact_urls
 test_checksum_verification
 test_archive_entry_policy

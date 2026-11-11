@@ -208,6 +208,14 @@ The script is fetched from the same pinned, published RouteGate release and
 verified against its `INSTALLER_SHA256SUMS` before host mutation. Grafana's
 own installer explicitly adds the official Grafana APT repository.
 
+On an already complete RouteGate host, the same menu distinguishes
+`INSTALLED` (RouteGate-managed Grafana already present) from `RETRY`
+(Grafana was selected but its installation failed after core completion).
+A managed, installed Grafana cannot be toggled `OFF` as if that uninstalled
+the service; repeat the installer instead verifies its health without
+rotating secrets. A pending failed add-on may be explicitly skipped or retried.
+This menu is not an uninstall tool.
+
 An interactive user may disable both optional components. If Grafana was
 selected and its installation fails, the core platform remains installed and
 `STATUS=complete`; the command exits with a clear add-on failure instead of
