@@ -53,6 +53,38 @@ class ReleasePublicationGateTests(unittest.TestCase):
         # by source-policy on *tagged* commits, not by PR unit tests.
         self.assertIn("needs: ci", self.workflow)
 
+    def test_live_origin_tag_is_verified_before_draft_creation(self):
+        # An already-green workflow could outlive a mutable/deleted v* tag.
+        # Compare the live remote ref to the event source SHA twice.
+        policy = self.workflow.split("  source-policy:", 1)[1].split(
+            "\n  ci:", 1
+        )[0]
+        self.assertIn(
+            'bash scripts/check-release-tag-identity.sh "$REF_NAME" "$SOURCE_SHA"',
+            policy,
+        )
+        publish = self.publish
+        self.assertIn(
+            'bash scripts/check-release-tag-identity.sh "$TAG_NAME" "$GITHUB_SHA"',
+            publish,
+        )
+        self.assertLess(
+            publish.index('bash scripts/check-release-tag-identity.sh "$TAG_NAME"'),
+            publish.index("gh release create"),
+        )
+        self.assertIn("test -s scripts/check-release-tag-identity.sh", policy)
+        self.assertIn("test -s scripts/test-release-tag-identity.sh", policy)
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("bash scripts/test-release-tag-identity.sh", ci)
+        identity = (ROOT / "scripts" / "check-release-tag-identity.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("git ls-remote --exit-code origin", identity)
+        self.assertNotIn("git push", identity)
+        self.assertNotIn("git tag ", identity)
+
     def test_tag_build_creates_draft_not_public_release(self):
         self.assertEqual(self.publish.count("gh release create"), 2)
         self.assertEqual(self.publish.count("--draft"), 2)
