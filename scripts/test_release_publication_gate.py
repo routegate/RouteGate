@@ -85,6 +85,37 @@ class ReleasePublicationGateTests(unittest.TestCase):
         self.assertNotIn("git push", identity)
         self.assertNotIn("git tag ", identity)
 
+    def test_workflow_dispatch_is_main_only_and_has_safe_label(self):
+        # The tag-push check must not be the only gate. Manual runs are
+        # powerful (id-token/attestations), so reject branches and stale SHAs.
+        self.assertIn("workflow_dispatch:", self.workflow)
+        guard = "bash scripts/check-manual-release-source.sh"
+        self.assertEqual(self.workflow.count(guard), 3)
+        self.assertIn("if: github.event_name == 'workflow_dispatch'", self.workflow)
+        policy = self.workflow.split("  source-policy:", 1)[1].split(
+            "\n  ci:", 1
+        )[0]
+        self.assertIn(guard, policy)
+        self.assertIn("test -s scripts/check-manual-release-source.sh", policy)
+        self.assertIn("test -s scripts/test-manual-release-source.sh", policy)
+        bundles = self.workflow.split("  bundles:", 1)[1]
+        self.assertLess(
+            bundles.index("Recheck manual release origin before building"),
+            bundles.index("Resolve bundle version"),
+        )
+        self.assertLess(
+            bundles.index("Recheck manual main before preserving attested artifacts"),
+            bundles.index("Upload workflow artifact"),
+        )
+        self.assertIn("bash scripts/test-manual-release-source.sh",
+                      (ROOT / ".github/workflows/ci.yml").read_text())
+        script = (ROOT / "scripts/check-manual-release-source.sh").read_text()
+        self.assertIn("refs/heads/main", script)
+        self.assertIn("git ls-remote --exit-code --heads origin", script)
+        self.assertIn("^dev(", script)
+        self.assertNotIn("git push", script)
+        self.assertNotIn("git tag ", script)
+
     def test_tag_build_creates_draft_not_public_release(self):
         self.assertEqual(self.publish.count("gh release create"), 2)
         self.assertEqual(self.publish.count("--draft"), 2)
