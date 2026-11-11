@@ -16,6 +16,9 @@ ROUTEGATE_BUNDLE_URL="${ROUTEGATE_BUNDLE_URL:-}"
 ROUTEGATE_CHECKSUM_URL="${ROUTEGATE_CHECKSUM_URL:-}"
 ROUTEGATE_ASSUME_YES="${ROUTEGATE_ASSUME_YES:-0}"
 ROUTEGATE_INSTALL_PROMETHEUS="${ROUTEGATE_INSTALL_PROMETHEUS:-}"
+ROUTEGATE_INSTALL_GRAFANA="${ROUTEGATE_INSTALL_GRAFANA:-}"
+ROUTEGATE_PROMETHEUS_EXPLICIT_NO=0
+ROUTEGATE_GRAFANA_SCRIPT=""
 ROUTEGATE_VERIFY_BUNDLE=0
 
 ROUTEGATE_STATE_DIR="/var/lib/routegate-installer"
@@ -80,6 +83,8 @@ Options:
   --checksum-url URL        SHA256SUMS URL for --bundle-url.
   --with-prometheus         Install RouteGate-managed Prometheus.
   --without-prometheus      Do not install Prometheus (default).
+  --with-grafana            Install Grafana as part of this run, after RouteGate is ready.
+  --without-grafana         Do not install Grafana (default).
   --yes                     Skip the final confirmation prompt.
   --help                    Show this help.
 
@@ -192,6 +197,15 @@ parse_args() {
         ;;
       --without-prometheus)
         ROUTEGATE_INSTALL_PROMETHEUS=0
+        ROUTEGATE_PROMETHEUS_EXPLICIT_NO=1
+        shift
+        ;;
+      --with-grafana)
+        ROUTEGATE_INSTALL_GRAFANA=1
+        shift
+        ;;
+      --without-grafana)
+        ROUTEGATE_INSTALL_GRAFANA=0
         shift
         ;;
       --yes|-y)
@@ -289,6 +303,30 @@ prompt_for_prometheus() {
   fi
 }
 
+prompt_for_grafana() {
+  if [[ -z "$ROUTEGATE_INSTALL_GRAFANA" && -f "$ROUTEGATE_STATE_FILE" ]] \
+      && [[ "$(state_value STATUS || true)" == "installing" ]]; then
+    ROUTEGATE_INSTALL_GRAFANA=$(state_value GRAFANA_REQUESTED || true)
+  fi
+  if [[ -z "$ROUTEGATE_INSTALL_GRAFANA" ]]; then
+    if [[ "$ROUTEGATE_ASSUME_YES" == "1" ]] || ! interactive_tty_available; then
+      ROUTEGATE_INSTALL_GRAFANA=0
+    else
+      local answer=""
+      read -r -p "Include Grafana dashboards in this installation? [y/N] " answer </dev/tty
+      [[ "$answer" =~ ^[Yy]$ ]] && ROUTEGATE_INSTALL_GRAFANA=1 || ROUTEGATE_INSTALL_GRAFANA=0
+    fi
+  fi
+  ROUTEGATE_INSTALL_GRAFANA=$(normalize_prometheus_choice "$ROUTEGATE_INSTALL_GRAFANA") \
+    || die "ROUTEGATE_INSTALL_GRAFANA must be true/false or 1/0."
+  if [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" && "$ROUTEGATE_INSTALL_PROMETHEUS" != "1" ]]; then
+    [[ "$ROUTEGATE_PROMETHEUS_EXPLICIT_NO" != "1" ]] \
+      || die "Grafana requires Prometheus; --with-grafana conflicts with --without-prometheus."
+    ROUTEGATE_INSTALL_PROMETHEUS=1
+    log "Grafana selected: automatically enabling RouteGate-managed Prometheus."
+  fi
+}
+
 prompt_for_inputs() {
   if [[ -z "$ROUTEGATE_DOMAIN" || -z "$ROUTEGATE_EMAIL" ]]; then
     [[ "$ROUTEGATE_ASSUME_YES" != "1" ]] \
@@ -321,6 +359,7 @@ prompt_for_inputs() {
   fi
 
   prompt_for_prometheus
+  prompt_for_grafana
   ROUTEGATE_SERVER_NAME="${ROUTEGATE_SERVER_NAME:-$ROUTEGATE_DOMAIN}"
 }
 
@@ -394,6 +433,10 @@ validate_inputs() {
   validate_release_version "$ROUTEGATE_VERSION" || die "Invalid release version: $ROUTEGATE_VERSION"
   [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "0" || "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] \
     || die "Prometheus installation choice is invalid."
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" == "0" || "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] \
+    || die "Grafana installation choice is invalid."
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" != "1" || "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] \
+    || die "Grafana requires Prometheus."
   [[ -n "$ROUTEGATE_SERVER_NAME" ]] || die "Server name cannot be empty."
   [[ ${#ROUTEGATE_SERVER_NAME} -le 128 ]] || die "Server name must be 128 characters or fewer."
   [[ "$ROUTEGATE_SERVER_NAME" != *$'\n'* && "$ROUTEGATE_SERVER_NAME" != *$'\r'* ]] \
@@ -606,6 +649,7 @@ VERSION=${version}
 ARCH=${ROUTEGATE_ARCH}
 BUNDLE_SHA256=${ROUTEGATE_BUNDLE_SHA256}
 PROMETHEUS_MANAGED=${ROUTEGATE_INSTALL_PROMETHEUS}
+GRAFANA_REQUESTED=${ROUTEGATE_INSTALL_GRAFANA}
 UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF_STATE
   chmod 0600 "$ROUTEGATE_STATE_FILE"
