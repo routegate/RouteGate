@@ -306,11 +306,11 @@ func TestCredentialRevocationSeesJobCommittedWhileAdmissionWaits(t *testing.T) {
 func TestCredentialRevocationDowngradePreservesHistory(t *testing.T) {
 	ctx, pool, in, _, done := removalPreparationFixture(t)
 	defer done()
-	down, err := os.ReadFile("../../migrations/000160_credential_revocation_preparations.down.sql")
+	down, err := os.ReadFile("../../migrations/000161_credential_revocation_preparations.down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	up, err := os.ReadFile("../../migrations/000160_credential_revocation_preparations.up.sql")
+	up, err := os.ReadFile("../../migrations/000161_credential_revocation_preparations.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
