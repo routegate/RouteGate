@@ -237,6 +237,22 @@ and a disposable test host before public promotion.
 They become available only after these changes are reviewed and a new release
 is published. Do not mix the newer installer with the v0.1.0 archive.
 
+### Disposable native Grafana acceptance
+
+The GitHub Actions job `hybrid-grafana-native-e2e` uses a **fresh, one-use
+GitHub-hosted Ubuntu 24.04 runner** to build the exact commit's release bundle
+and run the same installer with `--with-grafana`. It first rejects a damaged
+bundle, injects an ACME failure and resumes the same pinned release, then
+installs real Prometheus and the real Grafana package via the official
+Grafana repository using the verified local candidate sidecar. The test
+verifies managed ownership, local services, the test HTTPS `/grafana/` API,
+automatically provisioned Prometheus datasource, RouteGate dashboard and
+restart continuity. It keeps setup credentials out of public logs.
+
+This is a **test-only trusted CA** and synthetic DNS name, not public
+Let's Encrypt or proof of any real client/ISP reachability. A public
+release still requires the external VPS acceptance from #715.
+
 ### Pin v0.1.0 explicitly
 
 ```bash
