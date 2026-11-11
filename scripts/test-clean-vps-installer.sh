@@ -450,6 +450,7 @@ VERSION=v3.1.4
 ARCH=amd64
 BUNDLE_SHA256=$expected_sha
 PROMETHEUS_MANAGED=0
+GRAFANA_REQUESTED=0
 EOF_STATE
 
   # The production initializer is exercised against isolated ownership state,
@@ -470,6 +471,7 @@ EOF_STATE
        ROUTEGATE_RESUME_INSTALL=1
        ROUTEGATE_RESOLVED_VERSION="$4"
        ROUTEGATE_BUNDLE_SHA256="$5"
+       ROUTEGATE_INSTALL_GRAFANA=0
        initialize_install_state
     ' _ "$ROOT_DIR/install.sh" "$state_file" "$dir" "$version" "$hash" >"$output" 2>&1; then
       if [[ "$case_name" == matching ]]; then
@@ -496,6 +498,7 @@ EOF_STATE
        ROUTEGATE_RESUME_INSTALL=1
        ROUTEGATE_RESOLVED_VERSION=v3.1.4
        ROUTEGATE_BUNDLE_SHA256="$4"
+       ROUTEGATE_INSTALL_GRAFANA=0
        initialize_install_state
     ' _ "$ROOT_DIR/install.sh" "$state_file" "$TEST_TMP/rejected-legacy-dir" "$expected_sha" \
        >"$TEST_TMP/rejected-legacy.log" 2>&1; then
@@ -509,6 +512,77 @@ EOF_STATE
     grep -Fq 'write_install_state_status installing "$ROUTEGATE_RESOLVED_VERSION"' "$ROOT_DIR/install.sh"
   assert_true "installation state serializes the validated bundle fingerprint" \
     grep -Fq 'BUNDLE_SHA256=${ROUTEGATE_BUNDLE_SHA256}' "$ROOT_DIR/install.sh"
+}
+
+test_resume_grafana_selection_pin() {
+  local hash
+  hash=$(printf '%064d' 3)
+  local saved choice state dir report
+  for saved in 0 1; do
+    state="$TEST_TMP/resume-grafana-$saved.env"
+    cat >"$state" <<EOF_STATE
+STATUS=installing
+DOMAIN=ci.routegate.example
+VERSION=v3.1.4
+ARCH=amd64
+BUNDLE_SHA256=$hash
+PROMETHEUS_MANAGED=1
+GRAFANA_REQUESTED=$saved
+EOF_STATE
+    for choice in 0 1; do
+      dir="$TEST_TMP/resume-grafana-$saved-$choice"
+      report="$TEST_TMP/resume-grafana-$saved-$choice.log"
+      if bash -c '
+        source "$1"
+        ROUTEGATE_STATE_FILE="$2"
+        ROUTEGATE_STATE_DIR="$3"
+        ROUTEGATE_LOG_FILE=""
+        ROUTEGATE_RESUME_INSTALL=1
+        ROUTEGATE_RESOLVED_VERSION=v3.1.4
+        ROUTEGATE_BUNDLE_SHA256="$4"
+        ROUTEGATE_INSTALL_GRAFANA="$5"
+        initialize_install_state
+      ' _ "$ROOT_DIR/install.sh" "$state" "$dir" "$hash" "$choice" >"$report" 2>&1; then
+        if [[ "$saved" == "$choice" ]]; then
+          assert_true "Grafana resume preserves original $saved selection" test -d "$dir"
+        else
+          fail "Grafana selection $saved must not switch to $choice on resume"
+        fi
+      elif [[ "$saved" == "$choice" ]]; then
+        fail "matching Grafana selection $saved must resume"
+      else
+        assert_true "Grafana choice $saved->$choice rejected before state mutation" test ! -e "$dir"
+        assert_true "Grafana mismatch has actionable error" \
+          grep -Fq 'Interrupted installation is pinned to Grafana choice' "$report"
+      fi
+    done
+  done
+
+  state="$TEST_TMP/resume-grafana-missing.env"
+  cat >"$state" <<EOF_STATE
+STATUS=installing
+VERSION=v3.1.4
+BUNDLE_SHA256=$hash
+PROMETHEUS_MANAGED=1
+EOF_STATE
+  dir="$TEST_TMP/resume-grafana-missing"
+  if bash -c '
+    source "$1"
+    ROUTEGATE_STATE_FILE="$2"
+    ROUTEGATE_STATE_DIR="$3"
+    ROUTEGATE_LOG_FILE=""
+    ROUTEGATE_RESUME_INSTALL=1
+    ROUTEGATE_RESOLVED_VERSION=v3.1.4
+    ROUTEGATE_BUNDLE_SHA256="$4"
+    ROUTEGATE_INSTALL_GRAFANA=0
+    initialize_install_state
+  ' _ "$ROOT_DIR/install.sh" "$state" "$dir" "$hash" >"$TEST_TMP/resume-grafana-missing.log" 2>&1; then
+    fail "missing pinned Grafana intent must refuse automatic recovery"
+  else
+    assert_true "missing Grafana intent stops before state mutation" test ! -e "$dir"
+    assert_true "missing Grafana intent has actionable error" \
+      grep -Fq 'no valid pinned Grafana selection' "$TEST_TMP/resume-grafana-missing.log"
+  fi
 }
 
 test_piped_entrypoint_guard() {
@@ -873,6 +947,7 @@ test_archive_entry_policy
 test_release_bundle_precedes_host_mutation
 test_legacy_bundle_rejected_before_platform_install
 test_resume_release_pin
+test_resume_grafana_selection_pin
 test_piped_entrypoint_guard
 test_setup_url_contract
 test_manager_environment_public_url
