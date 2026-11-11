@@ -191,3 +191,55 @@ that verified replay retains the fence. PostgreSQL tests exercise actual Manager
 completion and verification handlers: initial commit, duplicate completion 404,
 successful historical readback, unchanged result/timestamps, payload mismatch,
 large exact integers, non-success state, foreign token and legacy capability.
+
+### Runtime checkpoints before recovery authorization (eighth implementation slice)
+
+Historical result acceptance alone is insufficient for recovering a legacy
+mutation fence: older success envelopes do not identify the runtime process
+that was running after the operation. A later hash of a file plus an active
+listener cannot reconstruct that missing fact. Old receipts stay deliverable
+but cannot produce recovery observations.
+
+The experimental heartbeat gate now records an optional `runtimeWitness` in
+the same atomic private receipt as its success envelope. This first scope is
+sing-box/VLESS service **restart**, or config apply selecting exactly one
+sing-box/VLESS adapter with service control enabled. Shared sing-box inbounds
+remain part of the same measured config; this is not account-specific traffic
+or revocation evidence. Other operations/adapters and multi-runtime applies
+retain the previous conservative behavior and have no recovery checkpoint.
+
+While holding the mutation lock, Agent brackets both pre-operation and
+post-operation observations with the locally configured adapter's systemd
+generation/source checks and active config reads. These reuse the removal
+executor's /proc executable/config-source binding, versioned runtime digest,
+enablement and listener checks. A checkpoint requires a new systemd InvocationID
+after execution. Config apply must match the task's sing-box candidate hash;
+service restart must retain its pre-operation config hash. The checkpoint stores
+both process generations and the final hash/listener port, never a config or
+command output. Failure to establish supported-scope evidence retains intent
+and suppresses a terminal result. The first scope requires a healthy observable
+baseline; repairing an already-unobservable runtime is not covered.
+
+`ObserveRuntimeRecovery` is an internal read-only evidence collector, with no
+HTTP, task-dispatch or operator command exposure. It acquires the same lock,
+requires an acknowledged result receipt and matching local Manager/Agent/server
+identity, then checks that the current file, process generation and listener
+still match the saved checkpoint. Changed durable state during observation,
+concurrent removal, malformed/missing proof or an old receipt fails closed. It
+returns bounded task/identity/state digests and runtime measurements. It never
+clears a marker, rewrites a receipt, restarts a service or restores credentials.
+The initial capture is only a local observation; only the verified before/after
+pair is eligible to be persisted as a recovery checkpoint.
+
+An observation is **not an authorization or a freshness token**. The next
+Manager operation must authenticate explicit operator approval, reserve the
+node, bind the exact task/receipt/observation and a fresh challenge, and require
+Agent re-observation under the lock at commit. A crash-safe audited release
+protocol is still missing. Nothing in this slice permits manual file deletion,
+automatic unlock, production activation or credential-removal dispatch.
+
+Tests cover before/after checkpoint persistence, missing restart and changed
+config rejection, old/unacknowledged receipts, identity mismatch, concurrent
+locks and evidence changes during health checks. The disposable systemd/Reality
+test also saves a witness from a real service restart, observes the exact process,
+then proves another real restart invalidates it while the fence remains intact.
