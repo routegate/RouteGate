@@ -191,6 +191,66 @@ EOF_MENU
     grep -Fq 'MENU_RESULT=vpn.example.org|owner@example.org|1|1' <<<"$output"
 }
 
+test_local_grafana_sidecar_preflight() {
+  local candidate="$TEST_TMP/local-grafana-candidate"
+  local script_path="$candidate/install-grafana.sh"
+  local sums="$candidate/INSTALLER_SHA256SUMS"
+  mkdir -p "$candidate"
+  printf 'candidate bundle fixture\n' >"$candidate/routegate-v0.2.0-linux-amd64.tar.gz"
+  printf '#!/usr/bin/env bash\nset -e\nprintf "grafana stub\\n"\n' >"$script_path"
+  (cd "$candidate" && sha256sum install-grafana.sh >INSTALLER_SHA256SUMS)
+
+  local output
+  if output=$(
+    ROUTEGATE_INSTALL_GRAFANA=1
+    ROUTEGATE_RESOLVED_VERSION=v0.2.0
+    ROUTEGATE_BUNDLE_URL=""
+    ROUTEGATE_BUNDLE_FILE="$candidate/routegate-v0.2.0-linux-amd64.tar.gz"
+    ROUTEGATE_WORK_DIR="$TEST_TMP/local-grafana-verified"
+    mkdir -p "$ROUTEGATE_WORK_DIR"
+    prepare_verified_grafana_installer
+    test -s "$ROUTEGATE_GRAFANA_SCRIPT"
+    sha256sum "$ROUTEGATE_GRAFANA_SCRIPT" | awk '{print $1}'
+  ); then
+    assert_true "local candidate Grafana helper is verified against colocated installer checksums" \
+      grep -Fq "$(sha256sum "$script_path" | awk '{print $1}')" <<<"$output"
+  else
+    fail "valid local candidate Grafana helper must verify"
+  fi
+
+  printf 'tampered\n' >>"$script_path"
+  if (
+    ROUTEGATE_INSTALL_GRAFANA=1
+    ROUTEGATE_RESOLVED_VERSION=v0.2.0
+    ROUTEGATE_BUNDLE_URL=""
+    ROUTEGATE_BUNDLE_FILE="$candidate/routegate-v0.2.0-linux-amd64.tar.gz"
+    ROUTEGATE_WORK_DIR="$TEST_TMP/local-grafana-tampered"
+    mkdir -p "$ROUTEGATE_WORK_DIR"
+    prepare_verified_grafana_installer
+  ) >"$TEST_TMP/grafana-tampered.out" 2>&1; then
+    fail "tampered local Grafana installer must fail preflight"
+  else
+    assert_true "tampered local Grafana installer rejected before system changes" \
+      grep -Fq 'Grafana installer SHA-256 verification failed.' "$TEST_TMP/grafana-tampered.out"
+  fi
+
+  rm -f "$sums"
+  if (
+    ROUTEGATE_INSTALL_GRAFANA=1
+    ROUTEGATE_RESOLVED_VERSION=v0.2.0
+    ROUTEGATE_BUNDLE_URL=""
+    ROUTEGATE_BUNDLE_FILE="$candidate/routegate-v0.2.0-linux-amd64.tar.gz"
+    ROUTEGATE_WORK_DIR="$TEST_TMP/local-grafana-no-checksum"
+    mkdir -p "$ROUTEGATE_WORK_DIR"
+    prepare_verified_grafana_installer
+  ) >"$TEST_TMP/grafana-no-checksum.out" 2>&1; then
+    fail "local Grafana helper without checksum manifest must fail closed"
+  else
+    assert_true "local Grafana with missing checksum manifest is rejected" \
+      grep -Fq 'requires colocated install-grafana.sh and INSTALLER_SHA256SUMS' "$TEST_TMP/grafana-no-checksum.out"
+  fi
+}
+
 test_grafana_selection_and_install_contract() {
   local output
   output=$(
@@ -241,6 +301,12 @@ test_grafana_selection_and_install_contract() {
   addon_line=$(grep -n 'install_selected_grafana' <<<"$main_body" | tail -n1 | cut -d: -f1)
   assert_true "Grafana release assets are verified before state mutation" test "$prepare_line" -lt "$state_line"
   assert_true "Grafana installation runs after core state completion" test "$state_line" -lt "$addon_line"
+
+  local complete_line success_line
+  complete_line=$(grep -n '^  write_install_state$' <<<"$main_body" | tail -n1 | cut -d: -f1)
+  success_line=$(grep -n '^  print_success$' <<<"$main_body" | tail -n1 | cut -d: -f1)
+  assert_true "Grafana add-on runs only after core is marked complete" test "$complete_line" -lt "$addon_line"
+  assert_true "final installation success follows selected Grafana" test "$addon_line" -lt "$success_line"
 }
 
 test_artifact_urls() {
@@ -798,6 +864,7 @@ test_existing_install_precedes_repository_preflight
 test_validation_helpers
 test_argument_parsing
 test_grafana_selection_and_install_contract
+test_local_grafana_sidecar_preflight
 test_numbered_interactive_configuration_menu_contract
 test_interactive_menu_pseudoterminal_smoke
 test_artifact_urls

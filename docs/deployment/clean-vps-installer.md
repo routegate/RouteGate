@@ -220,13 +220,38 @@ Prometheus; use a separately reviewed monitoring configuration workflow.
 For unattended automation, `--yes` bypasses the menu while retaining all
 preflight checks. Pass `--with-grafana` explicitly; it enables Prometheus
 unless `--without-prometheus` explicitly contradicts it (rejected).
-A local/custom bundle cannot automatically run an unverified Grafana helper;
-for that staging mode, run the base platform without `--with-grafana` until
-a separately verified add-on artifact path is supported.
+For a controlled **local release-candidate test**, `--bundle-file` can
+also install Grafana in the same run when the candidate bundle's directory
+contains both `install-grafana.sh` and `INSTALLER_SHA256SUMS` from the
+same exact build (`scripts/build-release-bundle.sh`). The installer copies
+these files to its private staging directory, validates the helper's SHA-256
+and shell syntax, and rejects mismatches **before changing the host**. An
+incomplete or tampered local candidate stops safely. Custom `--bundle-url`
+URLs cannot enable Grafana because an independently verified matching
+installer sidecar is not available from that mode. Public installations
+still retrieve the exact versioned artifacts from published GitHub Releases.
+Neither mode relaxes the requirement for reviewed code, explicit consent
+and a disposable test host before public promotion.
 
 **The historical v0.1.0 installer does not contain this menu or these flags.**
 They become available only after these changes are reviewed and a new release
 is published. Do not mix the newer installer with the v0.1.0 archive.
+
+### Disposable native Grafana acceptance
+
+The GitHub Actions job `hybrid-grafana-native-e2e` uses a **fresh, one-use
+GitHub-hosted Ubuntu 24.04 runner** to build the exact commit's release bundle
+and run the same installer with `--with-grafana`. It first rejects a damaged
+bundle, injects an ACME failure and resumes the same pinned release, then
+installs real Prometheus and the real Grafana package via the official
+Grafana repository using the verified local candidate sidecar. The test
+verifies managed ownership, local services, the test HTTPS `/grafana/` API,
+automatically provisioned Prometheus datasource, RouteGate dashboard and
+restart continuity. It keeps setup credentials out of public logs.
+
+This is a **test-only trusted CA** and synthetic DNS name, not public
+Let's Encrypt or proof of any real client/ISP reachability. A public
+release still requires the external VPS acceptance from #715.
 
 ### Pin v0.1.0 explicitly
 
