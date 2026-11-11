@@ -116,6 +116,48 @@ project's supply-chain trust boundary.
 
 ## Install RouteGate
 
+> **Release parity notice (2026-11-11):** The public `v0.1.0` MVP is a historical
+> stable release. It does **not** include the newer dark-only UI or the extensive
+> `main` features. Always fetch `install.sh` from the **same immutable release
+> tag** as the bundle requested via `--version`. Do **not** combine a current
+> `main/install.sh` with `--version v0.1.0` or `latest`: current main requires
+> updated bundle components absent from the old stable archive. The next
+> current-version release and full clean-host Hybrid validation are tracked in
+> [issue #715](https://github.com/routegate/RouteGate/issues/715).
+
+The supported current-main installer verifies/downloads/extracts its entire
+release bundle *before* installing platform packages or creating an install-state
+ownership record. A failed bundle compatibility check must not leave an
+ambiguous partial RouteGate installation. This does not replace a full clean-host
+Hybrid deployment test.
+
+### Verify release compatibility without installing
+
+Before installing on a newly provisioned VPS, use the `--verify-bundle` mode
+from the **same intended installer source**. It downloads the archive and
+SHA256SUMS (or uses local `--bundle-file` and `--checksum-file`), checks the
+archive checksum, safe extraction rules, required components, manifest
+version/architecture and CLI compatibility, then deletes its temporary files.
+It does **not** require root privileges, DNS, PostgreSQL or an administrator
+email. No packages, services or RouteGate installation-state files are changed.
+
+```bash
+# Example template: replace with a new reviewed release supporting --verify-bundle.
+VERSION='<reviewed-new-release-tag>'
+curl -fL --proto '=https' --tlsv1.2 \
+  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
+  -o routegate-install.sh
+less routegate-install.sh
+bash routegate-install.sh --verify-bundle --version "${VERSION}"
+```
+
+**Note:** `v0.1.0` contains an older bundle contract, so a modern
+`main/install.sh --verify-bundle --version v0.1.0` should report an
+incompatibility rather than modifying the VPS. A matching old tag installer
+may not itself support `--verify-bundle`; this flag is for newer candidate
+installers going forward. Passing this check is **not** full Hybrid E2E
+acceptance, which also requires real DNS/TLS/Agent/runtime tests.
+
 ### Interactive installation
 
 Choose the release first. Download its installer to a file, inspect the exact
@@ -147,6 +189,77 @@ The installer asks for:
 Pressing Enter accepts the recommended same-email choice.
 
 By default, the installer resolves the latest published RouteGate release and verifies the selected bundle against the release `SHA256SUMS` file.
+
+### Numbered terminal configuration menu (new reviewed releases)
+
+On an interactive SSH terminal, the installer opens a numbered menu **before**
+the first platform package/service mutation. Choose `1` to enter or edit
+hostname, Let's Encrypt email, administrator email and display name. Choose
+`2` for RouteGate-managed Prometheus and `3` for Grafana. The menu includes
+`4` to review the plan, `5` to proceed through preflight and final
+confirmation, and `0` to cancel.
+
+Grafana is offered **during the initial selection**, not left as a manual
+post-install instruction. Choosing Grafana automatically selects Prometheus
+because the Grafana dashboard requires that local datasource. The core platform
+and selected Prometheus are installed and validated first; then the already
+existing `install-grafana.sh` automatically runs **in the same invocation**.
+The script is fetched from the same pinned, published RouteGate release and
+verified against its `INSTALLER_SHA256SUMS` before host mutation. Grafana's
+own installer explicitly adds the official Grafana APT repository.
+
+On an already complete RouteGate host, the same menu distinguishes
+`INSTALLED` (RouteGate-managed Grafana already present) from `RETRY`
+(Grafana was selected but its installation failed after core completion).
+A managed, installed Grafana cannot be toggled `OFF` as if that uninstalled
+the service; repeat the installer instead verifies its health without
+rotating secrets. A pending failed add-on may be explicitly skipped or retried.
+This menu is not an uninstall tool.
+
+An interactive user may disable both optional components. If Grafana was
+selected and its installation fails, the core platform remains installed and
+`STATUS=complete`; the command exits with a clear add-on failure instead of
+pretending Grafana succeeded. Once the cause is resolved, retry `--with-grafana`
+using the **same exact release tag** on the healthy RouteGate-owned host.
+This does not remove or reinstall the core platform. Grafana cannot be added
+using this path to an already completed deployment that has no managed
+Prometheus; use a separately reviewed monitoring configuration workflow.
+
+For unattended automation, `--yes` bypasses the menu while retaining all
+preflight checks. Pass `--with-grafana` explicitly; it enables Prometheus
+unless `--without-prometheus` explicitly contradicts it (rejected).
+For a controlled **local release-candidate test**, `--bundle-file` can
+also install Grafana in the same run when the candidate bundle's directory
+contains both `install-grafana.sh` and `INSTALLER_SHA256SUMS` from the
+same exact build (`scripts/build-release-bundle.sh`). The installer copies
+these files to its private staging directory, validates the helper's SHA-256
+and shell syntax, and rejects mismatches **before changing the host**. An
+incomplete or tampered local candidate stops safely. Custom `--bundle-url`
+URLs cannot enable Grafana because an independently verified matching
+installer sidecar is not available from that mode. Public installations
+still retrieve the exact versioned artifacts from published GitHub Releases.
+Neither mode relaxes the requirement for reviewed code, explicit consent
+and a disposable test host before public promotion.
+
+**The historical v0.1.0 installer does not contain this menu or these flags.**
+They become available only after these changes are reviewed and a new release
+is published. Do not mix the newer installer with the v0.1.0 archive.
+
+### Disposable native Grafana acceptance
+
+The GitHub Actions job `hybrid-grafana-native-e2e` uses a **fresh, one-use
+GitHub-hosted Ubuntu 24.04 runner** to build the exact commit's release bundle
+and run the same installer with `--with-grafana`. It first rejects a damaged
+bundle, injects an ACME failure and resumes the same pinned release, then
+installs real Prometheus and the real Grafana package via the official
+Grafana repository using the verified local candidate sidecar. The test
+verifies managed ownership, local services, the test HTTPS `/grafana/` API,
+automatically provisioned Prometheus datasource, RouteGate dashboard and
+restart continuity. It keeps setup credentials out of public logs.
+
+This is a **test-only trusted CA** and synthetic DNS name, not public
+Let's Encrypt or proof of any real client/ISP reachability. A public
+release still requires the external VPS acceptance from #715.
 
 ### Pin v0.1.0 explicitly
 
@@ -192,6 +305,10 @@ rm -f routegate-install-v0.1.0.sh
 --checksum-file PATH   Matching SHA256SUMS file for --bundle-file.
 --bundle-url URL       Explicit HTTPS bundle URL.
 --checksum-url URL     Matching HTTPS SHA256SUMS URL.
+--with-prometheus      Select managed Prometheus in this run.
+--without-prometheus   Disable managed Prometheus.
+--with-grafana         Offer/install Grafana in the same run after core validation.
+--without-grafana      Disable Grafana (default).
 --yes                  Skip the final confirmation prompt.
 --help                 Show command help.
 ```
@@ -209,9 +326,9 @@ The installer performs these stages in order:
 3. Shows which required APT dependencies will be reused and which will be installed.
 4. Detects unowned RouteGate files, active web/database services, or listeners on TCP 80/443 before mutation.
 5. Verifies that the FQDN resolves to an IPv4 address detected for the VPS.
-6. Creates root-owned installation state and recovery storage.
-7. Installs required platform APT packages including PostgreSQL, nginx, Certbot, curl, jq, OpenSSL, and Agent bootstrap utilities. Protocol-specific packages are deferred to the Agent runtime installation workflow.
-8. Resolves the requested RouteGate release, downloads the native bundle, verifies `SHA256SUMS`, rejects unsafe archive paths/links, and validates the manifest.
+6. Resolves the requested RouteGate release, downloads the native bundle, verifies `SHA256SUMS`, rejects unsafe archive paths/links, and validates the manifest. If Grafana was selected, downloads and verifies its pinned installer/checksum before any platform package changes.
+7. Creates root-owned installation state and recovery storage.
+8. Installs required platform APT packages including PostgreSQL, nginx, Certbot, curl, jq, OpenSSL, and Agent bootstrap utilities. Protocol-specific packages are deferred to the Agent runtime installation workflow.
 9. Installs Manager, Agent, migrations, frontend assets, nginx configuration, and systemd units.
 10. Creates a dedicated local PostgreSQL role/database with a generated password and loopback-only listening.
 11. Generates a unique bootstrap administrator credential used only to initialize the first SuperAdmin and local platform workflow.
@@ -225,6 +342,7 @@ The installer performs these stages in order:
 19. Writes root-only first-access/recovery information and installs `routegate-recovery`.
 20. Verifies PostgreSQL, nginx, Manager, Agent, HTTPS health, Agent credentials, and local PostgreSQL exposure.
 21. Marks installation state complete and prints the `/setup` next action.
+22. If Grafana was selected at the start, runs the verified pinned Grafana helper, checks its HTTPS readiness and displays its access/next-action information.
 
 ## First administrator activation
 
@@ -300,7 +418,21 @@ Interrupted-install secrets are temporarily stored under:
 /var/lib/routegate-installer/
 ```
 
-These files are root-only. If a RouteGate-owned installation is marked `installing`, re-running the same command for the same domain resumes with preserved installer secrets. After successful verification, transient secrets are deleted and state becomes `complete`.
+These files are root-only. When `STATUS=installing`, the installer resumes
+only if the **verified release tag and SHA-256 match the exact original
+bundle**, in addition to matching the domain and Prometheus ownership.
+The state file records `VERSION` (a pinned resolved tag, **not** a
+floating `latest` alias) and `BUNDLE_SHA256` before APT or service changes.
+This prevents a changed `latest` tag or a replaced archive under the same
+version from silently rewriting a partially installed Hybrid.
+
+If interrupted state lacks the pinned version or checksum (such as an older
+installer's legacy state), automatic continuation is **blocked**. Preserve
+`/etc/routegate/install-state.env` and private logs; do not reset the state,
+delete PostgreSQL or bypass the check blindly. Inspect the exact original
+artifacts and use a reviewed manual recovery procedure. Matching verified
+retries preserve installer secrets. After successful verification, transient
+secrets are deleted and the state becomes `complete`.
 
 When state is `complete`, running the installer again performs health/idempotency checks and exits without reinstalling the platform or rotating credentials.
 

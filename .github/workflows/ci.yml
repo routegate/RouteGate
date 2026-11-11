@@ -5,6 +5,8 @@ on:
     branches:
       - main
   pull_request:
+  # Public tag releases reuse all checks, including the native Hybrid job.
+  workflow_call:
 
 jobs:
   backend:
@@ -49,6 +51,18 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      - name: Test scoped VLESS removal preflight against real sing-box
+        run: |
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/SagerNet/sing-box/releases/download/v1.12.8/sing-box-1.12.8-linux-amd64.tar.gz \
+            --output "$test_dir/sing-box.tar.gz"
+          printf '%s  %s\n' b41d9ae438a4367e5fd5c4aa36fe040d0c1bfe5f91f96a072eef31f61d46670c "$test_dir/sing-box.tar.gz" | sha256sum --check --status
+          tar -xzf "$test_dir/sing-box.tar.gz" -C "$test_dir"
+          ROUTEGATE_TEST_SING_BOX="$test_dir/sing-box-1.12.8-linux-amd64/sing-box" \
+            go test ./internal/configs -run '^TestVLESSRemovalSingBox' -count=1 -timeout=60s -v
+
       - name: Test rollout PostgreSQL connection in read-only mode
         run: python3 -m unittest discover -s ../scripts -p test_traffic_accounting_rollout.py
 
@@ -78,6 +92,19 @@ jobs:
 
       - name: Run tests
         run: go test ./...
+
+      - name: Test scoped Agent removal with systemd and real Reality traffic
+        run: |
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/SagerNet/sing-box/releases/download/v1.12.8/sing-box-1.12.8-linux-amd64.tar.gz \
+            --output "$test_dir/sing-box.tar.gz"
+          printf '%s  %s\n' b41d9ae438a4367e5fd5c4aa36fe040d0c1bfe5f91f96a072eef31f61d46670c "$test_dir/sing-box.tar.gz" | sha256sum --check --status
+          tar -xzf "$test_dir/sing-box.tar.gz" -C "$test_dir"
+          sudo env ROUTEGATE_TEST_SING_BOX="$test_dir/sing-box-1.12.8-linux-amd64/sing-box" \
+            ROUTEGATE_TEST_REMOVAL_SYSTEMD=1 "$(command -v go)" test ./internal/tasks \
+            -run '^TestCredentialRemovalSystemdRealityTraffic$' -count=1 -timeout=75s -v
 
       - name: Build disposable sing-box statistics runtime
         run: go install -tags with_v2ray_api github.com/sagernet/sing-box/cmd/sing-box@v1.12.12
@@ -153,6 +180,10 @@ jobs:
             scripts/test-agent-installer.sh \
             scripts/test-attestation-verifier-runtime.sh \
             scripts/test-clean-vps-installer.sh \
+            scripts/test-release-tag-identity.sh \
+            scripts/check-release-tag-identity.sh \
+            scripts/test-manual-release-source.sh \
+            scripts/check-manual-release-source.sh \
             scripts/test-grafana-installer.sh \
             scripts/test-production-like-preflight.sh \
             scripts/test-production-like-update-manager.sh \
@@ -182,6 +213,8 @@ jobs:
             scripts/routegate-update-transaction.sh \
             scripts/routegate-update-verified.sh \
             scripts/test-attestation-verifier-runtime.sh \
+            scripts/test-manual-release-source.sh \
+            scripts/check-manual-release-source.sh \
             scripts/test-grafana-installer.sh \
             scripts/test-production-like-preflight.sh \
             scripts/test-production-like-update-manager.sh \
@@ -202,6 +235,8 @@ jobs:
           sudo bash scripts/test-manager-only-ops-recovery.sh
           bash scripts/test-agent-installer.sh
           scripts/test-clean-vps-installer.sh
+          bash scripts/test-release-tag-identity.sh
+          bash scripts/test-manual-release-source.sh
           bash scripts/test-grafana-installer.sh
           sudo bash scripts/test-production-like-preflight.sh
           sudo bash scripts/test-production-like-update-manager.sh
@@ -217,8 +252,8 @@ jobs:
           bash scripts/routegate-update-transaction.sh --help >/dev/null
           bash scripts/routegate-update-verified.sh --help >/dev/null
 
-      - name: Run release manifest tests
-        run: python3 -m unittest scripts/test_release_manifest.py
+      - name: Run release manifest and publication safety tests
+        run: python3 -m unittest scripts/test_release_manifest.py scripts/test_release_publication_gate.py
 
       - name: Test UI publication recovery
         run: python3 -m unittest scripts/test_rg140_session_ui.py
@@ -245,6 +280,12 @@ jobs:
           python3 scripts/release_manifest.py verify \
             --manifest "$OUTPUT_DIR/release-manifest.json" \
             --artifacts-dir "$OUTPUT_DIR"
+          # Check the REAL freshly built bundle through the installer CLI before
+          # any privileged host action. Unlike static file listings this exercises
+          # the exact checksum, extraction and manifest compatibility contract.
+          bash "$GITHUB_WORKSPACE/install.sh" --verify-bundle --version "$VERSION" \
+            --bundle-file "$OUTPUT_DIR/routegate-${VERSION}-linux-amd64.tar.gz" \
+            --checksum-file "$OUTPUT_DIR/SHA256SUMS"
           cd "$OUTPUT_DIR"
           sha256sum -c SHA256SUMS
           sha256sum -c INSTALLER_SHA256SUMS
@@ -255,6 +296,12 @@ jobs:
           grep -Fxq './bin/routegate-manager' bundle-files.txt
           grep -Fxq './bin/routegate-agent' bundle-files.txt
           grep -Fxq './frontend/index.html' bundle-files.txt
+          # Validate shipped HTML rather than the source-tree appearance.
+          index_html=$(tar -xOzf routegate-ci-test-linux-amd64.tar.gz ./frontend/index.html)
+          [[ "$index_html" == *'data-theme="dark"'* && "$index_html" == *'color-scheme: dark'* ]] || {
+            echo "::error::CI bundle contains outdated frontend appearance."
+            exit 1
+          }
           grep -Fq './manager/migrations/' bundle-files.txt
           grep -Fxq './tools/routegate-recovery' bundle-files.txt
           grep -Fxq './tools/release_manifest.py' bundle-files.txt
@@ -451,5 +498,102 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test published release quick-start safety
+        run: npm test
+
       - name: Build website
         run: npm run build
+
+  hybrid-grafana-native-e2e:
+    name: Disposable Hybrid with real Prometheus and Grafana
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            backend/go.sum
+            agent/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install genuine Hybrid, Prometheus and Grafana on one-use Ubuntu (test TLS)
+        env:
+          ROUTEGATE_E2E_GRAFANA: "1"
+        run: bash scripts/hybrid-disposable-installer-e2e.sh
+
+  hybrid-native-e2e:
+    name: Disposable native Hybrid installer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            backend/go.sum
+            agent/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install real Hybrid stack on disposable Ubuntu host (test TLS)
+        run: bash scripts/hybrid-disposable-installer-e2e.sh
+  tagless-release-candidate:
+    name: Two-architecture tagless release rehearsal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact tested commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            backend/go.sum
+            agent/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Rehearse two-architecture release without tags or publication
+        run: |
+          bash -n scripts/test-release-candidate-dry-run.sh
+          bash scripts/test-release-candidate-dry-run.sh
+
