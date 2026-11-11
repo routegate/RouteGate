@@ -10,6 +10,7 @@ Successful build/tests do not prove that a fresh VPS installer, admin setup, ngi
 
 Record evidence, including exact artifact version and source commit, in the release notes or the tracking issue:
 
+- [ ] Same-commit CI includes a **tagless, two-architecture release rehearsal** for genuine linux/amd64 and linux/arm64 archives: checksums, embedded commit/version, native binary ELF architecture, frontend parity and corruption rejection. This does not run ARM64 binaries or prove actual tag attestation/publication.
 - [ ] Tag is immutable, points to the expected reviewed commit, and CI for that exact commit is green. The release workflow's attested bundle, installer scripts, release manifest and both checksum sets verify. Do not publish if the version/commit/bundle mismatch.
 - [ ] Installer from the **same release tag** is used with matching bundle, never mixed with `main` or `latest`. A deliberately stale bundle fails **before** packages, services and RouteGate installation state are changed.
 - [ ] On disposable, fresh Ubuntu 24.04 amd64, a dedicated DNS name resolves to the test VPS, TCP 80/443 are reachable, and the exact candidate is installed as **Hybrid/All-in-One**, not as a remote-only node. Record redacted stage-by-stage logs.
@@ -22,7 +23,7 @@ Record evidence, including exact artifact version and source commit, in the rele
 
 ## Publishing and immutability
 
-1. A tag matching `vX.Y.Z` or `vX.Y.Z-rc.N` must point to a commit in the canonical `main` history. The workflow refuses tags from unrelated/unreviewed branches. Every candidate must include `scripts/hybrid-disposable-installer-e2e.sh`, `scripts/hybrid-vpn-e2e.py` and the CI job `hybrid-native-e2e`; missing coverage **blocks** release creation.
+1. A tag matching `vX.Y.Z` or `vX.Y.Z-rc.N` must point to a commit in the canonical `main` history. The workflow refuses tags from unrelated/unreviewed branches. Every candidate must include `scripts/hybrid-disposable-installer-e2e.sh`, `scripts/hybrid-vpn-e2e.py`, `scripts/test-release-candidate-dry-run.sh`, and both CI jobs `hybrid-native-e2e` and `tagless-release-candidate`; missing coverage **blocks** release creation.
 2. The release workflow invokes the repository's reusable `RouteGate CI` **on the exact tag commit**. Only if every CI job, including disposable native Hybrid installation and real isolated VLESS/Reality traffic, succeeds will the release workflow build, checksum, attest and create a **GitHub Release draft**.
 3. Review the draft and all evidence. A green CI badge alone is **insufficient**; recording a real external Hybrid E2E is mandatory for the supported current release. The release reviewer explicitly decides whether RG-140 blocks promotion.
 4. Publish the draft **manually** using the GitHub Releases interface only after the checks above. For release candidates, retain the prerelease designation. Publishing is intentionally a separate operator action, not part of CI.
