@@ -524,6 +524,16 @@ test_all_in_one_role_contract() {
   assert_false \
     "All-in-One platform installer does not set WireGuard forwarding sysctl" \
     grep -Fq '99-routegate-wireguard.conf' "$ROOT_DIR/install.sh"
+  local nginx_template="$ROOT_DIR/deploy/nginx/routegate.conf.example"
+  assert_true \
+    "nginx prevents subscription URL referrer leaks site-wide" \
+    grep -Fq 'add_header Referrer-Policy "no-referrer" always;' "$nginx_template"
+  assert_false \
+    "nginx must not add weaker cross-origin referrer policy to bearer URLs" \
+    grep -Fq 'strict-origin-when-cross-origin' "$nginx_template"
+  assert_equal \
+    "nginx does not return duplicate upstream referrer policy on /sub and /api" \
+    2 "$(grep -Fc 'proxy_hide_header Referrer-Policy;' "$nginx_template")"
   assert_true \
     "Hybrid nginx config exposes the loopback Hysteria2 ACME bridge" \
     grep -Fq 'proxy_pass http://127.0.0.1:9080;' "$ROOT_DIR/deploy/nginx/routegate.conf.example"
