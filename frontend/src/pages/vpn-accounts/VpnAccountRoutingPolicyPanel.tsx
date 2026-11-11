@@ -64,6 +64,8 @@ function getCopy() {
       currentNode: 'Текущий узел',
       saveNode: 'Назначить узел',
       prepareTransfer: 'Подготовить перенос',
+      blockedByOtherTransfer: 'Этот узел зарезервирован незавершённым переносом другого аккаунта. Изменения здесь временно недоступны. Открой перенос, проверь состояние и безопасно заверши его или выполни откат.',
+      openBlockingTransfer: 'Открыть блокирующий перенос',
       nodeSaved: 'Узел обновлён.',
       nodeSaveError: 'Не удалось назначить узел.',
       configNotice: 'Изменение затронуло конфигурацию VPN-сервера и требует нового развёртывания.',
@@ -82,6 +84,8 @@ function getCopy() {
     currentNode: 'Current node',
     saveNode: 'Assign node',
     prepareTransfer: 'Prepare transfer',
+    blockedByOtherTransfer: 'This node is reserved by another account\'s unfinished transfer. Changes here are unavailable. Open that transfer, verify the state, and safely complete or roll it back.',
+    openBlockingTransfer: 'Open blocking transfer',
     nodeSaved: 'Node updated.',
     nodeSaveError: 'Failed to assign the node.',
     configNotice: 'The change affected a VPN server configuration and requires a new deployment.',
@@ -116,6 +120,8 @@ export function VpnAccountRoutingPolicyPanel({ accountId, active = true }: { acc
   const transferQuery = useQuery({ queryKey: ['vpn-account-transfer', accountId], queryFn: () => getAccountTransfer(accountId), enabled: active, refetchInterval: active ? 5000 : false });
   const transfer = transferQuery.data?.transfer;
   const transferActive = Boolean(transfer && !transfer.completedAt);
+  const blockingTransfer = transferQuery.data?.blockingTransfer;
+  const blockedByAnotherAccount = Boolean(blockingTransfer);
   const profilesQuery = useQuery({ queryKey: ['routing-profiles'], queryFn: getRoutingProfiles });
   const groupsQuery = useQuery({ queryKey: ['node-groups'], queryFn: getNodeGroups });
   const serversQuery = useQuery({ queryKey: ['servers'], queryFn: getServers });
@@ -248,7 +254,7 @@ export function VpnAccountRoutingPolicyPanel({ accountId, active = true }: { acc
     || accountQuery.isError || serversQuery.isError;
   const isLoading = (active && transferQuery.isLoading) || policyQuery.isLoading || profilesQuery.isLoading || groupsQuery.isLoading
     || accountQuery.isLoading || serversQuery.isLoading;
-  const editingDisabled = transferActive || isLoading || hasError || nodeMutation.isPending || profileMutation.isPending
+  const editingDisabled = transferActive || blockedByAnotherAccount || isLoading || hasError || nodeMutation.isPending || profileMutation.isPending
     || groupMutation.isPending || selectionPolicyMutation.isPending || selectionApplyMutation.isPending;
   const currentServerName = serversQuery.data?.items.find((server) => server.id === accountQuery.data?.serverId)?.name
     ?? accountQuery.data?.serverId
@@ -269,6 +275,14 @@ export function VpnAccountRoutingPolicyPanel({ accountId, active = true }: { acc
       {(profileMutation.isError || groupMutation.isError || selectionPolicyMutation.isError || selectionApplyMutation.isError) && <div className="form-message form-message-error">{t('routingPolicy.saveError')}</div>}
 
       <Section title={copy.placementTitle} description={copy.placementSubtitle}>
+        {blockingTransfer && (
+          <div className="form-message form-message-warning" role="alert">
+            <p>{copy.blockedByOtherTransfer}</p>
+            <Link className="text-link" to={`/vpn-accounts/${encodeURIComponent(blockingTransfer.accountId)}/routing`}>
+              {copy.openBlockingTransfer}
+            </Link>
+          </div>
+        )}
         {transfer && <AccountTransferPanel key={transfer.id} accountId={accountId} transfer={transfer} serverNames={Object.fromEntries((serversQuery.data?.items ?? []).map(s => [s.id, s.name || s.id]))} />}
         <form className="vpn-account-routing-form" onSubmit={saveNode} onChange={() => {
           setEdited(current => ({ ...current, node: true }));
