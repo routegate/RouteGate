@@ -175,6 +175,8 @@ test_checksum_verification() {
   assert_true \
     "accepts the matching release checksum" \
     verify_bundle_checksum "$bundle" "$checksums" "$bundle_name"
+  assert_equal "verified bundle SHA-256 stored for release resume" \
+    "$(sha256sum "$bundle" | awk '{print $1}')" "$ROUTEGATE_BUNDLE_SHA256"
 
   printf 'tampered\n' >>"$bundle"
   # shellcheck disable=SC2016
@@ -268,6 +270,80 @@ test_legacy_bundle_rejected_before_platform_install() {
   else
     fail "verify-only CLI validates a matching bundle (see $TEST_TMP/verify-valid.err)"
   fi
+}
+
+test_resume_release_pin() {
+  local expected_sha changed_sha state_file
+  expected_sha=$(printf '%064d' 1)
+  changed_sha=$(printf '%064d' 2)
+  state_file="$TEST_TMP/interrupted-install-state.env"
+
+  cat >"$state_file" <<EOF_STATE
+STATUS=installing
+DOMAIN=ci.routegate.example
+VERSION=v3.1.4
+ARCH=amd64
+BUNDLE_SHA256=$expected_sha
+PROMETHEUS_MANAGED=0
+EOF_STATE
+
+  # The production initializer is exercised against isolated ownership state,
+  # with all mutations directed to a test-only directory.
+  local case_name version hash dir output
+  for case_name in matching changed_tag changed_artifact; do
+    version=v3.1.4
+    hash=$expected_sha
+    [[ "$case_name" != changed_tag ]] || version=v3.1.5
+    [[ "$case_name" != changed_artifact ]] || hash=$changed_sha
+    dir="$TEST_TMP/resume-$case_name"
+    output="$TEST_TMP/resume-$case_name.log"
+    if bash -c '
+       source "$1"
+       ROUTEGATE_STATE_FILE="$2"
+       ROUTEGATE_STATE_DIR="$3"
+       ROUTEGATE_LOG_FILE=""
+       ROUTEGATE_RESUME_INSTALL=1
+       ROUTEGATE_RESOLVED_VERSION="$4"
+       ROUTEGATE_BUNDLE_SHA256="$5"
+       initialize_install_state
+    ' _ "$ROOT_DIR/install.sh" "$state_file" "$dir" "$version" "$hash" >"$output" 2>&1; then
+      if [[ "$case_name" == matching ]]; then
+        pass "interrupted install resumes only with original tag and SHA-256"
+      else
+        fail "interrupted install must reject $case_name"
+      fi
+    elif [[ "$case_name" == matching ]]; then
+      fail "matching pinned installation state must resume"
+    else
+      assert_true "mismatched $case_name rejected without writing state" \
+        test ! -e "$dir"
+      assert_true "mismatched $case_name explains why recovery was refused" \
+        grep -Eq 'pinned to release|SHA-256 differs' "$output"
+    fi
+  done
+
+  sed -i 's/^BUNDLE_SHA256=.*/BUNDLE_SHA256=/' "$state_file"
+  if bash -c '
+       source "$1"
+       ROUTEGATE_STATE_FILE="$2"
+       ROUTEGATE_STATE_DIR="$3"
+       ROUTEGATE_LOG_FILE=""
+       ROUTEGATE_RESUME_INSTALL=1
+       ROUTEGATE_RESOLVED_VERSION=v3.1.4
+       ROUTEGATE_BUNDLE_SHA256="$4"
+       initialize_install_state
+    ' _ "$ROOT_DIR/install.sh" "$state_file" "$TEST_TMP/rejected-legacy-dir" "$expected_sha" \
+       >"$TEST_TMP/rejected-legacy.log" 2>&1; then
+    fail "legacy interrupted state without SHA-256 must not auto-resume"
+  else
+    assert_true "unknown legacy release fingerprint rejected before mutation" \
+      test ! -e "$TEST_TMP/rejected-legacy-dir"
+  fi
+
+  assert_true "new state stores a resolved tag instead of floating latest" \
+    grep -Fq 'write_install_state_status installing "$ROUTEGATE_RESOLVED_VERSION"' "$ROOT_DIR/install.sh"
+  assert_true "installation state serializes the validated bundle fingerprint" \
+    grep -Fq 'BUNDLE_SHA256=${ROUTEGATE_BUNDLE_SHA256}' "$ROOT_DIR/install.sh"
 }
 
 test_piped_entrypoint_guard() {
@@ -617,6 +693,7 @@ test_checksum_verification
 test_archive_entry_policy
 test_release_bundle_precedes_host_mutation
 test_legacy_bundle_rejected_before_platform_install
+test_resume_release_pin
 test_piped_entrypoint_guard
 test_setup_url_contract
 test_manager_environment_public_url
