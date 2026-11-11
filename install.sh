@@ -2151,9 +2151,11 @@ main() {
   set_install_stage updater
   bootstrap_trusted_updater
   set_install_stage complete
+  # Core ownership remains complete even if an optional Grafana add-on fails.
+  # Do not print whole-install success before the selected add-on succeeds.
   write_install_state
-  print_success
   install_selected_grafana
+  print_success
 }
 
 if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
