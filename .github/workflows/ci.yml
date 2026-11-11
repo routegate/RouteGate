@@ -49,6 +49,20 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      # RG-140 v0.2.0 integration: old #547 tests are now replayed from
+      # current main, not substituted for the current backend/release CI.
+      - name: Test scoped VLESS removal preflight against real sing-box
+        run: |
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/SagerNet/sing-box/releases/download/v1.12.8/sing-box-1.12.8-linux-amd64.tar.gz \
+            --output "$test_dir/sing-box.tar.gz"
+          printf '%s  %s\\n' b41d9ae438a4367e5fd5c4aa36fe040d0c1bfe5f91f96a072eef31f61d46670c "$test_dir/sing-box.tar.gz" | sha256sum --check --status
+          tar -xzf "$test_dir/sing-box.tar.gz" -C "$test_dir"
+          ROUTEGATE_TEST_SING_BOX="$test_dir/sing-box-1.12.8-linux-amd64/sing-box" \
+            go test ./internal/configs -run '^TestVLESSRemovalSingBox' -count=1 -timeout=60s -v
+
       - name: Test rollout PostgreSQL connection in read-only mode
         run: python3 -m unittest discover -s ../scripts -p test_traffic_accounting_rollout.py
 
