@@ -162,6 +162,54 @@ test_security_contract() {
   assert_false "managed Grafana never enables anonymous Viewer access" grep -Fq 'org_role = Viewer' "$ROOT_DIR/install-grafana.sh"
 }
 
+test_loopback_socket_policy() {
+  assert_true "Grafana accepts only IPv4 loopback listener" bash -c '
+    source "$1"
+    ss() { printf "LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*\\n"; }
+    validate_loopback_listener 3000 Grafana 1
+  ' _ "$ROOT_DIR/install-grafana.sh"
+
+  assert_true "Grafana accepts only IPv6 loopback listener" bash -c '
+    source "$1"
+    ss() { printf "LISTEN 0 128 [::1]:3000 [::]:*\\n"; }
+    validate_loopback_listener 3000 Grafana 1
+  ' _ "$ROOT_DIR/install-grafana.sh"
+
+  assert_false "Grafana rejects wildcard port exposure" bash -c '
+    source "$1"
+    ss() { printf "LISTEN 0 128 0.0.0.0:3000 0.0.0.0:*\\n"; }
+    validate_loopback_listener 3000 Grafana 1
+  ' _ "$ROOT_DIR/install-grafana.sh"
+
+  assert_false "Grafana rejects concrete non-loopback even alongside loopback" bash -c '
+    source "$1"
+    ss() {
+      printf "LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*\\n"
+      printf "LISTEN 0 128 10.0.0.25:3000 0.0.0.0:*\\n"
+    }
+    validate_loopback_listener 3000 Grafana 1
+  ' _ "$ROOT_DIR/install-grafana.sh"
+
+  assert_false "Grafana rejects missing loopback listener" bash -c '
+    source "$1"
+    ss() { :; }
+    validate_loopback_listener 3000 Grafana 1
+  ' _ "$ROOT_DIR/install-grafana.sh"
+
+  assert_true "Grafana tolerates transient startup delay with bounded retries" bash -c '
+    source "$1"
+    count=0
+    ss() {
+      count=$((count + 1))
+      if ((count >= 3)); then
+        printf "LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*\\n"
+      fi
+    }
+    sleep() { :; }
+    validate_loopback_listener 3000 Grafana 3
+  ' _ "$ROOT_DIR/install-grafana.sh"
+}
+
 test_entrypoint_guard() {
   local guard
   guard=$(tail -n 3 "$ROOT_DIR/install-grafana.sh" | head -n1)
@@ -175,6 +223,7 @@ test_state_update
 test_nginx_proxy_generation
 test_dashboard_contract
 test_security_contract
+test_loopback_socket_policy
 test_entrypoint_guard
 printf '1..%d\n' "$TESTS_RUN"
 
