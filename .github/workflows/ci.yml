@@ -263,6 +263,12 @@ jobs:
           grep -Fxq './bin/routegate-manager' bundle-files.txt
           grep -Fxq './bin/routegate-agent' bundle-files.txt
           grep -Fxq './frontend/index.html' bundle-files.txt
+          # Validate shipped HTML rather than the source-tree appearance.
+          index_html=$(tar -xOzf routegate-ci-test-linux-amd64.tar.gz ./frontend/index.html)
+          [[ "$index_html" == *'data-theme="dark"'* && "$index_html" == *'color-scheme: dark'* ]] || {
+            echo "::error::CI bundle contains outdated frontend appearance."
+            exit 1
+          }
           grep -Fq './manager/migrations/' bundle-files.txt
           grep -Fxq './tools/routegate-recovery' bundle-files.txt
           grep -Fxq './tools/release_manifest.py' bundle-files.txt
