@@ -94,6 +94,12 @@ func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask)
 		return deny("local_state_unavailable")
 	}
 	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); _ = lock.Close() }()
+	// Check before receipt replay too: an interrupted legacy operation can
+	// invalidate a previously successful removal's evidence.
+	if !runtimeMarkerAbsent(filepath.Join(e.receiptDir, "mutation-inflight.json")) {
+		report.State = "recovery_required"
+		return deny("runtime_recovery_required")
+	}
 	receiptPath := filepath.Join(e.receiptDir, request.OperationID+".json")
 	fencePath := filepath.Join(e.receiptDir, "inflight.json")
 	if data, readErr := readRemovalFile(receiptPath, 16384, true); readErr == nil {
@@ -266,35 +272,10 @@ func validRemovalGeneration(value RuntimeGeneration) bool {
 }
 
 func (e CredentialRemovalExecutor) lock() (*os.File, error) {
-	if !filepath.IsAbs(e.receiptDir) || !filepath.IsAbs(e.activePath) {
+	if !filepath.IsAbs(e.activePath) {
 		return nil, ErrCredentialRemoval
 	}
-	if err := os.MkdirAll(e.receiptDir, 0700); err != nil {
-		return nil, err
-	}
-	info, err := os.Lstat(e.receiptDir)
-	if err != nil {
-		return nil, err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || stat.Uid != uint32(os.Geteuid()) {
-		return nil, ErrCredentialRemoval
-	}
-	fd, err := syscall.Open(filepath.Join(e.receiptDir, "runtime.lock"), syscall.O_RDWR|syscall.O_CREAT|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
-	if err != nil {
-		return nil, err
-	}
-	file := os.NewFile(uintptr(fd), "runtime.lock")
-	info, err = file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-		file.Close()
-		return nil, ErrCredentialRemoval
-	}
-	if err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		file.Close()
-		return nil, err
-	}
-	return file, nil
+	return lockRuntimeMutation(e.receiptDir)
 }
 
 func readRemovalFile(path string, limit int64, private bool) ([]byte, error) {
