@@ -198,16 +198,20 @@ test_loopback_socket_policy() {
 
   assert_true "Grafana tolerates transient startup delay with bounded retries" bash -c '
     source "$1"
-    count=0
+    counter="$2"
+    printf "0\\n" >"$counter"
     ss() {
+      local count
+      count=$(cat "$counter")
       count=$((count + 1))
+      printf "%s\\n" "$count" >"$counter"
       if ((count >= 3)); then
         printf "LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*\\n"
       fi
     }
     sleep() { :; }
     validate_loopback_listener 3000 Grafana 3
-  ' _ "$ROOT_DIR/install-grafana.sh"
+  ' _ "$ROOT_DIR/install-grafana.sh" "$TEST_TMP/socket-counter"
 }
 
 test_entrypoint_guard() {
