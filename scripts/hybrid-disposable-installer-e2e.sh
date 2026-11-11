@@ -70,6 +70,13 @@ umask 077
    "${ROUTEGATE_E2E_WORK_DIR:-}" == /home/runner/work/_temp/routegate-hybrid-clean-host-e2e ]] || exit 70
 [[ " $* " == *" --nginx "* && " $* " == *" --redirect "* &&
    " $* " == *" -d routegate-hybrid-ci.invalid "* ]] || exit 71
+# Inject one safe, deterministic ACME failure after PostgreSQL, Manager,
+# nginx and RouteGate-owned files have already been installed. This shim exists
+# ONLY inside this one-use GitHub runner's process-local PATH.
+if [[ -f "$ROUTEGATE_E2E_WORK_DIR/fail-certbot-once" ]]; then
+  rm -f "$ROUTEGATE_E2E_WORK_DIR/fail-certbot-once"
+  exit 75
+fi
 TLS="$ROUTEGATE_E2E_WORK_DIR/tls"
 mkdir -p "$TLS"
 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
@@ -144,6 +151,36 @@ for svc in postgresql nginx routegate-manager routegate-agent; do
 done
 log "Checksum failure was safe; retrying with original verified bundle and checksum."
 
+log "Injecting one post-mutation TLS failure to exercise actual interrupted-install recovery."
+touch "$WORK/fail-certbot-once"
+if sudo -n env \
+  "PATH=$WORK/bin:$PATH" "GITHUB_ACTIONS=true" "RUNNER_TEMP=$RUNNER_TEMP" \
+  "ROUTEGATE_E2E_DOMAIN=$DOMAIN" "ROUTEGATE_E2E_WORK_DIR=$WORK" \
+  "NO_PROXY=$NO_PROXY" "no_proxy=$no_proxy" \
+  bash "$ROOT/install.sh" \
+    --domain "$DOMAIN" --email routegate-ci@example.invalid \
+    --admin-email routegate-ci@example.invalid --server-name "$DOMAIN" \
+    --version "$VERSION" --bundle-file "$BUNDLE" --checksum-file "$CHECKSUM" \
+    --without-prometheus --yes >"$WORK/rejected-acme.stdout" 2>&1; then
+  die "TLS failure injection was ignored by the native installer"
+fi
+grep -Fq 'Installation stopped at stage nginx_tls' "$WORK/rejected-acme.stdout" ||
+  die "Interrupted install did not stop at the expected post-mutation TLS stage"
+sudo grep -Fxq 'STATUS=installing' /etc/routegate/install-state.env ||
+  die "Failed post-mutation install lost its resumable ownership state"
+[[ ! -e "$WORK/fail-certbot-once" ]] ||
+  die "One-time synthetic ACME failure was never exercised"
+sudo test -s /var/lib/routegate-installer/secrets.env ||
+  die "Post-mutation failure did not preserve necessary recovery credentials"
+sudo systemctl is-active --quiet postgresql || die "PostgreSQL not yet running after TLS failure"
+sudo systemctl is-active --quiet routegate-manager || die "Manager not yet running after TLS failure"
+sudo systemctl is-active --quiet nginx || die "nginx not yet running after TLS failure"
+PRESERVED_ADMIN_SHA=$(sudo sed -n 's/^ADMIN_PASSWORD=//p' /var/lib/routegate-installer/secrets.env |
+  sha256sum | awk '{print $1}')
+[[ "$PRESERVED_ADMIN_SHA" =~ ^[a-f0-9]{64}$ ]] ||
+  die "Failed to fingerprint preserved bootstrap credential"
+log "Interrupted state and secrets preserved; retrying the exact same verified release."
+
 log "Installing all-in-one Hybrid on disposable Ubuntu with test TLS."
 if ! sudo -n env \
   "PATH=$WORK/bin:$PATH" "GITHUB_ACTIONS=true" "RUNNER_TEMP=$RUNNER_TEMP" \
@@ -163,6 +200,8 @@ fi
 log "Checking real systemd services, persistent Agent and HTTPS frontend."
 sudo grep -Fxq 'STATUS=complete' /etc/routegate/install-state.env || die "Install not complete"
 sudo grep -Fxq "VERSION=$VERSION" /etc/routegate/install-state.env || die "Wrong version"
+[[ "$PRESERVED_ADMIN_SHA" == "$(sudo sed -n 's/^Bootstrap password: //p' /root/routegate-first-login.txt | sha256sum | awk '{print $1}')" ]] ||
+  die "Resume unexpectedly rotated the bootstrap password instead of preserving it"
 sudo grep -q '^agent_id:' /etc/routegate/agent.yaml || die "Agent not registered"
 sudo grep -q '^agent_token:' /etc/routegate/agent.yaml || die "Agent has no persistent token"
 if sudo grep -q '^registration_token:' /etc/routegate/agent.yaml; then
