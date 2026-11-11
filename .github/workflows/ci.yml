@@ -105,6 +105,9 @@ jobs:
       - name: Check historical readback identity and digest with race detector
         run: go test -race ./internal/client ./internal/heartbeat -run '^(TestRuntimeMutationResultVerification|TestRuntimeMutationVerifiedResultRetainsFence|TestFencedDurableReplayRefusesHistorical404AndRetainsFence)$' -count=1 -timeout=120s -v
 
+      - name: Verify read-only recovery witness and fail-closed runtime evidence with race detector
+        run: go test -race ./internal/heartbeat ./internal/tasks -run '^(TestFencedDispatchSavesRuntimeRecoveryWitness|TestRuntimeMutationRecovery(TargetHash|Observation|RejectsChangedEvidence))$' -count=1 -timeout=120s -v
+
       - name: Test scoped Agent removal with systemd and real Reality traffic
         run: |
           test_dir="$(mktemp -d)"
