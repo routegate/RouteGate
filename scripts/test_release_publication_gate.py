@@ -89,6 +89,23 @@ class ReleasePublicationGateTests(unittest.TestCase):
         )
         self.assertIn("CI bundle contains outdated frontend appearance.", ci)
 
+    def test_reusable_ci_rehearses_both_untagged_release_architectures(self):
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        script = (ROOT / "scripts" / "test-release-candidate-dry-run.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("  tagless-release-candidate:", ci)
+        self.assertIn("bash scripts/test-release-candidate-dry-run.sh", ci)
+        self.assertIn('ARCHITECTURES="amd64 arm64"', script)
+        self.assertIn('sha256sum -c SHA256SUMS', script)
+        self.assertIn('sha256sum -c INSTALLER_SHA256SUMS', script)
+        self.assertIn('verify-target', script)
+        self.assertIn('struct.unpack_from("<H", head, 18)[0] == machine', script)
+        self.assertIn('stale release frontend', script)
+        self.assertIn('Corrupted arm64 artifact unexpectedly passed', script)
+        self.assertNotIn("gh release create", script)
+        self.assertNotIn("git tag", script)
+
     def test_attestations_and_checksums_present_before_draft(self):
         verify = self.workflow.index(
             "Verify release manifest, checksums and bundle structure"

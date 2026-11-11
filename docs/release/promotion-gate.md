@@ -10,6 +10,7 @@ Successful build/tests do not prove that a fresh VPS installer, admin setup, ngi
 
 Record evidence, including exact artifact version and source commit, in the release notes or the tracking issue:
 
+- [ ] Same-commit CI includes a **tagless, two-architecture release rehearsal** for genuine linux/amd64 and linux/arm64 archives: checksums, embedded commit/version, native binary ELF architecture, frontend parity and corruption rejection. This does not run ARM64 binaries or prove actual tag attestation/publication.
 - [ ] Tag is immutable, points to the expected reviewed commit, and CI for that exact commit is green. The release workflow's attested bundle, installer scripts, release manifest and both checksum sets verify. Do not publish if the version/commit/bundle mismatch.
 - [ ] Installer from the **same release tag** is used with matching bundle, never mixed with `main` or `latest`. A deliberately stale bundle fails **before** packages, services and RouteGate installation state are changed.
 - [ ] On disposable, fresh Ubuntu 24.04 amd64, a dedicated DNS name resolves to the test VPS, TCP 80/443 are reachable, and the exact candidate is installed as **Hybrid/All-in-One**, not as a remote-only node. Record redacted stage-by-stage logs.
