@@ -35,6 +35,9 @@ class ReleasePublicationGateTests(unittest.TestCase):
         )[0]
         self.assertIn("scripts/hybrid-disposable-installer-e2e.sh", policy)
         self.assertIn("scripts/hybrid-vpn-e2e.py", policy)
+        self.assertIn("scripts/test-release-candidate-dry-run.sh", policy)
+        self.assertIn("grep -Eq '^  tagless-release-candidate:'", policy)
+        self.assertIn("grep -Fq 'bash scripts/test-release-candidate-dry-run.sh'", policy)
         self.assertIn("grep -Eq '^  hybrid-native-e2e:'", policy)
         self.assertIn("git merge-base --is-ancestor", policy)
         self.assertIn('^v[0-9]+', policy)
