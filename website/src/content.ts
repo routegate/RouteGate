@@ -21,6 +21,9 @@ export type SiteContent = {
   deployment: {
     eyebrow: string; title: string; text: string; cards: Card[]
     commandLabel: string; commandTitle: string; commandNote: string
+    releaseLoadingTitle: string; releaseUnavailableTitle: string
+    releaseLoading: string; releaseUnavailable: string; releaseUnavailableNote: string
+    legacyReleaseNote: string
   }
   roadmap: { eyebrow: string; title: string; intro: string; columns: RoadmapColumn[] }
   faq: {
@@ -87,8 +90,14 @@ export const content: Record<Locale, SiteContent> = {
         { title: 'Безопасный первый вход', text: 'Одноразовая ссылка /setup создаёт первого администратора без заводского пароля.' },
       ],
       commandLabel: 'БЫСТРЫЙ СТАРТ',
-      commandTitle: 'Скачать, проверить и установить v0.1.0',
-      commandNote: 'Команда ниже фиксирует стабильный v0.1.0. Возможности ветки main могут опережать стабильный релиз. Не запускайте удалённый скрипт вслепую через curl | sudo bash.',
+      commandTitle: 'Опубликованная стабильная версия {version}',
+      commandNote: 'Команда привязана к конкретному опубликованному тегу. Просмотри install.sh перед запуском и проверь контрольные суммы релизного архива.',
+      legacyReleaseNote: 'Последний публичный стабильный выпуск — v0.1.0 (устаревший MVP). Новые функции ветки main в него не входят. Подготовка актуального релиза: GitHub Issue #715.',
+      releaseLoadingTitle: 'Проверяем актуальный стабильный релиз…',
+      releaseUnavailableTitle: 'Не удалось проверить стабильный релиз',
+      releaseLoading: 'Получаем опубликованную версию из GitHub Releases…',
+      releaseUnavailable: 'Команда установки недоступна без подтверждённой версии. Открой GitHub Releases и выбери опубликованный тег.',
+      releaseUnavailableNote: 'Не подставляем устаревший или неподтверждённый номер автоматически. Проверь GitHub Releases или повтори попытку позже.',
     },
     roadmap: {
       eyebrow: 'ДОРОЖНАЯ КАРТА',
@@ -191,8 +200,14 @@ export const content: Record<Locale, SiteContent> = {
         { title: 'Secure first access', text: 'A single-use /setup link creates the first administrator without a factory password.' },
       ],
       commandLabel: 'QUICK START',
-      commandTitle: 'Download, review, and install v0.1.0',
-      commandNote: 'The command below pins stable v0.1.0. The main branch may contain capabilities that have not reached a stable release yet. Do not blindly pipe a remote script into sudo bash.',
+      commandTitle: 'Published stable release {version}',
+      commandNote: 'This command is pinned to the exact published release tag. Review install.sh before running it and verify release bundle checksums.',
+      legacyReleaseNote: 'The latest published stable is v0.1.0 (legacy MVP). Features developed on main are not in this release. Current release preparation: GitHub Issue #715.',
+      releaseLoadingTitle: 'Checking the published stable release…',
+      releaseUnavailableTitle: 'Cannot verify a stable release',
+      releaseLoading: 'Retrieving the published stable version from GitHub Releases…',
+      releaseUnavailable: 'The install command is unavailable without a verified release tag. Open GitHub Releases and choose a published version.',
+      releaseUnavailableNote: 'No silent fallback to an old or unverified version. Check GitHub Releases or try again later.',
     },
     roadmap: {
       eyebrow: 'ROADMAP',
