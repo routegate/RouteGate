@@ -157,6 +157,8 @@ jobs:
             scripts/test-clean-vps-installer.sh \
             scripts/test-release-tag-identity.sh \
             scripts/check-release-tag-identity.sh \
+            scripts/test-manual-release-source.sh \
+            scripts/check-manual-release-source.sh \
             scripts/test-grafana-installer.sh \
             scripts/test-production-like-preflight.sh \
             scripts/test-production-like-update-manager.sh \
@@ -186,6 +188,8 @@ jobs:
             scripts/routegate-update-transaction.sh \
             scripts/routegate-update-verified.sh \
             scripts/test-attestation-verifier-runtime.sh \
+            scripts/test-manual-release-source.sh \
+            scripts/check-manual-release-source.sh \
             scripts/test-grafana-installer.sh \
             scripts/test-production-like-preflight.sh \
             scripts/test-production-like-update-manager.sh \
@@ -207,6 +211,7 @@ jobs:
           bash scripts/test-agent-installer.sh
           scripts/test-clean-vps-installer.sh
           bash scripts/test-release-tag-identity.sh
+          bash scripts/test-manual-release-source.sh
           bash scripts/test-grafana-installer.sh
           sudo bash scripts/test-production-like-preflight.sh
           sudo bash scripts/test-production-like-update-manager.sh
