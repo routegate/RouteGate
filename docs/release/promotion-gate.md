@@ -22,11 +22,11 @@ Record evidence, including exact artifact version and source commit, in the rele
 
 ## Publishing and immutability
 
-1. A `v*` tag triggers build, checksum and attestation jobs and creates a **GitHub Release draft**.
-2. Review the draft and all evidence. A green CI badge alone is **insufficient**; recording a real Hybrid E2E is mandatory for the supported current release. The release reviewer explicitly decides whether RG-140 blocks promotion.
-3. Publish the draft **manually** using the GitHub Releases interface only after the checks above. For release candidates, retain the prerelease designation. Publishing is intentionally a separate operator action, not part of CI.
-4. Never replace release assets or re-point an existing published tag. If anything changes, cut a **new** version and regenerate artifacts/attestations. The workflow refuses to upload into an existing draft or release.
-
+1. A tag matching `vX.Y.Z` or `vX.Y.Z-rc.N` must point to a commit in the canonical `main` history. The workflow refuses tags from unrelated/unreviewed branches. Every candidate must include `scripts/hybrid-disposable-installer-e2e.sh`, `scripts/hybrid-vpn-e2e.py` and the CI job `hybrid-native-e2e`; missing coverage **blocks** release creation.
+2. The release workflow invokes the repository's reusable `RouteGate CI` **on the exact tag commit**. Only if every CI job, including disposable native Hybrid installation and real isolated VLESS/Reality traffic, succeeds will the release workflow build, checksum, attest and create a **GitHub Release draft**.
+3. Review the draft and all evidence. A green CI badge alone is **insufficient**; recording a real external Hybrid E2E is mandatory for the supported current release. The release reviewer explicitly decides whether RG-140 blocks promotion.
+4. Publish the draft **manually** using the GitHub Releases interface only after the checks above. For release candidates, retain the prerelease designation. Publishing is intentionally a separate operator action, not part of CI.
+5. Never replace release assets or re-point an existing published tag. If anything changes, cut a **new** version and regenerate artifacts/attestations. The workflow refuses to upload into an existing draft or release.
 ## Operational boundaries
 
 - The US production Manager, FI node, and NL candidate VPS are **not** CI test targets.
