@@ -5,6 +5,8 @@ on:
     branches:
       - main
   pull_request:
+  # Public tag releases reuse all checks, including the native Hybrid job.
+  workflow_call:
 
 jobs:
   backend:
@@ -217,8 +219,8 @@ jobs:
           bash scripts/routegate-update-transaction.sh --help >/dev/null
           bash scripts/routegate-update-verified.sh --help >/dev/null
 
-      - name: Run release manifest tests
-        run: python3 -m unittest scripts/test_release_manifest.py
+      - name: Run release manifest and publication safety tests
+        run: python3 -m unittest scripts/test_release_manifest.py scripts/test_release_publication_gate.py
 
       - name: Test UI publication recovery
         run: python3 -m unittest scripts/test_rg140_session_ui.py
@@ -456,6 +458,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Test published release quick-start safety
+        run: npm test
 
       - name: Build website
         run: npm run build

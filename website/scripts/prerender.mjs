@@ -21,7 +21,7 @@ const pages = {
     productTitle: 'From VPN nodes to user access',
     productItems: [
       'Managed local and remote Linux VPN nodes through RouteGate Agent.',
-      'Stable v0.1.0 supports VLESS / Reality; current main also implements WireGuard, Hysteria2, Shadowsocks 2022, and MTProto / FakeTLS.',
+      'The original public MVP v0.1.0 supported VLESS / Reality; newer protocols are available only when included in a published release.',
       'Access & Devices, subscriptions, QR delivery, revocation, and rotation.',
       'Routing profiles delivered according to each VPN client’s capabilities.',
     ],
@@ -29,7 +29,7 @@ const pages = {
     installText: 'The public clean-host path targets Ubuntu 24.04 LTS on amd64 with PostgreSQL, systemd, nginx, HTTPS, and a single-use administrator setup link.',
     roadmapTitle: 'Roadmap',
     roadmapItems: [
-      'Stable v0.1.0: validated VLESS / Reality clean-host path on Ubuntu 24.04 LTS amd64.',
+      'Original public MVP v0.1.0: initial VLESS / Reality clean-host path on Ubuntu 24.04 LTS amd64.',
       'Current main: multi-protocol management, Access & Devices, User Portal, routing profiles, and verified updates.',
       'Next: broader validation and safer automation without hidden account moves.',
     ],
@@ -50,7 +50,7 @@ const pages = {
     productTitle: 'От VPN-узла до пользовательского доступа',
     productItems: [
       'Управляемые локальные и удалённые Linux VPN-узлы через RouteGate Agent.',
-      'Стабильный v0.1.0 поддерживает VLESS / Reality; в текущей ветке main также реализованы WireGuard, Hysteria2, Shadowsocks 2022 и MTProto / FakeTLS.',
+      'Первый публичный MVP v0.1.0 поддерживал VLESS / Reality; дополнительные протоколы доступны только в тех выпусках, где они опубликованы.',
       'Доступ и устройства, подписки, QR-коды, отзыв и ротация доступа.',
       'Профили маршрутизации с доставкой с учётом возможностей конкретного VPN-клиента.',
     ],
@@ -58,7 +58,7 @@ const pages = {
     installText: 'Публичный путь установки рассчитан на Ubuntu 24.04 LTS amd64 с PostgreSQL, systemd, nginx, HTTPS и одноразовой ссылкой для создания администратора.',
     roadmapTitle: 'Дорожная карта',
     roadmapItems: [
-      'Стабильный v0.1.0: проверенный clean-host путь VLESS / Reality на Ubuntu 24.04 LTS amd64.',
+      'Первый публичный MVP v0.1.0: исходная установка VLESS / Reality на Ubuntu 24.04 LTS amd64.',
       'Текущая ветка main: несколько протоколов, Доступ и устройства, Портал пользователя, маршрутизация и проверяемые обновления.',
       'Дальше: более широкая проверка и безопасная автоматизация без скрытых переносов аккаунтов.',
     ],

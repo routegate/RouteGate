@@ -21,6 +21,9 @@ export type SiteContent = {
   deployment: {
     eyebrow: string; title: string; text: string; cards: Card[]
     commandLabel: string; commandTitle: string; commandNote: string
+    releaseLoadingTitle: string; releaseUnavailableTitle: string
+    releaseLoading: string; releaseUnavailable: string; releaseUnavailableNote: string
+    legacyReleaseNote: string; releaseListLabel: string
   }
   roadmap: { eyebrow: string; title: string; intro: string; columns: RoadmapColumn[] }
   faq: {
@@ -54,7 +57,7 @@ export const content: Record<Locale, SiteContent> = {
       intro: 'RouteGate управляет жизненным циклом инфраструктуры и клиентского доступа, а не только генерирует конфигурации.',
       cards: [
         { title: 'Управляемые VPN-узлы', text: 'Подключайте локальные и удалённые Linux-узлы через RouteGate Agent с явным состоянием и проверками.', icon: 'server' },
-        { title: 'Несколько протоколов', text: 'Стабильный v0.1.0 поддерживает VLESS / Reality. В текущей ветке main уже реализованы WireGuard, Hysteria2, Shadowsocks 2022 и MTProto / FakeTLS.', icon: 'protocol' },
+        { title: 'Несколько протоколов', text: 'Первый публичный выпуск v0.1.0 поддерживал VLESS / Reality. В ветке main также разработаны WireGuard, Hysteria2, Shadowsocks 2022 и MTProto / FakeTLS; наличие зависит от опубликованной версии.', icon: 'protocol' },
         { title: 'Доступ и устройства', text: 'VPN-аккаунты, отдельные устройства, подписки, QR-коды, отзыв и ротация доступа.', icon: 'devices' },
         { title: 'Маршрутизация и доставка', text: 'Профили Direct, VPN и Block с доставкой под возможности конкретного VPN-клиента.', icon: 'route' },
       ],
@@ -83,19 +86,26 @@ export const content: Record<Locale, SiteContent> = {
       cards: [
         { title: 'Проверяемая установка', text: 'Скачайте install.sh, просмотрите его и только затем запускайте с повышенными правами.' },
         { title: 'Платформа сначала', text: 'Установщик поднимает Manager, Agent, PostgreSQL, nginx и защищённую точку входа.' },
-        { title: 'VPN-компонент по требованию', text: 'Стабильный v0.1.0 использует управляемый VLESS / Reality через sing-box. Дополнительные протоколы уже развиваются в ветке main, но не входят в этот стабильный релиз.' },
+        { title: 'VPN-компонент по требованию', text: 'Первый MVP v0.1.0 использовал управляемый VLESS / Reality через sing-box. Доступность остальных протоколов определяется выбранным опубликованным выпуском.' },
         { title: 'Безопасный первый вход', text: 'Одноразовая ссылка /setup создаёт первого администратора без заводского пароля.' },
       ],
       commandLabel: 'БЫСТРЫЙ СТАРТ',
-      commandTitle: 'Архивный стабильный выпуск v0.1.0',
-      commandNote: 'Это исторический MVP v0.1.0, а не актуальная сборка ветки main: обновлённый интерфейс и новые протоколы в нём отсутствуют. Используйте install.sh только из того же тега, что и архив; не смешивайте с main. Подготовка нового проверенного релиза отслеживается в GitHub issue #715.',
+      commandTitle: 'Опубликованная стабильная версия {version}',
+      commandNote: 'Команда привязана к конкретному опубликованному тегу. Просмотри install.sh перед запуском и проверь контрольные суммы релизного архива.',
+      legacyReleaseNote: 'Последний публичный стабильный выпуск — v0.1.0 (устаревший MVP). Новые функции ветки main в него не входят. Подготовка актуального релиза: GitHub Issue #715.',
+      releaseListLabel: 'Опубликованные релизы',
+      releaseLoadingTitle: 'Проверяем актуальный стабильный релиз…',
+      releaseUnavailableTitle: 'Не удалось проверить стабильный релиз',
+      releaseLoading: 'Получаем опубликованную версию из GitHub Releases…',
+      releaseUnavailable: 'Команда установки недоступна без подтверждённой версии. Открой GitHub Releases и выбери опубликованный тег.',
+      releaseUnavailableNote: 'Не подставляем устаревший или неподтверждённый номер автоматически. Проверь GitHub Releases или повтори попытку позже.',
     },
     roadmap: {
       eyebrow: 'ДОРОЖНАЯ КАРТА',
       title: 'Куда развивается RouteGate',
       intro: 'Это продуктовая карта направлений, а не обещание дат. Уже работающие возможности отделены от текущего усиления и следующих задач.',
       columns: [
-        { title: 'Стабильный v0.1.0', items: [
+        { title: 'Первый публичный MVP v0.1.0', items: [
           'Проверенный путь VLESS / Reality на Ubuntu 24.04 LTS amd64.',
           'Manager, Agent, PostgreSQL, nginx/HTTPS и безопасный одноразовый /setup.',
           'VPN-аккаунты, QR/VLESS-доставка, Config Deploy и основы маршрутизации.',
@@ -158,7 +168,7 @@ export const content: Record<Locale, SiteContent> = {
       intro: 'RouteGate manages infrastructure and client-access lifecycle rather than only generating configuration files.',
       cards: [
         { title: 'Managed VPN nodes', text: 'Connect local and remote Linux nodes through RouteGate Agent with explicit state and validation.', icon: 'server' },
-        { title: 'Multiple protocols', text: 'Stable v0.1.0 supports VLESS / Reality. The current main branch already implements WireGuard, Hysteria2, Shadowsocks 2022, and MTProto / FakeTLS.', icon: 'protocol' },
+        { title: 'Multiple protocols', text: 'The original public v0.1.0 MVP supported VLESS / Reality. The main branch also implements WireGuard, Hysteria2, Shadowsocks 2022 and MTProto / FakeTLS; availability depends on the published release.', icon: 'protocol' },
         { title: 'Access & Devices', text: 'VPN accounts, per-device access, subscriptions, QR codes, revocation, and rotation.', icon: 'devices' },
         { title: 'Routing & delivery', text: 'Direct, VPN, and Block profiles delivered according to each VPN client’s capabilities.', icon: 'route' },
       ],
@@ -187,19 +197,26 @@ export const content: Record<Locale, SiteContent> = {
       cards: [
         { title: 'Reviewable install', text: 'Download install.sh, inspect it, and only then run it with elevated privileges.' },
         { title: 'Platform first', text: 'The installer brings up Manager, Agent, PostgreSQL, nginx, and the protected entry point.' },
-        { title: 'Runtime on demand', text: 'Stable v0.1.0 uses managed VLESS / Reality through sing-box. Additional protocols are already developed on main, but are not part of this stable release.' },
+        { title: 'Runtime on demand', text: 'The original v0.1.0 MVP used managed VLESS / Reality through sing-box. Other protocols are available only if included in the chosen published release.' },
         { title: 'Secure first access', text: 'A single-use /setup link creates the first administrator without a factory password.' },
       ],
       commandLabel: 'QUICK START',
-      commandTitle: 'Legacy stable release v0.1.0',
-      commandNote: 'This is the historical v0.1.0 MVP, not the current main build: the newer UI and protocols are not included. Use the installer from the same tag as the release bundle; never mix it with main. A new verified release is tracked in GitHub issue #715.',
+      commandTitle: 'Published stable release {version}',
+      commandNote: 'This command is pinned to the exact published release tag. Review install.sh before running it and verify release bundle checksums.',
+      legacyReleaseNote: 'The latest published stable is v0.1.0 (legacy MVP). Features developed on main are not in this release. Current release preparation: GitHub Issue #715.',
+      releaseListLabel: 'Published releases',
+      releaseLoadingTitle: 'Checking the published stable release…',
+      releaseUnavailableTitle: 'Cannot verify a stable release',
+      releaseLoading: 'Retrieving the published stable version from GitHub Releases…',
+      releaseUnavailable: 'The install command is unavailable without a verified release tag. Open GitHub Releases and choose a published version.',
+      releaseUnavailableNote: 'No silent fallback to an old or unverified version. Check GitHub Releases or try again later.',
     },
     roadmap: {
       eyebrow: 'ROADMAP',
       title: 'Where RouteGate is heading',
       intro: 'This is a product-direction map, not a promise of dates. Shipped capability is separated from current hardening and later work.',
       columns: [
-        { title: 'Stable v0.1.0', items: [
+        { title: 'Original public MVP v0.1.0', items: [
           'Validated VLESS / Reality path on Ubuntu 24.04 LTS amd64.',
           'Manager, Agent, PostgreSQL, nginx/HTTPS, and secure single-use /setup.',
           'VPN accounts, QR/VLESS delivery, Config Deploy, and routing foundations.',
