@@ -96,7 +96,7 @@ func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask)
 	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); _ = lock.Close() }()
 	// Check before receipt replay too: an interrupted legacy operation can
 	// invalidate a previously successful removal's evidence.
-	if !runtimeMarkerAbsent(filepath.Join(e.receiptDir, "mutation-inflight.json")) {
+	if !runtimeMarkerAbsent(filepath.Join(e.receiptDir, "mutation-inflight.json")) || !runtimeMarkerAbsent(filepath.Join(e.receiptDir, runtimeResultFile)) {
 		report.State = "recovery_required"
 		return deny("runtime_recovery_required")
 	}
