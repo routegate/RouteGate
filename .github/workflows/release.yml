@@ -124,6 +124,13 @@ jobs:
             grep -Fxq './bin/routegate-manager' "$listing"
             grep -Fxq './bin/routegate-agent' "$listing"
             grep -Fxq './frontend/index.html' "$listing"
+            # Check what will actually SHIP, not the working tree or
+            # standalone frontend build. A stale theme must block drafts.
+            index_html=$(tar -xOzf "$bundle" ./frontend/index.html)
+            if [[ "$index_html" != *'data-theme="dark"'* || "$index_html" != *'color-scheme: dark'* ]]; then
+              echo "::error::Release bundle $bundle has a stale frontend (dark-only UI contract missing)."
+              exit 1
+            fi
             grep -Fq './manager/migrations/' "$listing"
             grep -Fxq './tools/release_manifest.py' "$listing"
             grep -Fxq './tools/routegate-update-bootstrap.sh' "$listing"
