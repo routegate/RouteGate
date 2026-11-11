@@ -451,5 +451,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test published release quick-start safety
+        run: npm test
+
       - name: Build website
         run: npm run build
