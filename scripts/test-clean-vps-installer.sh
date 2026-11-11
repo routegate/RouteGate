@@ -301,6 +301,12 @@ test_grafana_selection_and_install_contract() {
   addon_line=$(grep -n 'install_selected_grafana' <<<"$main_body" | tail -n1 | cut -d: -f1)
   assert_true "Grafana release assets are verified before state mutation" test "$prepare_line" -lt "$state_line"
   assert_true "Grafana installation runs after core state completion" test "$state_line" -lt "$addon_line"
+
+  local complete_line success_line
+  complete_line=$(grep -n '^  write_install_state$' <<<"$main_body" | tail -n1 | cut -d: -f1)
+  success_line=$(grep -n '^  print_success$' <<<"$main_body" | tail -n1 | cut -d: -f1)
+  assert_true "Grafana add-on runs only after core is marked complete" test "$complete_line" -lt "$addon_line"
+  assert_true "final installation success follows selected Grafana" test "$addon_line" -lt "$success_line"
 }
 
 test_artifact_urls() {
