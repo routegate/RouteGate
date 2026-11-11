@@ -30,6 +30,22 @@ func TestMigrationOrdinalCollisionPreventsAllDatabaseWork(t *testing.T) {
 	}
 }
 
+func TestLegacyMigrationIdentityIsPreservedVerbatim(t *testing.T) {
+	// Real RouteGate migration history includes both numbered 000003 files
+	// and letter-suffixed legacy variants. An upgrade gate must never force
+	// renaming or removal of production-applied filenames.
+	files := []string{
+		"000003_auth_foundation.up.sql",
+		"000003_config_apply_jobs.up.sql",
+		"000150b_client_profile_repair.up.sql",
+		"000159_staged_account_transfers.up.sql",
+		"000160_traffic_report_checkpoints.up.sql",
+	}
+	if err := validateMigrationOrdinals(files); err != nil {
+		t.Fatalf("grandfathered migration history was rejected: %v", err)
+	}
+}
+
 func TestMigrationOrdinalCollisionRejectsInconsistentPadding(t *testing.T) {
 	files := []string{"000160_traffic_report_checkpoints.up.sql", "160_other.up.sql"}
 	if err := validateMigrationOrdinals(files); err == nil {
@@ -42,6 +58,7 @@ func TestMigrationOrdinalPreflightRejectsInvalidFileNames(t *testing.T) {
 		"badprefix_test.up.sql",
 		"000161.up.sql",
 		"000161_.up.sql",
+		"000161b_noncanonical.up.sql",
 		"_unnumbered.up.sql",
 	} {
 		t.Run(name, func(t *testing.T) {
