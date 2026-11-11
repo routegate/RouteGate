@@ -342,7 +342,21 @@ Interrupted-install secrets are temporarily stored under:
 /var/lib/routegate-installer/
 ```
 
-These files are root-only. If a RouteGate-owned installation is marked `installing`, re-running the same command for the same domain resumes with preserved installer secrets. After successful verification, transient secrets are deleted and state becomes `complete`.
+These files are root-only. When `STATUS=installing`, the installer resumes
+only if the **verified release tag and SHA-256 match the exact original
+bundle**, in addition to matching the domain and Prometheus ownership.
+The state file records `VERSION` (a pinned resolved tag, **not** a
+floating `latest` alias) and `BUNDLE_SHA256` before APT or service changes.
+This prevents a changed `latest` tag or a replaced archive under the same
+version from silently rewriting a partially installed Hybrid.
+
+If interrupted state lacks the pinned version or checksum (such as an older
+installer's legacy state), automatic continuation is **blocked**. Preserve
+`/etc/routegate/install-state.env` and private logs; do not reset the state,
+delete PostgreSQL or bypass the check blindly. Inspect the exact original
+artifacts and use a reviewed manual recovery procedure. Matching verified
+retries preserve installer secrets. After successful verification, transient
+secrets are deleted and the state becomes `complete`.
 
 When state is `complete`, running the installer again performs health/idempotency checks and exits without reinstalling the platform or rotating credentials.
 
