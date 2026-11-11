@@ -85,7 +85,7 @@ func (r *Runner) replayRuntimeResult(ctx context.Context) {
 		dir = tasks.DefaultRuntimeMutationDir
 	}
 	if err := tasks.ReplayRuntimeResult(dir, r.runtimeResultBinding(), func(taskID string, data []byte) error {
-		return r.client.ReplayTaskResult(ctx, r.cfg.AgentToken, taskID, data)
+		return r.client.ReplayTaskResult(ctx, r.cfg.AgentToken, taskID, data, r.runtimeResultBinding())
 	}); err != nil {
 		// Keep polling for read-only diagnostics; admission remains fenced.
 		r.logger.Warn("durable task result requires reconciliation")
