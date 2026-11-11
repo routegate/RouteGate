@@ -9,8 +9,14 @@ export function publishedStableTag(payload: unknown): string | null {
   return typeof tag === 'string' && stableTagPattern.test(tag) ? tag : null
 }
 
+export function isSupportedQuickStartTag(tag: string): boolean {
+  // Preserve historical v0.1.0 downloads, but do not automatically recommend
+  // its outdated installer as the current safe first-install experience.
+  return stableTagPattern.test(tag) && tag !== 'v0.1.0'
+}
+
 export function buildInstallCommand(tag: string): string {
-  if (!stableTagPattern.test(tag)) {
+  if (!isSupportedQuickStartTag(tag)) {
     throw new Error('Install command requires a verified stable release tag')
   }
   return [
