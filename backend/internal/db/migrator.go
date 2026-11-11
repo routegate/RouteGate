@@ -12,7 +12,35 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// validateMigrationSequence runs before opening a database transaction or
+// creating schema_migrations. Distinct names with the same ordinal (e.g.
+// 000160_traffic_* and 000160_revocation_*) would otherwise both apply because
+// the existing journal keys by complete filename rather than sequence.
+// Lettered ordinals like 000150a and 000150b are intentionally distinct.
+func validateMigrationSequence(files []string) error {
+	seen := make(map[string]string, len(files))
+	for _, file := range files {
+		version := strings.TrimSuffix(filepath.Base(file), ".up.sql")
+		ordinal := strings.SplitN(version, "_", 2)[0]
+		if previous, exists := seen[ordinal]; exists {
+			return fmt.Errorf("migration sequence %q reused by %q and %q", ordinal, previous, version)
+		}
+		seen[ordinal] = version
+	}
+	return nil
+}
+
 func Migrate(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, logger *slog.Logger) error {
+	// Fail without schema mutation when source/bundle histories collide.
+	files, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
+	if err != nil {
+		return fmt.Errorf("list migration files: %w", err)
+	}
+	sort.Strings(files)
+	if err := validateMigrationSequence(files); err != nil {
+		return err
+	}
+
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version TEXT PRIMARY KEY,
@@ -21,13 +49,6 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, logg
 	`); err != nil {
 		return fmt.Errorf("create schema_migrations table: %w", err)
 	}
-
-	files, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
-	if err != nil {
-		return fmt.Errorf("list migration files: %w", err)
-	}
-
-	sort.Strings(files)
 
 	for _, file := range files {
 		version := strings.TrimSuffix(filepath.Base(file), ".up.sql")
