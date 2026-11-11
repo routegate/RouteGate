@@ -115,6 +115,35 @@ BUNDLE="$WORK/dist/routegate-$VERSION-linux-amd64.tar.gz"
 CHECKSUM="$WORK/dist/SHA256SUMS"
 [[ -s "$BUNDLE" && -s "$CHECKSUM" ]] || die "Release bundle/checksum missing"
 
+log "Proving bad checksum rejects BEFORE package, service, or RouteGate state changes."
+# Negative installer test on the very same clean runner: intentionally tamper
+# ONLY the checksum file, not the actual candidate release bundle.
+printf '%064d  %s\n' 0 "$(basename "$BUNDLE")" >"$WORK/bad-checksums"
+if sudo -n env \
+  "PATH=$WORK/bin:$PATH" "GITHUB_ACTIONS=true" "RUNNER_TEMP=$RUNNER_TEMP" \
+  "ROUTEGATE_E2E_DOMAIN=$DOMAIN" "ROUTEGATE_E2E_WORK_DIR=$WORK" \
+  "NO_PROXY=$NO_PROXY" "no_proxy=$no_proxy" \
+  bash "$ROOT/install.sh" \
+    --domain "$DOMAIN" --email routegate-ci@example.invalid \
+    --admin-email routegate-ci@example.invalid --server-name "$DOMAIN" \
+    --version "$VERSION" --bundle-file "$BUNDLE" --checksum-file "$WORK/bad-checksums" \
+    --without-prometheus --yes >"$WORK/rejected-checksum.stdout" 2>&1; then
+  die "The real installer accepted a release with a tampered checksum"
+fi
+grep -Fq 'ERROR at stage bundle: Release bundle checksum verification failed.' \
+  "$WORK/rejected-checksum.stdout" ||
+  die "Corrupt bundle was not rejected at the pre-mutation bundle stage"
+[[ ! -e /etc/routegate/install-state.env &&
+   ! -e /usr/local/bin/routegate-manager &&
+   ! -e /usr/local/bin/routegate-agent ]] ||
+  die "Failed checksum attempt partially installed RouteGate or created install state"
+for svc in postgresql nginx routegate-manager routegate-agent; do
+  if sudo systemctl is-active --quiet "$svc"; then
+    die "Failed checksum attempt unexpectedly activated $svc"
+  fi
+done
+log "Checksum failure was safe; retrying with original verified bundle and checksum."
+
 log "Installing all-in-one Hybrid on disposable Ubuntu with test TLS."
 if ! sudo -n env \
   "PATH=$WORK/bin:$PATH" "GITHUB_ACTIONS=true" "RUNNER_TEMP=$RUNNER_TEMP" \
