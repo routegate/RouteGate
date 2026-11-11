@@ -372,6 +372,8 @@ installer_configuration_menu() {
     saved_prom=$(state_value PROMETHEUS_MANAGED || true)
     saved_grafana=$(state_value GRAFANA_REQUESTED || true)
     if [[ "$status" == "installing" || "$status" == "complete" ]]; then
+      [[ -n "$ROUTEGATE_DOMAIN" ]] || ROUTEGATE_DOMAIN=$(state_value DOMAIN || true)
+      [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
       [[ -n "$saved_prom" ]] && ROUTEGATE_INSTALL_PROMETHEUS="$saved_prom"
       if [[ "$status" == "installing" && -n "$saved_grafana" ]]; then
         ROUTEGATE_INSTALL_GRAFANA="$saved_grafana"
@@ -382,6 +384,9 @@ installer_configuration_menu() {
   [[ -n "$ROUTEGATE_INSTALL_GRAFANA" ]] || ROUTEGATE_INSTALL_GRAFANA=0
   ROUTEGATE_INSTALL_PROMETHEUS=$(normalize_prometheus_choice "$ROUTEGATE_INSTALL_PROMETHEUS") \
     || die "Invalid Prometheus selection."
+  if [[ "$status" == "complete" && "$ROUTEGATE_INSTALL_GRAFANA" == "1" && "$ROUTEGATE_INSTALL_PROMETHEUS" != "1" ]]; then
+    die "Existing RouteGate installation has no managed Prometheus; cannot add Grafana in this run."
+  fi
   prompt_for_grafana
 
   local choice="" domain_label=""
@@ -411,7 +416,9 @@ installer_configuration_menu() {
     case "$choice" in
       1)
         if [[ "$status" == "installing" || "$status" == "complete" ]]; then
-          printf 'Existing installation identity is locked for safety.\n' >/dev/tty
+          printf 'Existing domain is pinned: %s. Contact values may still be supplied.\n' "$ROUTEGATE_DOMAIN" >/dev/tty
+          ROUTEGATE_EMAIL=$(wizard_prompt_value "Let's Encrypt contact email" email "$ROUTEGATE_EMAIL")
+          ROUTEGATE_ADMIN_EMAIL=$(wizard_prompt_value "Administrator email" email "$ROUTEGATE_ADMIN_EMAIL")
           continue
         fi
         ROUTEGATE_DOMAIN=$(wizard_prompt_value "RouteGate public domain" domain "$ROUTEGATE_DOMAIN")
@@ -434,6 +441,7 @@ installer_configuration_menu() {
           fi
         else
           ROUTEGATE_INSTALL_PROMETHEUS=1
+          ROUTEGATE_PROMETHEUS_EXPLICIT_NO=0
         fi
         ;;
       3)
