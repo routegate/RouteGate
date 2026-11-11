@@ -438,6 +438,7 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
                   ? t.deployment.legacyReleaseNote
                   : t.deployment.commandNote
                 : t.deployment.releaseUnavailableNote}</span>
+              <a href={releasesUrl} target="_blank" rel="noreferrer">{t.deployment.releaseListLabel}<span>↗</span></a>
               <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
             </div>
           </div>
