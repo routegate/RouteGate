@@ -144,6 +144,58 @@ test_argument_parsing() {
   assert_equal "parses explicit managed Prometheus opt-in" "1" "$output"
 }
 
+test_grafana_selection_and_install_contract() {
+  local output
+  output=$(
+    ROUTEGATE_DOMAIN=""
+    ROUTEGATE_EMAIL=""
+    ROUTEGATE_ADMIN_EMAIL=""
+    ROUTEGATE_SERVER_NAME=""
+    ROUTEGATE_INSTALL_PROMETHEUS=""
+    ROUTEGATE_INSTALL_GRAFANA=""
+    ROUTEGATE_PROMETHEUS_EXPLICIT_NO=0
+    ROUTEGATE_ASSUME_YES=0
+    parse_args --domain vpn.example.org --email owner@example.org --with-grafana --yes
+    prompt_for_inputs >/dev/null
+    printf '%s|%s' "$ROUTEGATE_INSTALL_PROMETHEUS" "$ROUTEGATE_INSTALL_GRAFANA"
+  )
+  assert_equal "Grafana CLI selection automatically includes Prometheus" "1|1" "$output"
+
+  output=$(
+    ROUTEGATE_DOMAIN=""
+    ROUTEGATE_EMAIL=""
+    ROUTEGATE_ADMIN_EMAIL=""
+    ROUTEGATE_SERVER_NAME=""
+    ROUTEGATE_INSTALL_PROMETHEUS=""
+    ROUTEGATE_INSTALL_GRAFANA=""
+    ROUTEGATE_PROMETHEUS_EXPLICIT_NO=0
+    ROUTEGATE_ASSUME_YES=0
+    parse_args --domain vpn.example.org --email owner@example.org --without-grafana --yes
+    prompt_for_inputs
+    printf '%s|%s' "$ROUTEGATE_INSTALL_PROMETHEUS" "$ROUTEGATE_INSTALL_GRAFANA"
+  )
+  assert_equal "Grafana remains optional and disabled by default" "0|0" "$output"
+
+  assert_false "explicit --without-prometheus conflicts with --with-grafana" \
+    bash -c 'source "$1"; ROUTEGATE_DOMAIN=vpn.example.org; ROUTEGATE_EMAIL=owner@example.org; ROUTEGATE_ADMIN_EMAIL=owner@example.org; parse_args --with-grafana --without-prometheus --yes; prompt_for_inputs >/dev/null 2>&1' \
+      _ "$ROOT_DIR/install.sh"
+
+  assert_true "selected Grafana requires a verified pinned installer" \
+    grep -Fq 'prepare_verified_grafana_installer' "$ROOT_DIR/install.sh"
+  assert_true "Grafana script is checked against the release installer checksum set" \
+    grep -Fq 'INSTALLER_SHA256SUMS' "$ROOT_DIR/install.sh"
+  assert_true "Grafana script runs only after core installation is complete" \
+    grep -Fq '[[ "$(state_value STATUS || true)" == "complete" ]]' "$ROOT_DIR/install.sh"
+
+  local main_body prepare_line state_line addon_line
+  main_body=$(sed -n '/^main() {/,/^}/p' "$ROOT_DIR/install.sh")
+  prepare_line=$(grep -n 'prepare_bundle' <<<"$main_body" | head -n1 | cut -d: -f1)
+  state_line=$(grep -n 'initialize_install_state' <<<"$main_body" | head -n1 | cut -d: -f1)
+  addon_line=$(grep -n 'install_selected_grafana' <<<"$main_body" | tail -n1 | cut -d: -f1)
+  assert_true "Grafana release assets are verified before state mutation" test "$prepare_line" -lt "$state_line"
+  assert_true "Grafana installation runs after core state completion" test "$state_line" -lt "$addon_line"
+}
+
 test_artifact_urls() {
   local output
   output=$(artifact_urls v1.2.3 amd64 | paste -sd '|')
@@ -698,6 +750,7 @@ test_apt_repository_trust_preflight
 test_existing_install_precedes_repository_preflight
 test_validation_helpers
 test_argument_parsing
+test_grafana_selection_and_install_contract
 test_artifact_urls
 test_checksum_verification
 test_archive_entry_policy
