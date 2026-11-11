@@ -17,7 +17,15 @@ import time
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-import remote_node_vpn_e2e as common
+# Reuse the already-proven remote-node data-plane helpers. Its filename
+# contains dashes (remote-node-vpn-e2e.py), so a regular import cannot work.
+import importlib.util
+_helper = Path(__file__).with_name("remote-node-vpn-e2e.py")
+_spec = importlib.util.spec_from_file_location("routegate_remote_vpn_e2e", _helper)
+if _spec is None or _spec.loader is None:
+    raise RuntimeError("Cannot load native VPN E2E helpers")
+common = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(common)
 
 DOMAIN = "routegate-hybrid-ci.invalid"
 TARGET = common.TARGET
