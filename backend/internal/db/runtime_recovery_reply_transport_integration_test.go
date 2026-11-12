@@ -188,3 +188,28 @@ FOR EACH ROW EXECUTE FUNCTION rg140_fail_observation_reply_http_audit();
 	if rec.Code==http.StatusAccepted {t.Fatal("accepted HTTP result with failed audit")}
 	nonceAuditState(t,f,id,"issued",1)
 }
+
+func TestRuntimeRecoveryReplyTransportFullMACRejectsTimeTamperBeforeConsumption(t *testing.T){
+	f,id,claim,mac,reply:=authenticatedObservationFixture(t,30*time.Second)
+	defer f.done()
+	body:=recoveryReplyBody(claim,mac,reply)
+	reply.ObservedAt=reply.ObservedAt.Add(1*time.Second)
+	body["reply"]=reply // Original replyMac intentionally not recomputed.
+	rec:=requestRecoveryTransport(t,
+		recoveryobserve.NewObservationTransport(f.pool).Reply,
+		http.MethodPost,recoveryFixtureAgentToken,body)
+	if rec.Code!=http.StatusConflict {
+		t.Fatalf("tampered observedAt with original MAC accepted: %d %s",rec.Code,rec.Body.String())
+	}
+	// A changed unsigned timestamp may not spend the true nonce.
+	nonceAuditState(t,f,id,"issued",1)
+	// Same claim + original MAC over untouched reply remains spendable once.
+	original:=reply
+	original.ObservedAt=original.ObservedAt.Add(-1*time.Second)
+	rec=requestRecoveryTransport(t,recoveryobserve.NewObservationTransport(f.pool).Reply,
+		http.MethodPost,recoveryFixtureAgentToken,recoveryReplyBody(claim,mac,original))
+	if rec.Code!=http.StatusAccepted{
+		t.Fatalf("original complete signed response failed: %d %s",rec.Code,rec.Body.String())
+	}
+	nonceAuditState(t,f,id,"reply_matched_unattested",2)
+}
