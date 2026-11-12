@@ -14,6 +14,7 @@ import (
 type observationReplySubmission struct {
 	Claim tasks.RuntimeRecoveryTokenBoundEvidenceV1 `json:"claim"`
 	MAC string `json:"mac"`
+	ReplyMAC string `json:"replyMac"`
 	Reply tasks.RuntimeRecoveryChallengedObservation `json:"reply"`
 }
 
@@ -79,10 +80,12 @@ func (c *Client) SubmitRecoveryObservationReplyV1(
 	}
 	mac,err:=tasks.RuntimeRecoveryTokenProofMACV1(token,claim)
 	if err!=nil {return ErrRecoveryObservationTransportRefused}
+	replyMAC,err:=tasks.RuntimeRecoveryFullReplyMACV1(token,claim,observed)
+	if err!=nil {return ErrRecoveryObservationTransportRefused}
 	var result observationReplyResult
 	if err:=c.doJSON(ctx,"POST",
 		"/api/v1/agent/recovery-observations/reply",token,
-		observationReplySubmission{Claim:claim,MAC:mac,Reply:observed},&result);err!=nil{
+		observationReplySubmission{Claim:claim,MAC:mac,ReplyMAC:replyMAC,Reply:observed},&result);err!=nil{
 		// No retries! The server may have committed and the HTTP reply lost.
 		return err
 	}
