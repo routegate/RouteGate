@@ -94,7 +94,7 @@ SELECT
     AND action='runtime_recovery.enrollment_prepared_unattested'
     AND resource_type='agent' AND resource_id=$3::uuid
     AND metadata->>'session_id'=$4
-    AND metadata->>'preparation_id'=$1
+    AND metadata->>'preparation_id'=$1::text
     AND metadata->>'phase'='prepared_unattested')
 `,prepared.ID,f.operator.ID,f.agentID,f.operator.SessionID).Scan(&appendOnlyCount,&attributedAuditCount)
 	if err != nil || appendOnlyCount!=1 || attributedAuditCount!=1 {
