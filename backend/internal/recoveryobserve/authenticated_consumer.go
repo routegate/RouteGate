@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -158,6 +157,3 @@ WHERE n.id=$1::uuid AND n.state='issued'
 	return RecordedReply{ObservationID:claim.ObservationID,State:state},nil
 }
 
-// Prevent implicitly treating a successfully recorded response as a future
-// authorization. There is intentionally no Boolean Approved/Unlocked field.
-var _ time.Time
