@@ -1,6 +1,7 @@
 package recoveryobserve
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -38,7 +39,14 @@ func (h *ObservationTransport) Reply(w http.ResponseWriter,r *http.Request) {
 	}
 	token,ok:=strictObservationBearer(r.Header.Get("Authorization"))
 	if !ok {observationHTTPError(w,http.StatusUnauthorized);return}
-	decoder:=json.NewDecoder(http.MaxBytesReader(w,r.Body,16384))
+	// Reject duplicate and case-aliased JSON field names before checking MACs
+	// or entering the atomic nonce consumer. encoding/json otherwise accepts
+	// last-write-wins ambiguity in even deeply nested signed structures.
+	raw,err:=io.ReadAll(http.MaxBytesReader(w,r.Body,16384))
+	if err!=nil || rejectAmbiguousObservationJSON(raw)!=nil {
+		observationHTTPError(w,http.StatusBadRequest);return
+	}
+	decoder:=json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var request observationReplyRequest
 	if err:=decoder.Decode(&request);err!=nil {
