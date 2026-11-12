@@ -14,7 +14,8 @@ import (
 )
 
 func recoveryReplyBody(claim recoveryobserve.TokenBoundEvidenceV1,mac string,reply recoveryobserve.ObservationReply) map[string]any{
-	return map[string]any{"claim":claim,"mac":mac,"reply":reply}
+	fullMAC,_:=recoveryobserve.FullReplyMACV1(recoveryFixtureAgentToken,claim,reply)
+	return map[string]any{"claim":claim,"mac":mac,"replyMac":fullMAC,"reply":reply}
 }
 
 func TestRuntimeRecoveryReplyTransportAuthenticatedMatchAuditAndReplay(t *testing.T) {
@@ -46,7 +47,7 @@ func TestRuntimeRecoveryReplyTransportAuthenticatedMatchAuditAndReplay(t *testin
 }
 
 func TestRuntimeRecoveryReplyTransportWrongBearerOrMACDoesNotConsume(t *testing.T) {
-	for _,mode:=range []string{"missing_token","foreign_token","wrong_mac","wrong_nonce","wrong_attempt","wrong_agent","wrong_witness_digest"} {
+	for _,mode:=range []string{"missing_token","foreign_token","wrong_mac","wrong_nonce","wrong_attempt","wrong_agent","wrong_witness_digest","wrong_reply_mac"} {
 		t.Run(mode,func(t *testing.T){
 			f,id,claim,mac,reply:=authenticatedObservationFixture(t,30*time.Second)
 			defer f.done()
@@ -67,8 +68,10 @@ func TestRuntimeRecoveryReplyTransportWrongBearerOrMACDoesNotConsume(t *testing.
 				mac,err=recoveryobserve.TokenProofMACV1(recoveryFixtureAgentToken,claim)
 				if err!=nil{t.Fatal(err)}
 			}
+			body:=recoveryReplyBody(claim,mac,reply)
+			if mode=="wrong_reply_mac"{body["replyMac"]=strings.Repeat("0",64)}
 			rec:=requestRecoveryTransport(t,recoveryobserve.NewObservationTransport(f.pool).Reply,
-				http.MethodPost,token,recoveryReplyBody(claim,mac,reply))
+				http.MethodPost,token,body)
 			if rec.Code==http.StatusAccepted ||
 				strings.Contains(rec.Body.String(),claim.Nonce) ||
 				strings.Contains(rec.Body.String(),recoveryFixtureAgentToken) {
