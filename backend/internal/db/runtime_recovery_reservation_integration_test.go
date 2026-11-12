@@ -3,6 +3,8 @@ package db
 import (
     "context"
     "errors"
+    "crypto/sha256"
+    "encoding/hex"
     "strings"
     "sync"
     "testing"
@@ -11,6 +13,9 @@ import (
     "github.com/jackc/pgx/v5/pgconn"
     "github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Synthetic test-only Agent token (32 repetitions of 0x76).
+const recoveryFixtureAgentToken = "rg_agent_dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnY"
 
 type recoveryReservationFixture struct {
     ctx context.Context
@@ -29,6 +34,14 @@ func newRecoveryReservationFixture(t *testing.T) recoveryReservationFixture {
     t.Helper()
     ctx, pool, server, other, account, done := transferFixture(t)
     f := recoveryReservationFixture{ctx: ctx, pool: pool, serverID: server, otherServerID: other, accountID: account, done: done}
+    // Assign the known synthetic Agent token BEFORE this isolated fixture
+    // inserts a held reservation. The production admission guard still
+    // refuses token rotation after recovery is reserved.
+    hash := sha256.Sum256([]byte(recoveryFixtureAgentToken))
+    if _,err := pool.Exec(ctx,`UPDATE agents SET token_hash=$1 WHERE server_id=$2::uuid`,hex.EncodeToString(hash[:]),server);err!=nil{
+        done()
+        t.Fatal("seed synthetic recovery Agent token",err)
+    }
     if err := pool.QueryRow(ctx,`SELECT id::text,credential_generation FROM agents WHERE server_id=$1::uuid`,server).
         Scan(&f.agentID,&f.generation); err != nil {
         done()
