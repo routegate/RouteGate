@@ -54,6 +54,21 @@ func IsAdminUser(user UserProfile) bool {
 	return false
 }
 
+// PermissionRuntimeRecoveryAuthorize is deliberately NOT implied by any
+// ordinary admin/rollback permission. Only active human super_admin sessions
+// with this dedicated grant may create future recovery authorizations.
+const PermissionRuntimeRecoveryAuthorize = "runtime_recovery:authorize"
+
+// CanAuthorizeRuntimeRecovery is a policy prerequisite, not a recovery
+// command. A future writer MUST re-read the session and role transactionally.
+func CanAuthorizeRuntimeRecovery(u AuthenticatedUser) bool {
+	return u.UserType == UserTypeHuman &&
+		u.Status == "active" &&
+		u.ID != "" && u.SessionID != "" &&
+		HasRole(u.UserProfile, RoleSuperAdmin) &&
+		HasPermission(u.UserProfile, PermissionRuntimeRecoveryAuthorize)
+}
+
 func RequireAdminSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := UserFromContext(r.Context())
