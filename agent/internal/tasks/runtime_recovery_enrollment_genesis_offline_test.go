@@ -197,7 +197,7 @@ func TestRuntimeRecoveryEnrollmentGenesisOfflineV1CorruptionAndUnknownEntriesRef
 
 func TestRuntimeRecoveryEnrollmentGenesisOfflineV1CrashAtPersistenceBoundaries(t *testing.T){
  genesis:=recoveryEnrollmentGenesisFixtureV1()
- for _,stage:=range []string{"after_create","after_write","after_file_fsync","after_directory_fsync"}{
+ for _,stage:=range []string{"after_anchor_create","after_anchor_write","after_anchor_file_fsync","after_anchor_directory_fsync","after_create","after_write","after_file_fsync","after_directory_fsync"}{
   t.Run(stage,func(t *testing.T){
    runtimeDir,journalDir:=recoveryEnrollmentOfflineDirectoriesV1(t)
    reached:=false
@@ -215,12 +215,18 @@ func TestRuntimeRecoveryEnrollmentGenesisOfflineV1CrashAtPersistenceBoundaries(t
    })
    if !reached{t.Fatal("fault boundary not reached")}
    requireRecoveryEnrollmentGenesisRefusedV1(t,err)
+   anchor:=filepath.Join(runtimeDir,recoveryEnrollmentAnchorFilenameV1)
+   if _,err:=os.Lstat(anchor);err!=nil{t.Fatal("ambiguous runtime continuity anchor deleted",err)}
    path:=filepath.Join(journalDir,recoveryEnrollmentGenesisFilenameV1)
-   if _,err:=os.Lstat(path);err!=nil{t.Fatal("ambiguous genesis silently deleted",err)}
+   if stage=="after_create"||!strings.HasPrefix(stage,"after_anchor_"){
+    if _,err:=os.Lstat(path);err!=nil{t.Fatal("ambiguous genesis silently deleted",err)}
+   }else if _,err:=os.Lstat(path);!os.IsNotExist(err){
+    t.Fatal("journal genesis appeared before runtime anchor was safely fsynced",err)
+   }
    result,err:=inspectRecoveryEnrollmentGenesisOfflineV1(context.Background(),runtimeDir,journalDir,genesis)
-   if stage=="after_create"{
+   if strings.HasPrefix(stage,"after_anchor_")||stage=="after_create"{
     requireRecoveryEnrollmentGenesisRefusedV1(t,err)
-    if result!=(recoveryEnrollmentGenesisObservationV1{}){t.Fatal("empty/partial file accepted",result)}
+    if result!=(recoveryEnrollmentGenesisObservationV1{}){t.Fatal("partial two-file transaction accepted",result)}
    }else if err!=nil||!result.Unattested{
     t.Fatalf("persisted but ambiguous file must remain only unattested: %+v %v",result,err)
    }
@@ -282,7 +288,7 @@ func TestRuntimeRecoveryEnrollmentGenesisOfflineV1NeverApprovesFabricatedOrigin(
  fake.AgentCredentialGeneration=47
  if err:=writeRecoveryEnrollmentGenesisOfflineV1(context.Background(),runtimeDir,journalDir,fake,nil);err!=nil{t.Fatal(err)}
  obs,err:=inspectRecoveryEnrollmentGenesisOfflineV1(context.Background(),runtimeDir,journalDir,fake)
- if err!=nil||!obs.Unattested||!strings.HasPrefix(obs.GenesisSHA256,"")||len(obs.GenesisSHA256)!=64{
+ if err!=nil||!obs.Unattested||len(obs.GenesisSHA256)!=64{
   t.Fatalf("forged Manager input was promoted or refused unexpectedly: %+v %v",obs,err)
  }
 }
