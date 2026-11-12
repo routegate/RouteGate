@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type tokenProofVectorV1 struct {
@@ -17,6 +18,8 @@ type tokenProofVectorV1 struct {
 	TestAgentToken string `json:"testAgentToken"`
 	Claim RuntimeRecoveryTokenBoundEvidenceV1 `json:"claim"`
 	ExpectedMAC string `json:"expectedMAC"`
+	Reply RuntimeRecoveryChallengedObservation `json:"reply"`
+	ExpectedFullReplyMAC string `json:"expectedFullReplyMAC"`
 }
 
 func loadRecoveryTokenVectorV1(t *testing.T) tokenProofVectorV1 {
@@ -113,6 +116,31 @@ func TestRuntimeRecoveryTokenProofBindsEveryField(t *testing.T) {
 			edit(&p)
 			got,err:=RuntimeRecoveryTokenProofMACV1(v.TestAgentToken,p)
 			if err!=nil||got==v.ExpectedMAC{t.Fatalf("mutation not bound by token MAC: %v",err)}
+		})
+	}
+}
+
+func TestRuntimeRecoveryFullReplyMACV1SharedAgentVectorAndTamper(t *testing.T) {
+	v:=loadRecoveryTokenVectorV1(t)
+	mac,err:=RuntimeRecoveryFullReplyMACV1(v.TestAgentToken,v.Claim,v.Reply)
+	if err!=nil||mac!=v.ExpectedFullReplyMAC{
+		t.Fatalf("Agent full-response HMAC protocol drift: %s %v",mac,err)
+	}
+	changes:=map[string]func(*RuntimeRecoveryChallengedObservation){
+		"observed_at":func(r *RuntimeRecoveryChallengedObservation){r.ObservedAt=r.ObservedAt.Add(time.Second)},
+		"nonce":func(r *RuntimeRecoveryChallengedObservation){r.Nonce=base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x51},32))},
+		"generation":func(r *RuntimeRecoveryChallengedObservation){r.Observation.Witness.Generation.InvocationID=strings.Repeat("c",32)},
+		"runtime_hash":func(r *RuntimeRecoveryChallengedObservation){r.Observation.Witness.RuntimeHash=strings.Repeat("a",64)},
+		"receipt":func(r *RuntimeRecoveryChallengedObservation){r.Observation.ReceiptHash=strings.Repeat("1",64)},
+	}
+	for name,mutate:=range changes {
+		t.Run(name,func(t *testing.T){
+			changed:=v.Reply
+			mutate(&changed)
+			out,err:=RuntimeRecoveryFullReplyMACV1(v.TestAgentToken,v.Claim,changed)
+			if err!=nil||out==v.ExpectedFullReplyMAC {
+				t.Fatalf("modified complete observation kept original MAC: %v",err)
+			}
 		})
 	}
 }

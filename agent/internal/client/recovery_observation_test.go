@@ -205,6 +205,7 @@ func TestRecoveryObservationTransportNotCalledByDefaultAgentRunner(t *testing.T)
 	for _,name:=range []string{
 		"PollRecoveryPendingAttempt(",
 		"RequestRecoveryObservationNonce(",
+		"SubmitRecoveryObservationReplyV1(",
 	}{
 		if strings.Contains(string(raw),name) {
 			t.Fatalf("private recovery transport unexpectedly active in Agent polling: %s",name)

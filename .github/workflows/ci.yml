@@ -91,6 +91,9 @@ jobs:
       - name: Verify dormant Agent observation HTTP authentication and nonce delivery with PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^(TestRuntimeRecoveryTransport|TestRecoveryObservationTransportNotRegistered)' -count=1 -timeout=120s -v
 
+      - name: Verify complete signed Agent observation HTTP reply and atomic PostgreSQL consume
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^(TestRuntimeRecoveryReplyTransport|TestRuntimeRecoveryFullReplyMACV1)' -count=1 -timeout=120s -v
+
 
       # RG-140 v0.2.0 integration: old #547 tests are now replayed from
       # current main, not substituted for the current backend/release CI.
@@ -156,6 +159,9 @@ jobs:
 
       - name: Verify dormant outbound Agent recovery client binding and no automatic retries
         run: go test -race ./internal/client -run '^TestRecoveryObservationTransport' -count=1 -timeout=120s -v
+
+      - name: Verify one-shot signed Agent observation reply and full-response HMAC wire contract
+        run: go test -race ./internal/client ./internal/tasks -run '^(TestRecoveryObservationReplyTransport|TestRuntimeRecoveryFullReplyMACV1)' -count=1 -timeout=120s -v
 
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
