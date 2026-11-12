@@ -67,6 +67,9 @@ func TestRuntimeRecoveryReadOnlyHoldV1KeepsLockAndDurableFence(t *testing.T) {
 	if err := hold.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if hold.observation != (RuntimeRecoveryObservation{}) {
+		t.Fatal("closed review retained a stale observation usable after unlock")
+	}
 	// Close ends the short-lived lock only; it must not remove the durable
 	// intent marker or authorize a new task after the observed window.
 	for i, path := range paths {

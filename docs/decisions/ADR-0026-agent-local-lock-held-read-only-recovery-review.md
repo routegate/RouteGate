@@ -34,3 +34,28 @@ Before a release protocol can even be proposed:
 Isolated Agent tests prove the fresh hold actually blocks a second flock and the existing public observation, refuses malformed/stale/cancelled evidence, releases its own lock on failure, preserves unchanged marker/receipt/config bytes, and cannot clear the durable fence even after Close. The full Agent and Manager release CI remains required.
 
 This stage does **not** add an installer toggle, migration, auth bypass, runtime mutation, `main` merge, VPS change, or release. All RG-140 stacked PRs remain Draft.
+
+## Follow-up: invalidated hold and crash-cut refusals
+
+The private hold's `Close` now zeros its in-memory observation, even on a
+file-close error. `ObserveRuntimeRecovery` explicitly copies the snapshot
+before closing and **refuses** to return that snapshot if lock close fails.
+This prevents any internal consumer from reading a snapshot through a
+previously closed hold and mistakenly treating it as lock-current evidence.
+The public observation's successful result is still historical and never
+release authority.
+
+The fault-injection test matrix covers missing/corrupt marker or receipt,
+receipt without ACK, a concurrent removal intent, changed active config, and
+context cancellation during a real observation step. It asserts that all
+such incomplete states refuse the private hold and ordinary mutation
+admission, and that reviews never mutate or silently repair persisted files.
+
+**Fundamental limit:** an attacker or a filesystem failure that removes both
+durable marker and receipt can make an incomplete operation
+indistinguishable from a cleanly completed operation using only those two
+files. No read-only helper can solve this. A future release protocol needs a
+separate durable, transactionally tied completion record and trusted
+checkpoint provenance, plus explicitly audited transition ordering, before
+the possibility of unlock can be reviewed. This PR does not add that record
+or any cleanup/unlock operation.

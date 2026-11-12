@@ -57,6 +57,10 @@ func (h *runtimeRecoveryReadOnlyHoldV1) Close() error {
 	if h == nil {
 		return ErrRuntimeMutationBlocked
 	}
+	// Once the exclusive flock is gone, this observation is historical and
+	// must not remain readable via a previously retained hold pointer.
+	// This clears the in-memory snapshot even if closing the lock fails.
+	h.observation = RuntimeRecoveryObservation{}
 	if h.lock == nil {
 		return nil
 	}
