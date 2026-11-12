@@ -171,6 +171,9 @@ jobs:
       - name: Verify offline recovery journal crash-cut model never grants Agent unlock
         run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryJournalV1' -count=1 -timeout=120s -v
 
+      - name: Verify unregistered journal disk persistence and interrupted fsync boundaries
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryJournalDiskV1' -count=1 -timeout=120s -v
+
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
         run: |
