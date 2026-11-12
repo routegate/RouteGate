@@ -20,5 +20,40 @@
       "witnessSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     }
   },
-  "expectedMAC": "7c870e1b954bfcd062273f358f04ed159b9dfbb464ebf674be68029d588911dd"
+  "expectedMAC": "7c870e1b954bfcd062273f358f04ed159b9dfbb464ebf674be68029d588911dd",
+  "reply": {
+    "schemaVersion": 1,
+    "observationId": "11111111-1111-4111-8111-111111111111",
+    "reservationId": "66666666-6666-4666-8666-666666666666",
+    "attemptId": "55555555-5555-4555-8555-555555555555",
+    "attemptEpoch": 17,
+    "nonce": "kpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpI",
+    "agentCredentialGeneration": 4,
+    "observedAt": "2026-11-12T00:00:00Z",
+    "observation": {
+      "schemaVersion": 1,
+      "taskId": "44444444-4444-4444-8444-444444444444",
+      "agentId": "33333333-3333-4333-8333-333333333333",
+      "serverId": "22222222-2222-4222-8222-222222222222",
+      "markerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "receiptHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "envelopeHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "witness": {
+        "schemaVersion": 1,
+        "runtimeHash": "9999999999999999999999999999999999999999999999999999999999999999",
+        "generation": {
+          "invocationId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "pid": 311,
+          "startedMonotonic": "700"
+        },
+        "previousGeneration": {
+          "invocationId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pid": 310,
+          "startedMonotonic": "600"
+        },
+        "listenerPort": 443
+      }
+    }
+  },
+  "expectedFullReplyMAC": "eb45927cb5f8faceebe764d5681ecb262d711df8c95ca2805ac273a98c641a01"
 }
