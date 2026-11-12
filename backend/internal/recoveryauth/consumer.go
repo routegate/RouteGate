@@ -123,7 +123,7 @@ SELECT EXISTS (
 	// writes the issued->consumed audit event in this same transaction.
 	result, err := tx.Exec(ctx, `
 UPDATE vpn_runtime_recovery_challenges
-   SET state='consumed',consumed_at=date_trunc('second',clock_timestamp())
+   SET state='consumed',consumed_at=clock_timestamp()
  WHERE id=$1::uuid AND state='issued'
    AND reservation_id=$2::uuid
    AND operator_user_id=$3::uuid AND operator_session_id=$4::uuid
