@@ -148,6 +148,12 @@ func TestRuntimeRecoveryReplyTransportStrictJSONNeverConsumes(t *testing.T){
 		"unknown_body_bearer":string(good[:len(good)-1])+`,"agentToken":"SECRET"}`,
 		"two_documents":string(good)+string(good),
 		"malformed":string(good[:len(good)-1]),
+		// Last-write-wins duplicates previously decoded into the same
+		// signed struct and could consume a one-use nonce.
+		"duplicate_top_mac":strings.Replace(string(good),`"mac":`,`"mac":"bad","mac":`,1),
+		"duplicate_case_alias":strings.Replace(string(good),`"claim":`,`"Claim":null,"claim":`,1),
+		"duplicate_nested_timestamp":strings.Replace(string(good),`"observedAt":`,`"observedAt":"2001-01-01T00:00:00Z","observedAt":`,1),
+		"duplicate_nested_witness":strings.Replace(string(good),`"listenerPort":`,`"listenerPort":1,"listenerPort":`,1),
 	}{
 		t.Run(name,func(t *testing.T){
 			req:=httptest.NewRequest(http.MethodPost,

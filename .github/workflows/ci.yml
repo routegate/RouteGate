@@ -94,6 +94,9 @@ jobs:
       - name: Verify complete signed Agent observation HTTP reply and atomic PostgreSQL consume
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^(TestRuntimeRecoveryReplyTransport|TestRuntimeRecoveryFullReplyMACV1)' -count=1 -timeout=120s -v
 
+      - name: Verify unique Agent observation reply JSON before nonce consumption
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^(TestRejectAmbiguousObservationJSON|TestRuntimeRecoveryReplyTransportStrictJSONNeverConsumes)' -count=1 -timeout=120s -v
+
 
       # RG-140 v0.2.0 integration: old #547 tests are now replayed from
       # current main, not substituted for the current backend/release CI.
