@@ -292,3 +292,47 @@ func TestRuntimeRecoveryEnrollmentGenesisOfflineV1NeverApprovesFabricatedOrigin(
   t.Fatalf("forged Manager input was promoted or refused unexpectedly: %+v %v",obs,err)
  }
 }
+
+func TestRuntimeRecoveryEnrollmentGenesisOfflineV1RuntimeContinuityAnchorCannotBeBypassed(t *testing.T){
+ genesis:=recoveryEnrollmentGenesisFixtureV1()
+ for _,mode:=range []string{"missing","empty","partial","changed_generation","world_readable","hardlink","symlink","extra_json_key"}{
+  t.Run(mode,func(t *testing.T){
+   runtimeDir,journalDir:=recoveryEnrollmentOfflineDirectoriesV1(t)
+   if err:=writeRecoveryEnrollmentGenesisOfflineV1(context.Background(),runtimeDir,journalDir,genesis,nil);err!=nil{t.Fatal(err)}
+   path:=filepath.Join(runtimeDir,recoveryEnrollmentAnchorFilenameV1)
+   raw,err:=os.ReadFile(path)
+   if err!=nil{t.Fatal(err)}
+   switch mode{
+   case "missing":
+    if err:=os.Remove(path);err!=nil{t.Fatal(err)}
+   case "empty":
+    if err:=os.WriteFile(path,nil,0600);err!=nil{t.Fatal(err)}
+   case "partial":
+    if err:=os.WriteFile(path,[]byte("{"),0600);err!=nil{t.Fatal(err)}
+   case "changed_generation":
+    other:=genesis
+    other.AgentCredentialGeneration++
+    payload,err:=json.Marshal(other)
+    if err!=nil{t.Fatal(err)}
+    if err:=os.WriteFile(path,payload,0600);err!=nil{t.Fatal(err)}
+   case "world_readable":
+    if err:=os.Chmod(path,0644);err!=nil{t.Fatal(err)}
+   case "hardlink":
+    if err:=os.Link(path,filepath.Join(t.TempDir(),"alias"));err!=nil{t.Fatal(err)}
+   case "symlink":
+    if err:=os.Remove(path);err!=nil{t.Fatal(err)}
+    if err:=os.Symlink(filepath.Join(t.TempDir(),"alias"),path);err!=nil{t.Fatal(err)}
+   case "extra_json_key":
+    raw=bytes.Replace(raw,[]byte(`"nextJournalSequence":1`),[]byte(`"unexpected":true,"nextJournalSequence":1`),1)
+    if err:=os.WriteFile(path,raw,0600);err!=nil{t.Fatal(err)}
+   }
+   observed,err:=inspectRecoveryEnrollmentGenesisOfflineV1(context.Background(),runtimeDir,journalDir,genesis)
+   requireRecoveryEnrollmentGenesisRefusedV1(t,err)
+   if observed!=(recoveryEnrollmentGenesisObservationV1{}){t.Fatal("altered continuity anchor accepted",observed)}
+   // Journal side is still present and blocks rebirth even when an attacker
+   // deletes just the runtime anchor. Ambiguous state cannot be auto-repaired.
+   requireRecoveryEnrollmentGenesisRefusedV1(t,
+    writeRecoveryEnrollmentGenesisOfflineV1(context.Background(),runtimeDir,journalDir,genesis,nil))
+  })
+ }
+}
