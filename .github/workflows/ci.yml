@@ -85,6 +85,9 @@ jobs:
       - name: Verify atomic authenticated Agent observation consume, audit rollback and races
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryAuthenticatedConsume' -count=1 -timeout=120s -v
 
+      - name: Verify private observation nonce issuance only after audit commit and one-use concurrency
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryObservationIssuer' -count=1 -timeout=120s -v
+
 
       # RG-140 v0.2.0 integration: old #547 tests are now replayed from
       # current main, not substituted for the current backend/release CI.
