@@ -38,6 +38,8 @@ lock and the node's `servers` row lock, and only if:
    active Manager application.
 4. No other recovery reservation exists for the node or the same job.
 
+The insertion also obtains a short-lived shared lock on the existing global routing tables. It uses PostgreSQL `NOWAIT` and a fail-closed conflict if another transaction is editing routing, avoiding a server-row/table-lock deadlock. This closes the race between reserving a node and concurrent global routing changes without changing normal routing writes when no recovery reservation exists.
+
 The existing node guard from `000161` is extended to block new operations
 while a hold exists: config and Agent operations, platform updates, Agent
 credential replacement, account placement/protocol edits, config versions,
