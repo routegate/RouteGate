@@ -74,6 +74,7 @@ func TestMigrationOrdinalPreflightAllowsForwardOnlyNextMigration(t *testing.T) {
 		"000159_staged_account_transfers.up.sql",
 		"000160_traffic_report_checkpoints.up.sql",
 		"000161_credential_revocation_preparations.up.sql",
+		"000162_runtime_recovery_reservations.up.sql",
 	}
 	if err := validateMigrationOrdinals(files); err != nil {
 		t.Fatalf("valid migration sequence rejected: %v", err)
