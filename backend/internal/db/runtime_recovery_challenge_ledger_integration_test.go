@@ -10,7 +10,6 @@ import (
 
     "github.com/ikaevus/routegate/backend/internal/auth"
     "github.com/jackc/pgx/v5/pgconn"
-    "github.com/jackc/pgx/v5/pgxpool"
 )
 
 type recoveryLedgerFixture struct {
@@ -208,6 +207,4 @@ func TestRuntimeRecoveryChallengeCannotUseDifferentHumanOrMissingReservation(t *
     }
 }
 
-// Never expose production API: the tests exercise only isolated SQL and
-// intentionally do not create a route, runtime unlock or Agent task.
-var _ *pgxpool.Pool
+// The tests exercise isolated SQL only; no HTTP/API/runtime writer exists.
