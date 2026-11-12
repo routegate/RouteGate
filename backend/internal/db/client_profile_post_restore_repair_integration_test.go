@@ -109,8 +109,8 @@ func TestClientProfilePostRestoreRepairRestoresObservedInvariants(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000165_runtime_recovery_observation_nonce" {
-		t.Fatalf("applied schema version = %q, want 000165_runtime_recovery_observation_nonce", version)
+	if version != "000166_runtime_pre_dispatch_checkpoint" {
+		t.Fatalf("applied schema version = %q, want 000166_runtime_pre_dispatch_checkpoint", version)
 	}
 }
 
