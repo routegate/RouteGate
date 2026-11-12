@@ -106,6 +106,7 @@ BEGIN
     NEW.expected_config_sha256 := original_config_hash;
     -- This exact byte contract is independently generated from Manager's
     -- locked job row, not from any Agent marker/receipt/witness assertion.
+    NEW.committed_at := clock_timestamp();
     NEW.expected_marker_sha256 := encode(sha256(convert_to(
         format('{"schemaVersion":1,"taskId":"%s","kind":"%s"}',
                NEW.task_id::text,NEW.task_kind),'UTF8')),'hex');
@@ -151,21 +152,36 @@ CREATE TRIGGER rg146_checkpoint_event_no_truncate
 CREATE FUNCTION routegate_pre_dispatch_checkpoint_job_identity_guard()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
-    kind text := CASE WHEN TG_TABLE_NAME='config_apply_jobs'
-                      THEN 'config_apply' ELSE 'vpn_core_service' END;
+    held boolean;
 BEGIN
-    IF EXISTS (SELECT 1 FROM vpn_runtime_pre_dispatch_checkpoints
-               WHERE task_kind=kind AND task_id=OLD.id) THEN
-        IF TG_OP='DELETE' OR
-           NEW.id IS DISTINCT FROM OLD.id OR
-           NEW.server_id IS DISTINCT FROM OLD.server_id OR
-           NEW.agent_id IS DISTINCT FROM OLD.agent_id OR
-           (kind='config_apply' AND (
-             NEW.config_version_id IS DISTINCT FROM OLD.config_version_id OR
-             NEW.action IS DISTINCT FROM OLD.action)) OR
-           (kind='vpn_core_service' AND (
-             NEW.kind IS DISTINCT FROM OLD.kind OR
-             NEW.operation IS DISTINCT FROM OLD.operation)) THEN
+    SELECT EXISTS (
+        SELECT 1 FROM vpn_runtime_pre_dispatch_checkpoints
+        WHERE task_id=OLD.id AND
+              task_kind=CASE WHEN TG_TABLE_NAME='config_apply_jobs'
+                             THEN 'config_apply' ELSE 'vpn_core_service' END
+    ) INTO held;
+    IF NOT held THEN
+        IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+        RETURN NEW;
+    END IF;
+    IF TG_OP='DELETE' THEN
+        RAISE EXCEPTION USING ERRCODE='P0146', MESSAGE='pre_dispatch_checkpoint_job_identity_immutable';
+    END IF;
+    IF NEW.id IS DISTINCT FROM OLD.id OR
+       NEW.server_id IS DISTINCT FROM OLD.server_id OR
+       NEW.agent_id IS DISTINCT FROM OLD.agent_id THEN
+        RAISE EXCEPTION USING ERRCODE='P0146', MESSAGE='pre_dispatch_checkpoint_job_identity_immutable';
+    END IF;
+    -- These two source tables have disjoint columns. Never access fields
+    -- from the other table inside a short-circuit boolean expression.
+    IF TG_TABLE_NAME='config_apply_jobs' THEN
+        IF NEW.config_version_id IS DISTINCT FROM OLD.config_version_id OR
+           NEW.action IS DISTINCT FROM OLD.action THEN
+            RAISE EXCEPTION USING ERRCODE='P0146', MESSAGE='pre_dispatch_checkpoint_job_identity_immutable';
+        END IF;
+    ELSE
+        IF NEW.kind IS DISTINCT FROM OLD.kind OR
+           NEW.operation IS DISTINCT FROM OLD.operation THEN
             RAISE EXCEPTION USING ERRCODE='P0146', MESSAGE='pre_dispatch_checkpoint_job_identity_immutable';
         END IF;
     END IF;
