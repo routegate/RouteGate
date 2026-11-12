@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -167,8 +168,14 @@ func TestRuntimeRecoveryAttemptConcurrentConsumeHasExactlyOnePendingIntent(t *te
 func TestRuntimeRecoveryAttemptUpgradeBackfillsHistoricalConsumption(t *testing.T) {
 	f:=newRecoveryLedgerFixture(t)
 	defer f.done()
+	// The migration stack must be unwound in reverse dependency order:
+	// 000165 holds a foreign key into the 000164 attempts table. An empty
+	// observation nonce registry can be rolled back before testing 000164.
+	down165,err:=os.ReadFile("../../migrations/000165_runtime_recovery_observation_nonce.down.sql")
+	if err!=nil{t.Fatal(err)}
+	if _,err=f.pool.Exec(f.ctx,string(down165));err!=nil{t.Fatal("downgrade empty 165 schema:",err)}
 	// Simulate an existing 000163 database with a completed challenge.
-	// The 000164 downgrade is allowed only while the attempt table is empty.
+	// The 000164 downgrade is allowed only while its attempt table is empty.
 	down,err:=os.ReadFile("../../migrations/000164_runtime_recovery_attempt_ledger.down.sql")
 	if err!=nil{t.Fatal(err)}
 	if _,err=f.pool.Exec(f.ctx,string(down));err!=nil{t.Fatal("downgrade empty 164 schema:",err)}
@@ -187,8 +194,13 @@ func TestRuntimeRecoveryAttemptUpgradeBackfillsHistoricalConsumption(t *testing.
 
 	// An upgraded DB with any historical attempt MUST refuse destructive
 	// downgrade rather than deleting a consumed operator authorization.
-	if _,err=f.pool.Exec(f.ctx,string(down));err==nil{
-		t.Fatal("destructive downgrade erased pending recovery attempt")
+	if _,err=f.pool.Exec(f.ctx,string(down));err==nil || !strings.Contains(err.Error(),"recovery attempt history") {
+		t.Fatalf("downgrade did not fail on immutable recovery history: %v",err)
 	}
 	assertRecoveryAttempt(t,f,issued.ID,1)
+	// Reapply the newest empty schema after this historical upgrade test.
+	// Never use DROP CASCADE to bypass the dependency in the first place.
+	up165,err:=os.ReadFile("../../migrations/000165_runtime_recovery_observation_nonce.up.sql")
+	if err!=nil{t.Fatal(err)}
+	if _,err=f.pool.Exec(f.ctx,string(up165));err!=nil{t.Fatal("reapply current 165 schema:",err)}
 }
