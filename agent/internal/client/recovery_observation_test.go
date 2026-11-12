@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -196,4 +197,17 @@ func TestRecoveryObservationTransportRefusesMalformedPendingMetadata(t *testing.
 	c:=New(server.URL)
 	value,err:=c.PollRecoveryPendingAttempt(context.Background(),syntheticRecoveryAgentBearer)
 	if err==nil||value!=nil {t.Fatalf("untrusted pending metadata accepted: %+v %v",value,err)}
+}
+
+func TestRecoveryObservationTransportNotCalledByDefaultAgentRunner(t *testing.T){
+	raw,err:=os.ReadFile("../heartbeat/runner.go")
+	if err!=nil{t.Fatal(err)}
+	for _,name:=range []string{
+		"PollRecoveryPendingAttempt(",
+		"RequestRecoveryObservationNonce(",
+	}{
+		if strings.Contains(string(raw),name) {
+			t.Fatalf("private recovery transport unexpectedly active in Agent polling: %s",name)
+		}
+	}
 }
