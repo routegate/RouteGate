@@ -49,6 +49,9 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      - name: Verify RG-140 recovery authorization policy and bound challenge under race detector
+        run: go test -race ./internal/auth ./internal/recoveryauth -run '^(TestRuntimeRecovery|TestRecoveryChallenge)' -count=1 -timeout=120s -v
+
       - name: Verify fenced Manager timeout preservation against PostgreSQL
         run: go test ./internal/db -run '^TestRuntimeMutationFencingPreservesUncertainJobs$' -count=1 -timeout=120s -v
 
