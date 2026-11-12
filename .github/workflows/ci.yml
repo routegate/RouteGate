@@ -168,6 +168,8 @@ jobs:
 
       - name: Verify fresh Agent-local read-only recovery holds retain exclusive flock and durable fence
         run: go test -race ./internal/tasks -run '^TestRuntimeRecovery(ReadOnlyHoldV1|CrashBoundariesRemainFenced|CancelledDuringHealthNeverLeaksEvidence)' -count=1 -timeout=120s -v
+      - name: Verify offline recovery journal crash-cut model never grants Agent unlock
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryJournalV1' -count=1 -timeout=120s -v
 
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
