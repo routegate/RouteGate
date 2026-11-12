@@ -88,6 +88,9 @@ jobs:
       - name: Verify private observation nonce issuance only after audit commit and one-use concurrency
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryObservationIssuer' -count=1 -timeout=120s -v
 
+      - name: Verify dormant Agent observation HTTP authentication and nonce delivery with PostgreSQL
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^(TestRuntimeRecoveryTransport|TestRecoveryObservationTransportNotRegistered)' -count=1 -timeout=120s -v
+
 
       # RG-140 v0.2.0 integration: old #547 tests are now replayed from
       # current main, not substituted for the current backend/release CI.
@@ -150,6 +153,9 @@ jobs:
 
       - name: Verify token-bound read-only Agent proof-of-possession format
         run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryTokenProof' -count=1 -timeout=120s -v
+
+      - name: Verify dormant outbound Agent recovery client binding and no automatic retries
+        run: go test -race ./internal/client -run '^TestRecoveryObservationTransport' -count=1 -timeout=120s -v
 
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
