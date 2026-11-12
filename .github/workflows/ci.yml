@@ -55,6 +55,9 @@ jobs:
       - name: Verify historical result readback against PostgreSQL
         run: go test ./internal/agents ./internal/db -run '^TestRuntimeMutationFencing(VerifyHandler|VerifyStoredResult)$' -count=1 -timeout=120s -v
 
+      - name: Verify recovery holds and serializable node admission against PostgreSQL
+        run: go test ./internal/db -run '^TestRuntimeRecoveryReservation' -count=1 -timeout=120s -v
+
       # RG-140 v0.2.0 integration: old #547 tests are now replayed from
       # current main, not substituted for the current backend/release CI.
       - name: Test scoped VLESS removal preflight against real sing-box

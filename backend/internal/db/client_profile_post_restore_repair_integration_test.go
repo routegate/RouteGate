@@ -109,8 +109,8 @@ func TestClientProfilePostRestoreRepairRestoresObservedInvariants(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000161_credential_revocation_preparations" {
-		t.Fatalf("applied schema version = %q, want 000161_credential_revocation_preparations", version)
+	if version != "000162_runtime_recovery_reservations" {
+		t.Fatalf("applied schema version = %q, want 000162_runtime_recovery_reservations", version)
 	}
 }
 
