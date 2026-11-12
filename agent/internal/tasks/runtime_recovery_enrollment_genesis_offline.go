@@ -125,7 +125,8 @@ func writeRecoveryEnrollmentGenesisOfflineV1(
 	genesis recoveryEnrollmentGenesisV1,
 	step func(string) error,
 ) error {
-	if ctx == nil || ctx.Err() != nil || !validRecoveryEnrollmentGenesisV1(genesis) {
+	if ctx == nil || ctx.Err() != nil || !validRecoveryEnrollmentGenesisV1(genesis) ||
+		validateRecoveryEnrollmentDistinctRootsV1(runtimeDir, journalDir) != nil {
 		return errRecoveryJournalUntrustedV1
 	}
 	runtimeLock, err := holdExistingRuntimeMutationForGenesisV1(runtimeDir)
@@ -254,7 +255,8 @@ func inspectRecoveryEnrollmentGenesisOfflineV1(
 	deny := func() (recoveryEnrollmentGenesisObservationV1, error) {
 		return recoveryEnrollmentGenesisObservationV1{}, errRecoveryJournalUntrustedV1
 	}
-	if ctx == nil || ctx.Err() != nil || !validRecoveryEnrollmentGenesisV1(expected) {
+	if ctx == nil || ctx.Err() != nil || !validRecoveryEnrollmentGenesisV1(expected) ||
+		validateRecoveryEnrollmentDistinctRootsV1(runtimeDir, journalDir) != nil {
 		return deny()
 	}
 	runtimeLock, err := holdExistingRuntimeMutationForGenesisV1(runtimeDir)
