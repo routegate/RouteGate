@@ -2,7 +2,6 @@ package db
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -126,9 +125,6 @@ func TestRuntimeRecoveryTokenProvenanceRejectsExpiredOrResolvedNonce(t *testing.
 	t.Run("already_resolved",func(t *testing.T){
 		f,id,mac,claim:=tokenBoundObservationFixture(t,30*time.Second)
 		defer f.done()
-		_,_,_,principal,reply:=struct{ }{}, "", "", recoveryobserve.AgentTransportIdentity{}, recoveryobserve.ObservationReply{}
-		_ = principal
-		_ = reply
 		// Consume a correct nonce through the existing isolated verifier:
 		// it is *not* an HTTP route or a release signal.
 		var state string
@@ -151,4 +147,3 @@ UPDATE vpn_runtime_recovery_observation_nonces
 // A valid preflight is inherently stale once its read lock is released.
 // An authenticated nonce-consumption transaction and fresh under-lock Agent
 // re-observation must be built in a separate reviewed recovery protocol.
-var _ = context.Background
