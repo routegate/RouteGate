@@ -54,7 +54,12 @@ FROM vpn_runtime_recovery_enrollment_preparations e WHERE e.id=$1::uuid
 	// Preparation MUST NOT make the ordinary Agent locked/enrolled. Current
 	// credential rotation, normal legacy job creation and claim still work.
 	_, err = f.pool.Exec(f.ctx, `
-UPDATE agents SET token_hash=$1 WHERE id=$2::uuid
+UPDATE agents
+   SET token_hash=$1,
+       credential_generation=credential_generation+1,
+       last_authenticated_heartbeat_at=NULL,
+       last_authenticated_heartbeat_generation=NULL
+ WHERE id=$2::uuid
 `, strings.Repeat("f",64), f.agentID)
 	if err != nil { t.Fatal("preparation interfered with ordinary Agent rotation:", err) }
 	var currentGeneration int64
