@@ -340,3 +340,28 @@ func TestRuntimePreDispatchCheckpointEmptySchemaDowngradesWithoutTouchingJobs(t 
 		t.Fatal("checkpoint schema cannot be reapplied:", err)
 	}
 }
+
+
+// Ordinary un-enrolled nodes must retain their existing job/version cleanup.
+// A BEFORE DELETE trigger returning NEW (nil) would silently suppress these
+// deletes even with no checkpoint and could break an installed Manager.
+func TestRuntimePreDispatchCheckpointLegacyVersionDeleteRemainsAllowed(t *testing.T) {
+	f := newRecoveryReservationFixture(t)
+	defer f.done()
+	var versionID string
+	if err := f.pool.QueryRow(f.ctx, `
+INSERT INTO config_versions(server_id,version,config_hash,rendered_config)
+SELECT cv.server_id,
+       (SELECT COALESCE(MAX(v.version),0)+1 FROM config_versions v WHERE v.server_id=cv.server_id),
+       cv.config_hash,cv.rendered_config
+  FROM config_versions cv WHERE cv.id=$1::uuid
+RETURNING id::text
+`, f.configVersionID).Scan(&versionID); err != nil {
+		t.Fatal("create unreferenced legacy config version:",err)
+	}
+	tag, err := f.pool.Exec(f.ctx,
+		`DELETE FROM config_versions WHERE id=$1::uuid`, versionID)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("legacy config cleanup unexpectedly suppressed: rows=%d err=%v",tag.RowsAffected(),err)
+	}
+}
