@@ -78,6 +78,7 @@ func TestMigrationOrdinalPreflightAllowsForwardOnlyNextMigration(t *testing.T) {
 		"000163_runtime_recovery_challenge_ledger.up.sql",
 		"000164_runtime_recovery_attempt_ledger.up.sql",
 		"000165_runtime_recovery_observation_nonce.up.sql",
+		"000166_runtime_pre_dispatch_checkpoint.up.sql",
 	}
 	if err := validateMigrationOrdinals(files); err != nil {
 		t.Fatalf("valid migration sequence rejected: %v", err)
@@ -94,5 +95,23 @@ func TestCurrentMigrationCatalogHasNoOrdinalCollisions(t *testing.T) {
 	}
 	if err := validateMigrationOrdinals(files); err != nil {
 		t.Fatalf("checked-in migration catalog is ambiguous: %v", err)
+	}
+}
+
+ 
+// Keep a cheap, pre-database guard for the five new PL/pgSQL bodies. A
+// single-dollar terminator breaks Manager startup even when Go compiles.
+// Full PostgreSQL integration tests still validate migration semantics.
+func TestPreDispatchCheckpointMigrationDollarQuotesAreBalanced(t *testing.T) {
+	data, err := os.ReadFile("../../migrations/000166_runtime_pre_dispatch_checkpoint.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(data)
+	if strings.Contains(sql, "END; $;") ||
+		strings.Count(sql, "AS $$") != 5 ||
+		strings.Count(sql, "END; $$;") != 5 ||
+		strings.Count(sql, "$$") != 10 {
+		t.Fatal("pre-dispatch checkpoint migration has malformed PL/pgSQL dollar quoting")
 	}
 }

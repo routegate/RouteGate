@@ -82,6 +82,9 @@ jobs:
       - name: Verify Manager-derived mutation marker independent of Agent claims
         run: go test -race ./internal/recoveryobserve -run '^TestManagerExpectedMutationMarkerV1' -count=1 -timeout=120s -v
 
+      - name: Verify immutable Manager pre-dispatch checkpoint and atomic PostgreSQL audit
+        run: go test -race ./internal/db -run '^TestRuntimePreDispatchCheckpoint' -count=1 -timeout=180s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 
