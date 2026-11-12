@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -161,4 +162,33 @@ func TestRuntimeRecoveryAttemptConcurrentConsumeHasExactlyOnePendingIntent(t *te
 	if success!=1||denied!=1{t.Fatalf("duplicate authorized attempt: success=%d denied=%d",success,denied)}
 	assertRecoveryAttempt(t,f,issued.ID,1)
 	assertRecoveryChallengeState(t,f,issued.ID,"consumed",1)
+}
+
+func TestRuntimeRecoveryAttemptUpgradeBackfillsHistoricalConsumption(t *testing.T) {
+	f:=newRecoveryLedgerFixture(t)
+	defer f.done()
+	// Simulate an existing 000163 database with a completed challenge.
+	// The 000164 downgrade is allowed only while the attempt table is empty.
+	down,err:=os.ReadFile("../../migrations/000164_runtime_recovery_attempt_ledger.down.sql")
+	if err!=nil{t.Fatal(err)}
+	if _,err=f.pool.Exec(f.ctx,string(down));err!=nil{t.Fatal("downgrade empty 164 schema:",err)}
+
+	issued,err:=recoveryauth.NewIssuer(f.pool).Issue(f.ctx,f.reservationID,verifiedRecoveryActor(f))
+	if err!=nil{t.Fatal(err)}
+	if err=recoveryauth.NewConsumer(f.pool).Consume(f.ctx,issued.ID,issued.Token,verifiedRecoveryActor(f));err!=nil{
+		t.Fatal("consume on historical 163 schema:",err)
+	}
+
+	up,err:=os.ReadFile("../../migrations/000164_runtime_recovery_attempt_ledger.up.sql")
+	if err!=nil{t.Fatal(err)}
+	if _,err=f.pool.Exec(f.ctx,string(up));err!=nil{t.Fatal("backfill pending attempt on upgrade:",err)}
+	assertRecoveryAttempt(t,f,issued.ID,1)
+	assertRecoveryChallengeState(t,f,issued.ID,"consumed",1)
+
+	// An upgraded DB with any historical attempt MUST refuse destructive
+	// downgrade rather than deleting a consumed operator authorization.
+	if _,err=f.pool.Exec(f.ctx,string(down));err==nil{
+		t.Fatal("destructive downgrade erased pending recovery attempt")
+	}
+	assertRecoveryAttempt(t,f,issued.ID,1)
 }
