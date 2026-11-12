@@ -105,6 +105,9 @@ func TestRuntimeRecoveryReservationBlocksMutationsAndCannotBeDeleted(t *testing.
     _,err=f.pool.Exec(f.ctx,`UPDATE servers SET vless_port=9711 WHERE id=$1::uuid`,f.serverID)
     requireRecoveryGuard(t,err)
 
+    _,err=f.pool.Exec(f.ctx,`INSERT INTO routing_profiles(name) VALUES('rg140-blocked-routing-change')`)
+    requireRecoveryGuard(t,err)
+
     // A legitimate heartbeat must not be disabled by the reservation.
     if _,err=f.pool.Exec(f.ctx,`UPDATE agents SET last_seen_at=now() WHERE id=$1::uuid`,f.agentID);err!=nil {
         t.Fatal("heartbeat unexpectedly prevented",err)
@@ -197,4 +200,25 @@ func TestRuntimeRecoveryReservationCannotRaceNewJob(t *testing.T) {
                (SELECT count(*) FROM agent_operation_jobs WHERE server_id=$1::uuid AND status='pending')
     `,f.serverID).Scan(&holds,&jobs);err!=nil {t.Fatal(err)}
     if holds+jobs!=1 {t.Fatalf("unsafe concurrent state holds=%d jobs=%d",holds,jobs)}
+}
+
+// The reservation insert must fail immediately if another transaction is
+// mutating shared routing, rather than waiting with the server row locked.
+func TestRuntimeRecoveryReservationRefusesConcurrentRoutingWrite(t *testing.T) {
+    f:=newRecoveryReservationFixture(t)
+    defer f.done()
+    f.enableFencing(t)
+
+    tx,err:=f.pool.Begin(f.ctx)
+    if err!=nil {t.Fatal(err)}
+    defer func(){_ = tx.Rollback(f.ctx)}()
+    if _,err:=tx.Exec(f.ctx,`INSERT INTO routing_profiles(name) VALUES('rg140-inflight-routing-change')`);err!=nil {
+        t.Fatal(err)
+    }
+    requireRecoveryGuard(t,f.reserve(f.ctx,f.generation,"config_apply"))
+    if err:=tx.Rollback(f.ctx);err!=nil {t.Fatal(err)}
+
+    // Once the routing writer releases its lock, the ordinary isolated
+    // reservation may proceed. Its future release still requires authorization.
+    if err:=f.reserve(f.ctx,f.generation,"config_apply");err!=nil {t.Fatal(err)}
 }
