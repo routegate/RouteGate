@@ -74,7 +74,9 @@ func TestRecoveryObservationReplyTransportSignedOneShotAgentSubmission(t *testin
 		decoder.DisallowUnknownFields()
 		if err:=decoder.Decode(&submitted);err!=nil {t.Error(err);w.WriteHeader(http.StatusBadRequest);return}
 		expectedMAC,err:=tasks.RuntimeRecoveryTokenProofMACV1(syntheticRecoveryAgentBearer,submitted.Claim)
-		if err!=nil || submitted.MAC!=expectedMAC ||
+		expectedReplyMAC,replyErr:=tasks.RuntimeRecoveryFullReplyMACV1(syntheticRecoveryAgentBearer,submitted.Claim,submitted.Reply)
+		if err!=nil || replyErr!=nil || submitted.MAC!=expectedMAC ||
+			submitted.ReplyMAC!=expectedReplyMAC ||
 			submitted.Claim.Evidence.MarkerSHA256!=submitted.Reply.Observation.MarkerHash ||
 			submitted.Claim.Evidence.ReceiptSHA256!=submitted.Reply.Observation.ReceiptHash ||
 			submitted.Claim.Nonce!=submitted.Reply.Nonce ||
