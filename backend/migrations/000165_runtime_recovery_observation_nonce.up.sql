@@ -56,6 +56,16 @@ BEGIN
         THEN
             RAISE EXCEPTION USING ERRCODE='P0145', MESSAGE='recovery_observation_nonce_replay';
         END IF;
+        -- Re-check the Agent generation AT the resolution boundary, not
+        -- only when the challenge was originally recorded.
+        PERFORM 1 FROM agents a
+         WHERE a.id=NEW.agent_id AND a.server_id=NEW.server_id
+           AND a.credential_generation=NEW.agent_credential_generation
+           AND a.capabilities @> '{"runtimeMutationFencingV1":true}'::jsonb
+         FOR SHARE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION USING ERRCODE='P0145', MESSAGE='recovery_observation_agent_rotated';
+        END IF;
         RETURN NEW;
     END IF;
     IF NEW.state <> 'issued' OR NEW.resolved_at IS NOT NULL
