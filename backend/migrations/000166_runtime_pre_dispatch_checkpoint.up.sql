@@ -209,8 +209,12 @@ BEGIN
             RAISE EXCEPTION USING ERRCODE='P0146', MESSAGE='pre_dispatch_checkpoint_config_immutable';
         END IF;
     END IF;
+    -- In a BEFORE DELETE trigger, RETURN OLD is mandatory for ordinary
+    -- uncheckpointed config versions; RETURN NEW would silently suppress
+    -- the deletion even if no recovery checkpoint exists.
+    IF TG_OP='DELETE' THEN RETURN OLD; END IF;
     RETURN NEW;
-END; $$;
+END; $;
 CREATE TRIGGER rg146_checkpoint_version_identity
     BEFORE UPDATE OR DELETE ON config_versions
     FOR EACH ROW EXECUTE FUNCTION routegate_pre_dispatch_checkpoint_version_guard();
