@@ -35,13 +35,21 @@ func newRecoveryReservationFixture(t *testing.T) recoveryReservationFixture {
         t.Fatal(err)
     }
     if err := pool.QueryRow(ctx,`
-        SELECT j.id::text,j.config_version_id::text
-        FROM config_apply_jobs j
-        WHERE j.server_id=$1::uuid AND j.agent_id=$2::uuid AND j.status='succeeded' AND j.action='apply'
-        ORDER BY j.completed_at DESC LIMIT 1
-    `,server,f.agentID).Scan(&f.jobID,&f.configVersionID);err != nil {
+        SELECT config_version_id::text FROM config_apply_jobs
+        WHERE server_id=$1::uuid ORDER BY created_at DESC LIMIT 1
+    `,server).Scan(&f.configVersionID);err != nil {
         done()
-        t.Fatal("fixture has no positively completed scoped job",err)
+        t.Fatal("fixture has no baseline config version",err)
+    }
+    // The generic transfer fixture completes a config apply without necessarily
+    // claiming it through Agent polling; make the verified job ownership explicit.
+    if err := pool.QueryRow(ctx,`
+        INSERT INTO config_apply_jobs(server_id,agent_id,config_version_id,action,status,started_at,completed_at)
+        VALUES($1::uuid,$2::uuid,$3::uuid,'apply','succeeded',now()-interval '1 minute',now())
+        RETURNING id::text
+    `,server,f.agentID,f.configVersionID).Scan(&f.jobID);err != nil {
+        done()
+        t.Fatal("create isolated completed Agent job",err)
     }
     return f
 }
