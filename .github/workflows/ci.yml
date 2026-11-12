@@ -85,6 +85,9 @@ jobs:
       - name: Verify immutable Manager pre-dispatch checkpoint and atomic PostgreSQL audit
         run: go test -race ./internal/db -run '^TestRuntimePreDispatchCheckpoint' -count=1 -timeout=180s -v
 
+      - name: Verify dormant Agent enrollment preparation cannot activate or gate legacy operations
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentPreparationV1' -count=1 -timeout=180s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 

@@ -79,6 +79,7 @@ func TestMigrationOrdinalPreflightAllowsForwardOnlyNextMigration(t *testing.T) {
 		"000164_runtime_recovery_attempt_ledger.up.sql",
 		"000165_runtime_recovery_observation_nonce.up.sql",
 		"000166_runtime_pre_dispatch_checkpoint.up.sql",
+		"000167_runtime_recovery_enrollment_preparation.up.sql",
 	}
 	if err := validateMigrationOrdinals(files); err != nil {
 		t.Fatalf("valid migration sequence rejected: %v", err)
@@ -113,5 +114,20 @@ func TestPreDispatchCheckpointMigrationDollarQuotesAreBalanced(t *testing.T) {
 		strings.Count(sql, "END; $$;") != 5 ||
 		strings.Count(sql, "$$") != 10 {
 		t.Fatal("pre-dispatch checkpoint migration has malformed PL/pgSQL dollar quoting")
+	}
+}
+
+
+// Three PL/pgSQL bodies must have balanced, unbroken delimiters. This
+// catches an accidental single-dollar typo without waiting for Manager E2E.
+func TestDormantEnrollmentPreparationMigrationDollarQuotesAreBalanced(t *testing.T) {
+	data, err := os.ReadFile("../../migrations/000167_runtime_recovery_enrollment_preparation.up.sql")
+	if err != nil { t.Fatal(err) }
+	sql := string(data)
+	if strings.Contains(sql, "END; $;") ||
+		strings.Count(sql, "AS $$") != 3 ||
+		strings.Count(sql, "END; $$;") != 3 ||
+		strings.Count(sql, "$$") != 6 {
+		t.Fatal("enrollment preparation migration contains malformed PL/pgSQL delimiters")
 	}
 }
