@@ -220,12 +220,11 @@ func TestRuntimePreDispatchCheckpointIsImmutableAndProtectsSource(t *testing.T) 
 		`UPDATE config_apply_jobs SET config_version_id=NULL WHERE id=$1::uuid`,
 		`DELETE FROM config_apply_jobs WHERE id=$1::uuid`,
 	} {
-		_, err := f.pool.Exec(f.ctx, stmt, jobID)
-		// Checkpoint UPDATE/DELETE uses id but job_id is different. For those
-		// two statements we check the actual checkpoint id below.
+		targetID := jobID
 		if strings.Contains(stmt, "vpn_runtime_pre_dispatch_checkpoints") {
-			_, err = f.pool.Exec(f.ctx, stmt, id)
+			targetID = id
 		}
+		_, err := f.pool.Exec(f.ctx, stmt, targetID)
 		requirePreDispatchGuard(t, err)
 	}
 	_, err = f.pool.Exec(f.ctx,
