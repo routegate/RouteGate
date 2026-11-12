@@ -50,61 +50,10 @@ type recoveryIssuedResponse struct {
 
 var ErrRecoveryObservationTransportRefused = errors.New("recovery observation transport refused")
 
-// The private local task validator also enforces this canonical v4 identity
-// format. Reject malformed manager messages before they can be interpreted
-// as read-only observation instructions.
+// A Manager-provided identity is only usable when it matches Agent's
+// canonical local v4 identity contract; malformed values fail closed.
 var recoveryObservationUUID = regexp.MustCompile(
-	`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}package client
-
-import (
-	"context"
-	"encoding/base64"
-	"errors"
-	"regexp"
-	"time"
-
-	"github.com/ikaevus/routegate/agent/internal/tasks"
-)
-
-// RecoveryPendingAttempt is an Agent-owned, read-only Manager poll result.
-// It is not an executable task and must never enter task dispatch/admission.
-type RecoveryPendingAttempt struct {
-	SchemaVersion int `json:"schemaVersion"`
-	AttemptID string `json:"attemptId"`
-	ReservationID string `json:"reservationId"`
-	AttemptEpoch int64 `json:"attemptEpoch"`
-	TaskID string `json:"taskId"`
-	AgentID string `json:"agentId"`
-	ServerID string `json:"serverId"`
-	AgentCredentialGeneration int64 `json:"agentCredentialGeneration"`
-}
-
-type recoveryPendingResponse struct {
-	Pending *RecoveryPendingAttempt `json:"pending"`
-}
-
-type recoveryIssueRequest struct {
-	AttemptID string `json:"attemptId"`
-	Evidence tasks.RuntimeRecoveryEvidenceDigestsV1 `json:"evidence"`
-}
-
-type recoveryIssuedResponse struct {
-	SchemaVersion int `json:"schemaVersion"`
-	ObservationID string `json:"observationId"`
-	ReservationID string `json:"reservationId"`
-	AttemptID string `json:"attemptId"`
-	AttemptEpoch int64 `json:"attemptEpoch"`
-	Nonce string `json:"nonce"`
-	IssuedAt time.Time `json:"issuedAt"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	TaskID string `json:"taskId"`
-	AgentID string `json:"agentId"`
-	ServerID string `json:"serverId"`
-	AgentCredentialGeneration int64 `json:"agentCredentialGeneration"`
-	ExpectedEvidence tasks.RuntimeRecoveryEvidenceDigestsV1 `json:"expectedEvidence"`
-}
-
-,
+	`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`,
 )
 
 // PollRecoveryPendingAttempt uses Agent's existing outbound Manager bearer
