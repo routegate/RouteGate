@@ -108,10 +108,14 @@ func ObserveRuntimeRecovery(ctx context.Context, dir string, binding RuntimeResu
 	if err != nil {
 		return RuntimeRecoveryObservation{}, ErrRuntimeMutationBlocked
 	}
-	defer hold.Close()
-	// A returned observation is historical: the private flock is released
-	// on return and this result cannot authorize any future mutation.
-	return hold.observation, nil
+	// Copy the read-only observation before closing, because Close
+	// deliberately invalidates the hold's in-memory evidence. The returned
+	// value is historical and can never authorize a later mutation.
+	historical := hold.observation
+	if err := hold.Close(); err != nil {
+		return RuntimeRecoveryObservation{}, ErrRuntimeMutationBlocked
+	}
+	return historical, nil
 }
 
 // observeRuntimeRecoveryUnderLock is the original read-only, two-sided
