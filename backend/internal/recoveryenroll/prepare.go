@@ -96,8 +96,8 @@ SELECT s.id::text
    AND u.user_type='human' AND u.status='active'
    AND r.code='super_admin'
    AND perm.code='runtime_recovery:enrollment_prepare'
- FOR SHARE OF s,u,ur,r,rp,perm
  LIMIT 1
+ FOR SHARE OF s,u,ur,r,rp,perm
 `, operator.SessionID, operator.ID).Scan(&authorizedSession)
 	if err != nil || authorizedSession != operator.SessionID { return refuse() }
 
