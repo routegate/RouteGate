@@ -244,3 +244,41 @@ FOR EACH ROW EXECUTE FUNCTION rg140_reject_observation_reply_event();
 	}
 	nonceAuditState(t,f,id,"issued",1)
 }
+
+func TestRuntimeRecoveryObservationNonceRejectsWrongAttemptAndDuplicateRequest(t *testing.T) {
+	f,id,_,_,_:=observationFixture(t,30*time.Second)
+	defer f.done()
+	_,err:=f.pool.Exec(f.ctx,`
+INSERT INTO vpn_runtime_recovery_observation_nonces (
+ attempt_id,reservation_id,server_id,agent_id,task_id,attempt_epoch,
+ agent_credential_generation,expected_marker_sha256,expected_receipt_sha256,
+ expected_runtime_witness_sha256,nonce_sha256,issued_at,expires_at
+)
+SELECT attempt_id,reservation_id,server_id,agent_id,task_id,attempt_epoch+1,
+       agent_credential_generation,expected_marker_sha256,expected_receipt_sha256,
+       expected_runtime_witness_sha256,repeat('1',64),clock_timestamp(),
+       clock_timestamp()+interval '30 seconds'
+FROM vpn_runtime_recovery_observation_nonces WHERE id=$1::uuid
+`,id)
+	requireNonceGuard(t,err)
+
+	// A second otherwise correct request for the same durable attempt must
+	// not mint a fresh nonce, even if the first one expires or is rejected.
+	_,err=f.pool.Exec(f.ctx,`
+INSERT INTO vpn_runtime_recovery_observation_nonces (
+ attempt_id,reservation_id,server_id,agent_id,task_id,attempt_epoch,
+ agent_credential_generation,expected_marker_sha256,expected_receipt_sha256,
+ expected_runtime_witness_sha256,nonce_sha256,issued_at,expires_at
+)
+SELECT attempt_id,reservation_id,server_id,agent_id,task_id,attempt_epoch,
+       agent_credential_generation,expected_marker_sha256,expected_receipt_sha256,
+       expected_runtime_witness_sha256,repeat('2',64),clock_timestamp(),
+       clock_timestamp()+interval '30 seconds'
+FROM vpn_runtime_recovery_observation_nonces WHERE id=$1::uuid
+`,id)
+	var pg *pgconn.PgError
+	if !errors.As(err,&pg)||pg.Code!="23505" {
+		t.Fatalf("second nonce for one attempt was admitted: %v",err)
+	}
+	nonceAuditState(t,f,id,"issued",1)
+}
