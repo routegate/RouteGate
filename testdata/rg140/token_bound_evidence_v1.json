@@ -7,7 +7,7 @@
     "reservationId": "66666666-6666-4666-8666-666666666666",
     "attemptId": "55555555-5555-4555-8555-555555555555",
     "attemptEpoch": 17,
-    "nonce": "kpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpI",
+    "nonce": "kpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpI",
     "agentCredentialGeneration": 4,
     "evidence": {
       "schemaVersion": 1,
@@ -20,5 +20,5 @@
       "witnessSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     }
   },
-  "expectedMAC": "4d9b091b0a6e007fb2071cd06228a7b7a3b1e7610b937e9613e02be42f116065"
+  "expectedMAC": "7c870e1b954bfcd062273f358f04ed159b9dfbb464ebf674be68029d588911dd"
 }
