@@ -171,15 +171,15 @@ func TestRuntimeRecoveryEnrollmentPreflightV1RefusesAbsentInvalidAndCancelled(t 
 	f:=newRecoveryReservationFixture(t)
 	defer f.done()
 	badAgent:="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	for name, id, ctx := range []struct{name,id string;ctx context.Context}{
+	for _, tc := range []struct{name,id string;ctx context.Context}{
 		{"unknown_agent",badAgent,f.ctx},
 		{"malformed_uuid","not-a-uuid",f.ctx},
 		{"empty_uuid","",f.ctx},
 		{"nil_context",f.agentID,nil},
 		{"cancelled_context",f.agentID,func() context.Context {ctx,cancel:=context.WithCancel(f.ctx);cancel();return ctx}()},
 	}{
-		t.Run(name,func(t *testing.T){
-			got,err:=inspectRecoveryEnrollmentPreflightV1(ctx,f.pool,id)
+		t.Run(tc.name,func(t *testing.T){
+			got,err:=inspectRecoveryEnrollmentPreflightV1(tc.ctx,f.pool,tc.id)
 			if !errors.Is(err,errRecoveryEnrollmentPreflightRefusedV1) ||
 				got.Assessment!=""||got.Unattested||len(got.Reasons)!=0{
 				t.Fatalf("invalid preflight input returned evidence: %+v %v",got,err)
