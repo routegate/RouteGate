@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/ikaevus/routegate/agent/internal/tasks"
@@ -48,6 +50,63 @@ type recoveryIssuedResponse struct {
 
 var ErrRecoveryObservationTransportRefused = errors.New("recovery observation transport refused")
 
+// The private local task validator also enforces this canonical v4 identity
+// format. Reject malformed manager messages before they can be interpreted
+// as read-only observation instructions.
+var recoveryObservationUUID = regexp.MustCompile(
+	`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}package client
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"regexp"
+	"time"
+
+	"github.com/ikaevus/routegate/agent/internal/tasks"
+)
+
+// RecoveryPendingAttempt is an Agent-owned, read-only Manager poll result.
+// It is not an executable task and must never enter task dispatch/admission.
+type RecoveryPendingAttempt struct {
+	SchemaVersion int `json:"schemaVersion"`
+	AttemptID string `json:"attemptId"`
+	ReservationID string `json:"reservationId"`
+	AttemptEpoch int64 `json:"attemptEpoch"`
+	TaskID string `json:"taskId"`
+	AgentID string `json:"agentId"`
+	ServerID string `json:"serverId"`
+	AgentCredentialGeneration int64 `json:"agentCredentialGeneration"`
+}
+
+type recoveryPendingResponse struct {
+	Pending *RecoveryPendingAttempt `json:"pending"`
+}
+
+type recoveryIssueRequest struct {
+	AttemptID string `json:"attemptId"`
+	Evidence tasks.RuntimeRecoveryEvidenceDigestsV1 `json:"evidence"`
+}
+
+type recoveryIssuedResponse struct {
+	SchemaVersion int `json:"schemaVersion"`
+	ObservationID string `json:"observationId"`
+	ReservationID string `json:"reservationId"`
+	AttemptID string `json:"attemptId"`
+	AttemptEpoch int64 `json:"attemptEpoch"`
+	Nonce string `json:"nonce"`
+	IssuedAt time.Time `json:"issuedAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	TaskID string `json:"taskId"`
+	AgentID string `json:"agentId"`
+	ServerID string `json:"serverId"`
+	AgentCredentialGeneration int64 `json:"agentCredentialGeneration"`
+	ExpectedEvidence tasks.RuntimeRecoveryEvidenceDigestsV1 `json:"expectedEvidence"`
+}
+
+,
+)
+
 // PollRecoveryPendingAttempt uses Agent's existing outbound Manager bearer
 // client but is deliberately NOT called by heartbeat, task polling or the
 // Runner. It does not mint a nonce, mutate VPN state or bypass a fence.
@@ -61,9 +120,13 @@ func (c *Client) PollRecoveryPendingAttempt(ctx context.Context, token string) (
 	}
 	p:=response.Pending
 	if p==nil{return nil,nil}
-	if p.SchemaVersion!=1 || p.AttemptID=="" || p.ReservationID=="" ||
-		p.AttemptEpoch<=0 || p.TaskID=="" || p.AgentID=="" || p.ServerID=="" ||
-		p.AgentCredentialGeneration<=0 {
+	if p.SchemaVersion!=1 ||
+		!recoveryObservationUUID.MatchString(p.AttemptID) ||
+		!recoveryObservationUUID.MatchString(p.ReservationID) ||
+		!recoveryObservationUUID.MatchString(p.TaskID) ||
+		!recoveryObservationUUID.MatchString(p.AgentID) ||
+		!recoveryObservationUUID.MatchString(p.ServerID) ||
+		p.AttemptEpoch<=0 || p.AgentCredentialGeneration<=0 {
 		return nil,ErrRecoveryObservationTransportRefused
 	}
 	return p,nil
@@ -82,8 +145,11 @@ func (c *Client) RequestRecoveryObservationNonce(
 ) (tasks.RuntimeRecoveryObservationChallenge,error) {
 	var empty tasks.RuntimeRecoveryObservationChallenge
 	if c==nil || ctx.Err()!=nil || token=="" || pending.SchemaVersion!=1 ||
-		pending.AttemptID=="" || pending.ReservationID=="" ||
-		pending.AgentID=="" || pending.ServerID=="" || pending.TaskID=="" ||
+		!recoveryObservationUUID.MatchString(pending.AttemptID) ||
+		!recoveryObservationUUID.MatchString(pending.ReservationID) ||
+		!recoveryObservationUUID.MatchString(pending.AgentID) ||
+		!recoveryObservationUUID.MatchString(pending.ServerID) ||
+		!recoveryObservationUUID.MatchString(pending.TaskID) ||
 		pending.AttemptEpoch<=0 || pending.AgentCredentialGeneration<=0 ||
 		evidence.SchemaVersion!=1 || evidence.TaskID!=pending.TaskID ||
 		evidence.AgentID!=pending.AgentID || evidence.ServerID!=pending.ServerID {
@@ -97,7 +163,11 @@ func (c *Client) RequestRecoveryObservationNonce(
 	// Check EVERY identity/digest before using a server response to observe
 	// the process. A lost or mismatched response is never retried in-place.
 	now:=time.Now().UTC()
-	if issued.SchemaVersion!=1 || issued.ObservationID=="" ||
+	rawNonce,nonceErr:=base64.RawURLEncoding.DecodeString(issued.Nonce)
+	if issued.SchemaVersion!=1 ||
+		!recoveryObservationUUID.MatchString(issued.ObservationID) ||
+		nonceErr!=nil || len(rawNonce)!=32 ||
+		base64.RawURLEncoding.EncodeToString(rawNonce)!=issued.Nonce ||
 		issued.ReservationID!=pending.ReservationID ||
 		issued.AttemptID!=pending.AttemptID ||
 		issued.AttemptEpoch!=pending.AttemptEpoch ||
