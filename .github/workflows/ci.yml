@@ -76,6 +76,10 @@ jobs:
       - name: Verify one-use recovery observation nonce, identity and audit against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryObservationNonce' -count=1 -timeout=120s -v
 
+      - name: Verify Agent/Manager runtime evidence digest v1 contract on Manager
+        run: go test -race ./internal/recoveryobserve -run '^TestRuntimeRecoveryEvidenceManager' -count=1 -timeout=120s -v
+
+
       # RG-140 v0.2.0 integration: old #547 tests are now replayed from
       # current main, not substituted for the current backend/release CI.
       - name: Test scoped VLESS removal preflight against real sing-box
@@ -131,6 +135,10 @@ jobs:
 
       - name: Verify nonce-bound read-only Agent evidence and expiration under race detector
         run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryChallengedObservation' -count=1 -timeout=120s -v
+
+      - name: Verify Agent/Manager exact-byte evidence digest v1 contract on Agent
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryEvidenceV1' -count=1 -timeout=120s -v
+
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
         run: |

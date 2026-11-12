@@ -114,10 +114,15 @@ func matchesReply(reply ObservationReply, nonce string, principal AgentTransport
 		reply.ObservedAt.After(row.now.Add(2*time.Second)) {
 		return false
 	}
-	payload,err:=json.Marshal(w)
-	if err!=nil { return false }
-	digest:=sha256.Sum256(payload)
-	return subtle.ConstantTimeCompare([]byte(hex.EncodeToString(digest[:])),[]byte(row.expectedWitness))==1
+	// These DB digests are opaque until their Agent-local byte provenance
+	// is established. Strictly match the v1 format without pretending that
+	// an echoed nonce attests to possession of the original files.
+	manifest:=EvidenceDigestsV1{
+		SchemaVersion:1,TaskID:row.taskID,AgentID:row.agentID,ServerID:row.serverID,
+		MarkerSHA256:row.expectedMarker,ReceiptSHA256:row.expectedReceipt,
+		EnvelopeSHA256:o.EnvelopeHash,WitnessSHA256:row.expectedWitness,
+	}
+	return MatchesEvidenceDigestsV1(manifest,o)
 }
 
 // RecordOneReply consumes one previously recorded nonce. Only a transport
