@@ -42,8 +42,8 @@ func TestMigrationsApplyFromScratchOnPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000164_runtime_recovery_attempt_ledger" {
-		t.Fatalf("applied schema version = %q, want 000164_runtime_recovery_attempt_ledger", version)
+	if version != "000165_runtime_recovery_observation_nonce" {
+		t.Fatalf("applied schema version = %q, want 000165_runtime_recovery_observation_nonce", version)
 	}
 	assertRawTrafficArchivalPreservesDailyRollup(t, ctx, pool)
 	assertAgentMaintenanceJobContract(t, ctx, pool)
@@ -530,8 +530,8 @@ func TestRuntimeMetricsBackfillMigrationRepairsAppliedSchemaDrift(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000164_runtime_recovery_attempt_ledger" {
-		t.Fatalf("applied schema version = %q, want 000164_runtime_recovery_attempt_ledger", version)
+	if version != "000165_runtime_recovery_observation_nonce" {
+		t.Fatalf("applied schema version = %q, want 000165_runtime_recovery_observation_nonce", version)
 	}
 }
 
