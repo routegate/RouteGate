@@ -41,6 +41,16 @@ BEGIN
     IF NOT FOUND THEN
         RAISE EXCEPTION USING ERRCODE='P0142', MESSAGE='recovery_node_missing';
     END IF;
+    -- A concurrent shared-routing write must not commit alongside this
+    -- observation reservation. NOWAIT avoids a routing-table/server-row
+    -- deadlock when another transaction owns locks in the opposite order.
+    BEGIN
+        LOCK TABLE routing_profiles, routing_profile_rules,
+                   server_routing_profiles, managed_routing_rule_sets
+            IN SHARE MODE NOWAIT;
+    EXCEPTION WHEN lock_not_available THEN
+        RAISE EXCEPTION USING ERRCODE='P0142', MESSAGE='recovery_routing_busy';
+    END;
     IF EXISTS(SELECT 1 FROM vpn_account_transfer_nodes WHERE server_id=NEW.server_id)
        OR EXISTS(SELECT 1 FROM vpn_credential_revocations WHERE server_id=NEW.server_id AND state='prepared')
     THEN
