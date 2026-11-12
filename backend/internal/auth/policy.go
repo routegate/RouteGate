@@ -54,6 +54,23 @@ func IsAdminUser(user UserProfile) bool {
 	return false
 }
 
+// PermissionRuntimeRecoveryEnrollmentPrepare is a separate, deliberately
+// narrow super_admin grant. It may create only the immutable
+// "prepared_unattested" Manager record. It cannot enroll, activate, dispatch,
+// perform Agent work, or clear the RG-140 mutation fence.
+const PermissionRuntimeRecoveryEnrollmentPrepare = "runtime_recovery:enrollment_prepare"
+
+// CanPrepareRuntimeRecoveryEnrollment is a local early check only.
+// The writer MUST re-check the live session, role and permission in
+// PostgreSQL under locks in its own transaction before recording history.
+func CanPrepareRuntimeRecoveryEnrollment(u AuthenticatedUser) bool {
+	return u.UserType == UserTypeHuman &&
+		u.Status == "active" &&
+		u.ID != "" && u.SessionID != "" &&
+		HasRole(u.UserProfile, RoleSuperAdmin) &&
+		HasPermission(u.UserProfile, PermissionRuntimeRecoveryEnrollmentPrepare)
+}
+
 // PermissionRuntimeRecoveryAuthorize is deliberately NOT implied by any
 // ordinary admin/rollback permission. Only active human super_admin sessions
 // with this dedicated grant may create future recovery authorizations.

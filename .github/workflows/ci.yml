@@ -94,6 +94,9 @@ jobs:
       - name: Rehearse checkpoint-bound config/service claims atomically in disposable PostgreSQL
         run: go test -race ./internal/db -run '^TestRuntimeCheckpointedClaimRehearsalV1' -count=1 -timeout=180s -v
 
+      - name: Verify operator-authorized Agent preparation is dormant and audit-atomic
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryAuthorizedPreparationV1' -count=1 -timeout=180s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 

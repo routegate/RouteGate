@@ -49,6 +49,7 @@ var BuiltInPermissions = []string{
 	"configs:delete",
 	"configs:rollback",
 	PermissionRuntimeRecoveryAuthorize,
+	PermissionRuntimeRecoveryEnrollmentPrepare,
 
 	"routing_profiles:read",
 	"routing_profiles:create",
@@ -76,6 +77,7 @@ var BuiltInRoles = map[string][]string{
 		BuiltInPermissions,
 		"system:manage",
 		PermissionRuntimeRecoveryAuthorize,
+		PermissionRuntimeRecoveryEnrollmentPrepare,
 		"licenses:manage",
 		"portal:access",
 		"agent:connect",
