@@ -75,7 +75,7 @@ func TestManagerExpectedMutationMarkerV1RejectsInvalidManagerJob(t *testing.T) {
 	job, reported, _ := managerJobIntentFixtureV1(t)
 	mutations := map[string]func(*ManagerJobIntentV1){
 		"missing_task": func(j *ManagerJobIntentV1) { j.TaskID = "" },
-		"noncanonical_task": func(j *ManagerJobIntentV1) { j.TaskID = strings.ToUpper(j.TaskID) },
+		"noncanonical_task": func(j *ManagerJobIntentV1) { j.TaskID = strings.ToUpper("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") },
 		"other_agent": func(j *ManagerJobIntentV1) { j.AgentID = "" },
 		"other_server": func(j *ManagerJobIntentV1) { j.ServerID = "" },
 		"missing_generation": func(j *ManagerJobIntentV1) { j.AgentCredentialGeneration = 0 },
@@ -104,7 +104,7 @@ func TestManagerExpectedMutationMarkerV1RefusesAgentClaimDrift(t *testing.T) {
 		"wrong_agent": func(e *EvidenceDigestsV1) { e.AgentID = job.ServerID },
 		"wrong_server": func(e *EvidenceDigestsV1) { e.ServerID = job.AgentID },
 		"wrong_marker": func(e *EvidenceDigestsV1) { e.MarkerSHA256 = strings.Repeat("0", 64) },
-		"pre_ack_receipt": func(e *EvidenceDigestsV1) { e.ReceiptSHA256 = "" },
+		"missing_receipt": func(e *EvidenceDigestsV1) { e.ReceiptSHA256 = "" },
 		"schema_changed": func(e *EvidenceDigestsV1) { e.SchemaVersion++ },
 	}
 	for name, change := range changes {
@@ -138,5 +138,22 @@ func TestManagerExpectedMutationMarkerV1ConsistentForgedEvidenceStillUnattested(
 	comparison, err := CompareManagerExpectedMutationMarkerV1(job, reported)
 	if err != nil || comparison.State != managerMarkerConsistentUnattestedV1 {
 		t.Fatalf("marker was confused with full provenance: %+v %v", comparison, err)
+	}
+}
+
+ 
+// The Agent mutation marker v1 does not encode the credential generation.
+// A separate *current* Manager DB generation check is mandatory. This pure
+// helper cannot replace that check, even with an independently known job ID.
+func TestManagerExpectedMutationMarkerV1GenerationIsNotAttestedByMarker(t *testing.T) {
+	job, reported, golden := managerJobIntentFixtureV1(t)
+	job.AgentCredentialGeneration++
+	hash, err := ManagerExpectedMutationMarkerV1(job)
+	if err != nil || hash != golden {
+		t.Fatalf("unexpected marker rotation semantics: %s %v", hash, err)
+	}
+	comparison, err := CompareManagerExpectedMutationMarkerV1(job, reported)
+	if err != nil || comparison.State != managerMarkerConsistentUnattestedV1 {
+		t.Fatalf("a marker match must remain UNATTESTED after generation drift: %+v %v", comparison, err)
 	}
 }
