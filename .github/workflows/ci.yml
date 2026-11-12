@@ -88,6 +88,9 @@ jobs:
       - name: Verify dormant Agent enrollment preparation cannot activate or gate legacy operations
         run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentPreparationV1' -count=1 -timeout=180s -v
 
+      - name: Verify historical Manager enrollment preflight remains unattested
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentPreflightV1' -count=1 -timeout=180s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 
@@ -182,6 +185,9 @@ jobs:
 
       - name: Verify unregistered journal disk persistence and interrupted fsync boundaries
         run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryJournalDiskV1' -count=1 -timeout=120s -v
+
+      - name: Verify read-only Agent journal preflight cannot grant recovery authorization
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryJournalOfflinePreflightV1' -count=1 -timeout=120s -v
 
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
