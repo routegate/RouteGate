@@ -166,6 +166,9 @@ jobs:
       - name: Verify one-shot signed Agent observation reply and full-response HMAC wire contract
         run: go test -race ./internal/client ./internal/tasks -run '^(TestRecoveryObservationReplyTransport|TestRuntimeRecoveryFullReplyMACV1)' -count=1 -timeout=120s -v
 
+      - name: Verify fresh Agent-local read-only recovery holds retain exclusive flock and durable fence
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryReadOnlyHoldV1' -count=1 -timeout=120s -v
+
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
         run: |
