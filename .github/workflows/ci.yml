@@ -67,6 +67,9 @@ jobs:
       - name: Verify bound-secret recovery consumer and audit rollback against PostgreSQL
         run: go test -race ./internal/db -run '^TestRuntimeRecoveryVerifiedConsumer' -count=1 -timeout=120s -v
 
+      - name: Verify committed recovery challenge issuance and audit before secret disclosure
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryIssuer' -count=1 -timeout=120s -v
+
       # RG-140 v0.2.0 integration: old #547 tests are now replayed from
       # current main, not substituted for the current backend/release CI.
       - name: Test scoped VLESS removal preflight against real sing-box
