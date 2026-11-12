@@ -166,7 +166,7 @@ func TestClientProfileSchemaInvariantRepairRepairsAlreadyAppliedHistoricalDrift(
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000162_runtime_recovery_reservations" {
-		t.Fatalf("applied schema version = %q, want 000162_runtime_recovery_reservations", version)
+	if version != "000163_runtime_recovery_challenge_ledger" {
+		t.Fatalf("applied schema version = %q, want 000163_runtime_recovery_challenge_ledger", version)
 	}
 }
