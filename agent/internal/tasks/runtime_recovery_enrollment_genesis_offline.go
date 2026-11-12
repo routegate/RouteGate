@@ -114,8 +114,9 @@ func holdExistingRuntimeMutationForGenesisV1(dir string) (*os.File, error) {
 // existing private test directories and is never invoked by startup.
 //
 // Requires both the REAL existing Agent runtime-mutation flock AND the
-// journal-directory flock, both held until file + directory fsync. The
-// created file is immutable O_EXCL with no cleanup, retry, rename or repair.
+// journal-directory flock, both held through two file + directory fsync
+// sequences (runtime continuity anchor first, journal genesis second).
+// Both created files are immutable O_EXCL with no cleanup, retry, rename or repair.
 // Even on success no remote origin, Agent process, or journal completeness
 // is attested. Fault steps model syscall boundaries, not power-loss physics.
 func writeRecoveryEnrollmentGenesisOfflineV1(
@@ -132,6 +133,11 @@ func writeRecoveryEnrollmentGenesisOfflineV1(
 		return errRecoveryJournalUntrustedV1
 	}
 	defer runtimeLock.Close()
+	runtimeDirectory, err := openRecoveryEnrollmentAnchorRootV1(runtimeDir)
+	if err != nil {
+		return errRecoveryJournalUntrustedV1
+	}
+	defer runtimeDirectory.Close()
 	journalLock, err := openRecoveryJournalDiskV1(journalDir)
 	if err != nil {
 		return errRecoveryJournalUntrustedV1
@@ -144,6 +150,12 @@ func writeRecoveryEnrollmentGenesisOfflineV1(
 	}
 	raw, err := json.Marshal(genesis)
 	if err != nil || len(raw) == 0 || len(raw) > recoveryJournalDiskRecordLimitV1 {
+		return errRecoveryJournalUntrustedV1
+	}
+	// A runtime-root continuity anchor is fsynced FIRST under runtime.lock.
+	// If the journal genesis disappears, this immutable anchor refuses a
+	// second "first use". A crash between the two files stays fail-closed.
+	if err := writeRecoveryEnrollmentAnchorUnderRuntimeLockV1(runtimeDirectory, raw, step); err != nil {
 		return errRecoveryJournalUntrustedV1
 	}
 	fd, err := syscall.Openat(int(journalLock.Fd()), recoveryEnrollmentGenesisFilenameV1,
@@ -250,13 +262,22 @@ func inspectRecoveryEnrollmentGenesisOfflineV1(
 		return deny()
 	}
 	defer runtimeLock.Close()
+	runtimeDirectory, err := openRecoveryEnrollmentAnchorRootV1(runtimeDir)
+	if err != nil {
+		return deny()
+	}
+	defer runtimeDirectory.Close()
 	journalLock, err := openRecoveryJournalDiskV1(journalDir)
 	if err != nil {
 		return deny()
 	}
 	defer journalLock.Close()
+	anchor, err := readRecoveryEnrollmentAnchorUnderRuntimeLockV1(runtimeDirectory)
+	if err != nil || anchor != expected {
+		return deny()
+	}
 	got, err := readRecoveryEnrollmentGenesisUnderJournalLockV1(journalLock)
-	if err != nil || got != expected || ctx.Err() != nil {
+	if err != nil || got != anchor || ctx.Err() != nil {
 		return deny()
 	}
 	digest, err := recoveryEnrollmentGenesisDigestV1(got)
