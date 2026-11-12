@@ -19,6 +19,15 @@ import (
 
 // Fixture scope is a disposable PostgreSQL schema. The evidence values are
 // synthetic token-holder claims, explicitly NOT trusted Agent attestation.
+func issuerSyntheticWitness() recoveryobserve.RuntimeWitness {
+	return recoveryobserve.RuntimeWitness{
+		SchemaVersion:1,RuntimeHash:strings.Repeat("9",64),
+		Generation:recoveryobserve.RuntimeGeneration{InvocationID:strings.Repeat("b",32),PID:311,StartedMonotonic:"700"},
+		PreviousGeneration:recoveryobserve.RuntimeGeneration{InvocationID:strings.Repeat("a",32),PID:310,StartedMonotonic:"600"},
+		ListenerPort:443,
+	}
+}
+
 func issuerFixture(t *testing.T) (recoveryLedgerFixture,string,recoveryobserve.EvidenceDigestsV1) {
 	t.Helper()
 	f:=newRecoveryLedgerFixture(t)
@@ -33,12 +42,15 @@ SELECT id::text,job_id::text,agent_id::text,server_id::text
   FROM vpn_runtime_recovery_attempts WHERE reservation_id=$1::uuid
 `,f.reservationID).Scan(&attemptID,&taskID,&agentID,&serverID)
 	if err!=nil{f.done();t.Fatal(err)}
+	witnessBytes,err:=json.Marshal(issuerSyntheticWitness())
+	if err!=nil{f.done();t.Fatal(err)}
+	witnessHash:=sha256.Sum256(witnessBytes)
 	evidence:=recoveryobserve.EvidenceDigestsV1{
 		SchemaVersion:1,TaskID:taskID,AgentID:agentID,ServerID:serverID,
 		MarkerSHA256:strings.Repeat("c",64),
 		ReceiptSHA256:strings.Repeat("d",64),
 		EnvelopeSHA256:strings.Repeat("f",64),
-		WitnessSHA256:strings.Repeat("e",64),
+		WitnessSHA256:hex.EncodeToString(witnessHash[:]),
 	}
 	return f,attemptID,evidence
 }
@@ -95,22 +107,12 @@ func TestRuntimeRecoveryObservationIssuerInteroperatesWithAtomicConsumer(t *test
 	issued,err:=recoveryobserve.NewObservationIssuer(f.pool).
 		IssueFromAuthenticatedAgentClaim(f.ctx,recoveryFixtureAgentToken,attempt,evidence)
 	if err!=nil{t.Fatal(err)}
-	witness:=recoveryobserve.RuntimeWitness{
-		SchemaVersion:1,RuntimeHash:strings.Repeat("9",64),
-		Generation:recoveryobserve.RuntimeGeneration{InvocationID:strings.Repeat("b",32),PID:311,StartedMonotonic:"700"},
-		PreviousGeneration:recoveryobserve.RuntimeGeneration{InvocationID:strings.Repeat("a",32),PID:310,StartedMonotonic:"600"},
-		ListenerPort:443,
-	}
+	witness:=issuerSyntheticWitness()
 	witnessBytes,err:=json.Marshal(witness)
 	if err!=nil{t.Fatal(err)}
 	witnessDigest:=sha256.Sum256(witnessBytes)
-	// In the disposable fixture only, arrange a claim matching these exact
-	// witness bytes before issuance. A real Agent has no such trusted
-	// evidence registration path yet.
 	if evidence.WitnessSHA256!=hex.EncodeToString(witnessDigest[:]){
-		// One-use issuer was already used; do not try to overwrite the
-		// persisted digest or fabricate Manager authorization.
-		t.Skip("fixture witness is intentionally synthetic, not proven")
+		t.Fatal("fixture witness digest must be bound BEFORE nonce issuance")
 	}
 	claim:=recoveryobserve.TokenBoundEvidenceV1{
 		SchemaVersion:1,ObservationID:issued.ObservationID,
