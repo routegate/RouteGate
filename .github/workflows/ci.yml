@@ -73,6 +73,9 @@ jobs:
       - name: Verify atomic recovery attempt creation and fail-closed audit under race detector
         run: go test -race ./internal/db -run '^TestRuntimeRecoveryAttempt' -count=1 -timeout=120s -v
 
+      - name: Verify one-use recovery observation nonce, identity and audit against PostgreSQL
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryObservationNonce' -count=1 -timeout=120s -v
+
       # RG-140 v0.2.0 integration: old #547 tests are now replayed from
       # current main, not substituted for the current backend/release CI.
       - name: Test scoped VLESS removal preflight against real sing-box
