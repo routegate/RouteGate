@@ -195,6 +195,9 @@ jobs:
       - name: Verify read-only Agent journal preflight cannot grant recovery authorization
         run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryJournalOfflinePreflightV1' -count=1 -timeout=120s -v
 
+      - name: Verify offline Agent enrollment genesis double anchor and eight fsync crash boundaries
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryEnrollmentGenesisOfflineV1' -count=1 -timeout=120s -v
+
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
         run: |
