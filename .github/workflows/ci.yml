@@ -79,6 +79,9 @@ jobs:
       - name: Verify Agent/Manager runtime evidence digest v1 contract on Manager
         run: go test -race ./internal/recoveryobserve -run '^TestRuntimeRecoveryEvidenceManager' -count=1 -timeout=120s -v
 
+      - name: Verify Manager-derived mutation marker independent of Agent claims
+        run: go test -race ./internal/recoveryobserve -run '^TestManagerExpectedMutationMarkerV1' -count=1 -timeout=120s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 
