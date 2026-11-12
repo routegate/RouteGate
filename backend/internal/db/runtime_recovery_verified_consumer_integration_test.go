@@ -176,11 +176,14 @@ func TestRuntimeRecoveryVerifiedConsumerAuditFailureRollsBackConsumption(t *test
 	// Simulate a failure to append the required audit event. The state
 	// transition must roll back rather than silently accept authorization.
 	_,err:=f.pool.Exec(f.ctx,`
-CREATE FUNCTION rg140_reject_consumed_challenge_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION rg140_reject_consumed_challenge_audit() RETURNS trigger LANGUAGE plpgsql AS $
 BEGIN
  IF NEW.action='consumed' THEN RAISE EXCEPTION 'injected recovery audit disk failure'; END IF;
  RETURN NEW;
-END $$;
+END $;
+`)
+	if err!=nil{t.Fatal(err)}
+	_,err=f.pool.Exec(f.ctx,`
 CREATE TRIGGER rg140_reject_consumed_audit
  BEFORE INSERT ON vpn_runtime_recovery_challenge_events
  FOR EACH ROW EXECUTE FUNCTION rg140_reject_consumed_challenge_audit();
