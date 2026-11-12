@@ -126,6 +126,11 @@ func TestRuntimeRecoveryJournalDiskV1CorruptionAndLinksFailClosed(t *testing.T) 
 			case "gap":
 				if err := os.WriteFile(filepath.Join(dir, recoveryJournalDiskNameV1(2)), []byte("{}"), 0600); err != nil { t.Fatal(err) }
 			case "altered_chain":
+				// A validly re-encoded first entry changes the digest
+				// required by the already persisted second entry.
+				if err := appendRecoveryJournalDiskV1(dir, syntheticRecoveryJournalV1(t)[1], nil); err != nil {
+					t.Fatal(err)
+				}
 				raw, err := os.ReadFile(path)
 				if err != nil { t.Fatal(err) }
 				raw = bytes.Replace(raw, []byte(first.MarkerSHA256), []byte("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"), 1)
