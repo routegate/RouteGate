@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 type tokenProvenanceVectorV1 struct {
@@ -15,6 +16,8 @@ type tokenProvenanceVectorV1 struct {
 	TestAgentToken string `json:"testAgentToken"`
 	Claim TokenBoundEvidenceV1 `json:"claim"`
 	ExpectedMAC string `json:"expectedMAC"`
+	Reply ObservationReply `json:"reply"`
+	ExpectedFullReplyMAC string `json:"expectedFullReplyMAC"`
 }
 func readTokenProvenanceVector(t *testing.T)tokenProvenanceVectorV1{
 	t.Helper()
@@ -83,6 +86,31 @@ func TestRuntimeRecoveryTokenProvenanceV1RejectsMalformedOrAlteredClaims(t *test
 			change(&claim)
 			got,err:=TokenProofMACV1(v.TestAgentToken,claim)
 			if err!=nil||got==v.ExpectedMAC{t.Fatal("changed claim retained original HMAC",err)}
+		})
+	}
+}
+
+func TestRuntimeRecoveryFullReplyMACV1SharedManagerVectorAndTamper(t *testing.T){
+	v:=readTokenProvenanceVector(t)
+	mac,err:=FullReplyMACV1(v.TestAgentToken,v.Claim,v.Reply)
+	if err!=nil || mac!=v.ExpectedFullReplyMAC{
+		t.Fatalf("Manager full-response MAC diverged from Agent: %s %v",mac,err)
+	}
+	changes:=map[string]func(*ObservationReply){
+		"observed_at":func(r *ObservationReply){r.ObservedAt=r.ObservedAt.Add(time.Second)},
+		"nonce":func(r *ObservationReply){r.Nonce=base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x51},32))},
+		"generation":func(r *ObservationReply){r.Observation.Witness.Generation.InvocationID=strings.Repeat("c",32)},
+		"runtime_hash":func(r *ObservationReply){r.Observation.Witness.RuntimeHash=strings.Repeat("a",64)},
+		"receipt":func(r *ObservationReply){r.Observation.ReceiptHash=strings.Repeat("1",64)},
+	}
+	for name,mutate:=range changes{
+		t.Run(name,func(t *testing.T){
+			changed:=v.Reply
+			mutate(&changed)
+			out,err:=FullReplyMACV1(v.TestAgentToken,v.Claim,changed)
+			if err!=nil||out==v.ExpectedFullReplyMAC{
+				t.Fatalf("changed full reply kept original MAC: %v",err)
+			}
 		})
 	}
 }
