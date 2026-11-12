@@ -35,7 +35,7 @@ Isolated Agent tests prove the fresh hold actually blocks a second flock and the
 
 This stage does **not** add an installer toggle, migration, auth bypass, runtime mutation, `main` merge, VPS change, or release. All RG-140 stacked PRs remain Draft.
 
-## Follow-up: invalidated hold and crash-cut refusals (PR #764)
+## Follow-up: invalidated hold and crash-cut refusals
 
 The private hold's `Close` now zeros its in-memory observation, even on a
 file-close error. `ObserveRuntimeRecovery` explicitly copies the snapshot
