@@ -104,17 +104,24 @@ type RuntimeRecoveryObservation struct {
 }
 
 func ObserveRuntimeRecovery(ctx context.Context, dir string, binding RuntimeResultBinding, taskID, activePath string, adapter VPNCoreAdapter) (RuntimeRecoveryObservation, error) {
+	hold, err := beginRuntimeRecoveryReadOnlyHoldV1(ctx, dir, binding, taskID, activePath, adapter)
+	if err != nil {
+		return RuntimeRecoveryObservation{}, ErrRuntimeMutationBlocked
+	}
+	defer hold.Close()
+	// A returned observation is historical: the private flock is released
+	// on return and this result cannot authorize any future mutation.
+	return hold.observation, nil
+}
+
+// observeRuntimeRecoveryUnderLock is the original read-only, two-sided
+// file/process consistency check. Its caller MUST already hold the
+// exclusive runtime mutation flock; this function never acquires/releases
+// the lock, clears intent or alters a service.
+func observeRuntimeRecoveryUnderLock(ctx context.Context, dir string, binding RuntimeResultBinding, taskID, activePath string, adapter VPNCoreAdapter) (RuntimeRecoveryObservation, error) {
 	deny := func() (RuntimeRecoveryObservation, error) {
 		return RuntimeRecoveryObservation{}, ErrRuntimeMutationBlocked
 	}
-	if !canonicalTaskIDPattern.MatchString(taskID) || !RuntimeMutationStatePresent(dir) {
-		return deny()
-	}
-	lock, err := lockRuntimeMutation(dir)
-	if err != nil {
-		return deny()
-	}
-	defer lock.Close()
 	markerPath := filepath.Join(dir, "mutation-inflight.json")
 	receiptPath := filepath.Join(dir, runtimeResultFile)
 	marker, err := readRemovalFile(markerPath, 16384, true)
