@@ -1,6 +1,7 @@
 package recoveryobserve
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,6 +14,7 @@ import (
 type observationReplyRequest struct {
 	Claim TokenBoundEvidenceV1 `json:"claim"`
 	MAC string `json:"mac"`
+	ReplyMAC string `json:"replyMac"`
 	Reply ObservationReply `json:"reply"`
 }
 
@@ -45,6 +47,14 @@ func (h *ObservationTransport) Reply(w http.ResponseWriter,r *http.Request) {
 	var extra any
 	if err:=decoder.Decode(&extra);!errors.Is(err,io.EOF) {
 		observationHTTPError(w,http.StatusBadRequest);return
+	}
+	// The original claim HMAC binds digests; a second domain-separated HMAC
+	// covers the FULL reply, including observedAt and runtime generation.
+	// Bad MACs are rejected before any DB state is consumed.
+	expectedReplyMAC,err:=FullReplyMACV1(token,request.Claim,request.Reply)
+	if err!=nil || !canonicalHash.MatchString(request.ReplyMAC) ||
+		subtle.ConstantTimeCompare([]byte(expectedReplyMAC),[]byte(request.ReplyMAC))!=1 {
+		observationHTTPError(w,http.StatusConflict);return
 	}
 	// The DB transaction locks the nonce+Agent, checks current token hash,
 	// generation, reservation, signed digests and reply before committing
