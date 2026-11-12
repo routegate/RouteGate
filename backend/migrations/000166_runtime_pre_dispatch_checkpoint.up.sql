@@ -144,3 +144,57 @@ CREATE TRIGGER rg146_checkpoint_no_truncate
 CREATE TRIGGER rg146_checkpoint_event_no_truncate
     BEFORE TRUNCATE ON vpn_runtime_pre_dispatch_checkpoint_events
     FOR EACH STATEMENT EXECUTE FUNCTION routegate_pre_dispatch_checkpoint_immutable();
+
+-- Once a checkpoint commits, its source job identity/configuration cannot
+-- be rewritten while the status may still advance normally. This protects
+-- the DB-origin snapshot, without requiring a checkpoint for legacy jobs.
+CREATE FUNCTION routegate_pre_dispatch_checkpoint_job_identity_guard()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    kind text := CASE WHEN TG_TABLE_NAME='config_apply_jobs'
+                      THEN 'config_apply' ELSE 'vpn_core_service' END;
+BEGIN
+    IF EXISTS (SELECT 1 FROM vpn_runtime_pre_dispatch_checkpoints
+               WHERE task_kind=kind AND task_id=OLD.id) THEN
+        IF TG_OP='DELETE' OR
+           NEW.id IS DISTINCT FROM OLD.id OR
+           NEW.server_id IS DISTINCT FROM OLD.server_id OR
+           NEW.agent_id IS DISTINCT FROM OLD.agent_id OR
+           (kind='config_apply' AND (
+             NEW.config_version_id IS DISTINCT FROM OLD.config_version_id OR
+             NEW.action IS DISTINCT FROM OLD.action)) OR
+           (kind='vpn_core_service' AND (
+             NEW.kind IS DISTINCT FROM OLD.kind OR
+             NEW.operation IS DISTINCT FROM OLD.operation)) THEN
+            RAISE EXCEPTION USING ERRCODE='P0146', MESSAGE='pre_dispatch_checkpoint_job_identity_immutable';
+        END IF;
+    END IF;
+    RETURN NEW;
+END; $$;
+CREATE TRIGGER rg146_checkpoint_config_job_identity
+    BEFORE UPDATE OR DELETE ON config_apply_jobs
+    FOR EACH ROW EXECUTE FUNCTION routegate_pre_dispatch_checkpoint_job_identity_guard();
+CREATE TRIGGER rg146_checkpoint_operation_job_identity
+    BEFORE UPDATE OR DELETE ON agent_operation_jobs
+    FOR EACH ROW EXECUTE FUNCTION routegate_pre_dispatch_checkpoint_job_identity_guard();
+
+-- A Manager-owned config candidate cannot be replaced behind an immutable
+-- checkpoint. Life-cycle status / applied_at changes are still permitted.
+CREATE FUNCTION routegate_pre_dispatch_checkpoint_version_guard()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM vpn_runtime_pre_dispatch_checkpoints
+               WHERE config_version_id=OLD.id) THEN
+        IF TG_OP='DELETE' OR
+           NEW.id IS DISTINCT FROM OLD.id OR
+           NEW.server_id IS DISTINCT FROM OLD.server_id OR
+           NEW.config_hash IS DISTINCT FROM OLD.config_hash OR
+           NEW.rendered_config IS DISTINCT FROM OLD.rendered_config THEN
+            RAISE EXCEPTION USING ERRCODE='P0146', MESSAGE='pre_dispatch_checkpoint_config_immutable';
+        END IF;
+    END IF;
+    RETURN NEW;
+END; $$;
+CREATE TRIGGER rg146_checkpoint_version_identity
+    BEFORE UPDATE OR DELETE ON config_versions
+    FOR EACH ROW EXECUTE FUNCTION routegate_pre_dispatch_checkpoint_version_guard();
