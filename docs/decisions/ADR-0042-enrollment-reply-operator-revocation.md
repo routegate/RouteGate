@@ -28,6 +28,7 @@ The original, independently testable HMAC and nonce checks (ADR-0039), current A
 4. Verify a direct SQL UPDATE cannot promote a revoked challenge to `reply_matched_unattested`.
 5. Control: a still-authorized, correctly signed reply is accepted only as `reply_matched_unattested` with one atomic attempt-resolution audit. Later revocation does not rewrite historical evidence or allow replay.
 6. Inject a resolution-audit failure and confirm full rollback, leaving the attempt `issued_unattested`.
+7. Hold a concurrent, uncommitted session revocation using a PostgreSQL row lock while a signed reply tries to resolve. The reply must not finish through the locked authorization; once revocation commits, the reply refuses and its attempt remains unconsumed.
 
 ## Explicit limits
 
