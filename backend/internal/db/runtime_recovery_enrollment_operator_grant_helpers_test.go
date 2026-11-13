@@ -159,6 +159,53 @@ END; $$;
 CREATE TRIGGER rg140_test_enrollment_attempt_attributed_audit_insert
  AFTER INSERT ON rg140_test_enrollment_attempts
  FOR EACH ROW EXECUTE FUNCTION rg140_test_enrollment_attempt_attributed_audit();
+-- A human grant cannot survive a session revocation, permission removal
+-- or its own expiry while an Agent reply is pending. The BEFORE UPDATE
+-- trigger protects *all* consumer call paths, including ADR-0037's older
+-- test-only consumer and direct SQL resolution attempts.
+CREATE FUNCTION rg140_test_enrollment_attempt_resolution_grant_gate()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF OLD.state <> 'issued_unattested'
+    OR NEW.state NOT IN ('reply_matched_unattested','reply_rejected')
+    OR NEW.id <> OLD.id OR NEW.grant_id IS DISTINCT FROM OLD.grant_id
+    OR NEW.preparation_id IS DISTINCT FROM OLD.preparation_id
+    OR NEW.agent_id IS DISTINCT FROM OLD.agent_id
+    OR NEW.server_id IS DISTINCT FROM OLD.server_id
+    OR NEW.credential_generation IS DISTINCT FROM OLD.credential_generation
+ THEN
+  RAISE EXCEPTION 'rg140_test_enrollment_resolution_transition_refused';
+ END IF;
+ PERFORM 1 FROM rg140_test_enrollment_challenge_grants g
+ JOIN auth_sessions sess ON sess.id=g.actor_session_id
+ JOIN users u ON u.id=g.actor_user_id AND u.id=sess.user_id
+ JOIN user_roles ur ON ur.user_id=u.id
+ JOIN roles r ON r.id=ur.role_id
+ JOIN role_permissions rp ON rp.role_id=r.id
+ JOIN permissions perm ON perm.id=rp.permission_id
+ WHERE g.id=OLD.grant_id
+   AND g.preparation_id=OLD.preparation_id
+   AND g.agent_id=OLD.agent_id
+   AND g.server_id=OLD.server_id
+   AND g.credential_generation=OLD.credential_generation
+   AND g.state='granted_unattested'
+   AND clock_timestamp()<g.expires_at
+   AND sess.revoked_at IS NULL AND sess.expires_at>clock_timestamp()
+   AND u.user_type='human' AND u.status='active'
+   AND r.code='super_admin'
+   AND perm.code='runtime_recovery:enrollment_challenge_issue'
+   AND (SELECT count(*) FROM rg140_test_enrollment_challenge_grant_events e
+         WHERE e.grant_id=g.id AND e.action='granted_unattested')=1
+ LIMIT 1
+ FOR SHARE OF g,sess,u,ur,r,rp,perm;
+ IF NOT FOUND THEN
+  RAISE EXCEPTION 'rg140_test_enrollment_resolution_operator_grant_stale';
+ END IF;
+ RETURN NEW;
+END; $$;
+CREATE TRIGGER rg140_test_enrollment_attempt_resolution_grant_gate_update
+ BEFORE UPDATE ON rg140_test_enrollment_attempts
+ FOR EACH ROW EXECUTE FUNCTION rg140_test_enrollment_attempt_resolution_grant_gate();
 `
 
 type enrollmentOperatorGrantV1 struct {
