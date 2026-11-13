@@ -413,40 +413,38 @@ func TestRuntimeRecoveryEnrollmentOperatorGrantV1LegacyIssuerCannotBypassGrant(t
 }
 
 func TestRuntimeRecoveryEnrollmentOperatorGrantV1DatabaseGateRechecksCurrentHuman(t *testing.T){
-	for _,mode:=range []string{"revoked_session","expired_grant","wrong_grant_identity"} {
+	for _,mode:=range []string{"revoked_session","expired_grant","removed_permission","wrong_generation"} {
 		t.Run(mode,func(t *testing.T){
 			f:=newEnrollmentOperatorGrantFixtureV1(t)
 			defer f.done()
-			grant:=grantForFixtureV1(t,f)
+			var grant enrollmentOperatorGrantV1
 			var err error
+			if mode=="expired_grant"{
+				grant,err=grantEnrollmentChallengeWithTTLV1(
+					f.ctx,f.pool,f.preparationID,explicitEnrollmentChallengeActionV1,
+					f.operator,5*time.Millisecond,
+				)
+				if err!=nil{t.Fatal(err)}
+				time.Sleep(40*time.Millisecond)
+			}else{
+				grant=grantForFixtureV1(t,f)
+			}
 			switch mode {
 			case "revoked_session":
 				_,err=f.pool.Exec(f.ctx,`UPDATE auth_sessions
  SET revoked_at=clock_timestamp() WHERE id=$1::uuid`,f.operator.SessionID)
-			case "expired_grant":
-				// Fresh SQL clock, no mutation of the original grant row.
-				// Create a separate fixture for a short-lived grant.
-				// This branch exercises issuance-time gate through the
-				// grant wrapper's own DB deadline validation.
-				time.Sleep(1*time.Millisecond)
-			case "wrong_grant_identity":
-				// No mutation: a direct caller tries to use a valid grant
-				// with a different immutable Agent UUID in the attempt.
-			}
-			if err!=nil{t.Fatal(err)}
-			agentID:=f.agentID
-			if mode=="wrong_grant_identity" {
-				agentID="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-			}
-			if mode=="expired_grant" {
-				// Default grant has 60 seconds; verify stale permission
-				// independently instead of sleeping or rewriting it.
+			case "removed_permission":
 				_,err=f.pool.Exec(f.ctx,`DELETE FROM role_permissions
 WHERE role_id=(SELECT id FROM roles WHERE code='super_admin')
 AND permission_id=(SELECT id FROM permissions WHERE code=$1)`,
 					enrollmentChallengeIssuePermissionV1)
-				if err!=nil{t.Fatal(err)}
 			}
+			if err!=nil{t.Fatal(err)}
+			generation:=f.generation
+			if mode=="wrong_generation"{generation++}
+			// Direct SQL bypass simulation: the trigger MUST NOT trust a
+			// caller-supplied grant_id without checking session, expiry,
+			// permission and the immutable tuple.
 			_,err=f.pool.Exec(f.ctx,`
 INSERT INTO rg140_test_enrollment_attempts(
  preparation_id,agent_id,server_id,credential_generation,
@@ -454,7 +452,7 @@ INSERT INTO rg140_test_enrollment_attempts(
 VALUES(
  $1::uuid,$2::uuid,$3::uuid,$4,$5,$6,
  clock_timestamp(),clock_timestamp()+interval '30 seconds',$7::uuid)
-`,f.preparationID,agentID,f.serverID,f.generation,
+`,f.preparationID,f.agentID,f.serverID,generation,
 				strings.Repeat("1",64),strings.Repeat("2",64),grant.ID)
 			if err==nil{
 				t.Fatal("database accepted challenge INSERT without a current matching authorized grant")
