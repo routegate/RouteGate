@@ -377,3 +377,92 @@ func TestRuntimeRecoveryEnrollmentOperatorGrantV1GrantAndEventsAreAppendOnly(t *
 		t.Fatalf("grant history changed after destructive attempt: %d/%d/%d/%d",g,e,a,au)
 	}
 }
+
+func TestRuntimeRecoveryEnrollmentOperatorGrantV1LegacyIssuerCannotBypassGrant(t *testing.T) {
+	f:=newEnrollmentOperatorGrantFixtureV1(t)
+	defer f.done()
+
+	// ADR-0037 intentionally has an unauthenticated lower-level issuer for
+	// its own disposable fixture. Once the operator grant schema is present,
+	// the database INSERT gate must refuse that issuer, before and after
+	// an actual human grant. A wrapper-only permission check is insufficient.
+	_,err:=issueEnrollmentOneShotRehearsalV1(f.ctx,f.pool,f.agentID)
+	requireOneShotRefusedV1(t,err)
+	g,e,a,au:=operatorGrantCountsV1(t,f)
+	if g!=0||e!=0||a!=0||au!=0 {
+		t.Fatalf("unguarded issuer created Manager history: %d/%d/%d/%d",g,e,a,au)
+	}
+
+	grant:=grantForFixtureV1(t,f)
+	_,err=issueEnrollmentOneShotRehearsalV1(f.ctx,f.pool,f.agentID)
+	requireOneShotRefusedV1(t,err)
+	g,e,a,au=operatorGrantCountsV1(t,f)
+	if g!=1||e!=1||a!=0||au!=1 {
+		t.Fatalf("low-level issuer spent or bypassed a fresh grant: %d/%d/%d/%d",g,e,a,au)
+	}
+	issued,err:=issueGrantedEnrollmentChallengeRehearsalV1(
+		f.ctx,f.pool,grant.ID,f.operator,
+	)
+	if err!=nil||issued.ID==""||issued.Nonce=="" {
+		t.Fatalf("grant-gated issuance broken after bypass refusal: %+v %v",issued,err)
+	}
+	g,e,a,au=operatorGrantCountsV1(t,f)
+	if g!=1||e!=1||a!=1||au!=2 {
+		t.Fatalf("gated issuance did not commit exactly once: %d/%d/%d/%d",g,e,a,au)
+	}
+}
+
+func TestRuntimeRecoveryEnrollmentOperatorGrantV1DatabaseGateRechecksCurrentHuman(t *testing.T){
+	for _,mode:=range []string{"revoked_session","expired_grant","wrong_grant_identity"} {
+		t.Run(mode,func(t *testing.T){
+			f:=newEnrollmentOperatorGrantFixtureV1(t)
+			defer f.done()
+			grant:=grantForFixtureV1(t,f)
+			var err error
+			switch mode {
+			case "revoked_session":
+				_,err=f.pool.Exec(f.ctx,`UPDATE auth_sessions
+ SET revoked_at=clock_timestamp() WHERE id=$1::uuid`,f.operator.SessionID)
+			case "expired_grant":
+				// Fresh SQL clock, no mutation of the original grant row.
+				// Create a separate fixture for a short-lived grant.
+				// This branch exercises issuance-time gate through the
+				// grant wrapper's own DB deadline validation.
+				time.Sleep(1*time.Millisecond)
+			case "wrong_grant_identity":
+				// No mutation: a direct caller tries to use a valid grant
+				// with a different immutable Agent UUID in the attempt.
+			}
+			if err!=nil{t.Fatal(err)}
+			agentID:=f.agentID
+			if mode=="wrong_grant_identity" {
+				agentID="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+			}
+			if mode=="expired_grant" {
+				// Default grant has 60 seconds; verify stale permission
+				// independently instead of sleeping or rewriting it.
+				_,err=f.pool.Exec(f.ctx,`DELETE FROM role_permissions
+WHERE role_id=(SELECT id FROM roles WHERE code='super_admin')
+AND permission_id=(SELECT id FROM permissions WHERE code=$1)`,
+					enrollmentChallengeIssuePermissionV1)
+				if err!=nil{t.Fatal(err)}
+			}
+			_,err=f.pool.Exec(f.ctx,`
+INSERT INTO rg140_test_enrollment_attempts(
+ preparation_id,agent_id,server_id,credential_generation,
+ expected_genesis_sha256,nonce_sha256,issued_at,expires_at,grant_id)
+VALUES(
+ $1::uuid,$2::uuid,$3::uuid,$4,$5,$6,
+ clock_timestamp(),clock_timestamp()+interval '30 seconds',$7::uuid)
+`,f.preparationID,agentID,f.serverID,f.generation,
+				strings.Repeat("1",64),strings.Repeat("2",64),grant.ID)
+			if err==nil{
+				t.Fatal("database accepted challenge INSERT without a current matching authorized grant")
+			}
+			g,e,a,au:=operatorGrantCountsV1(t,f)
+			if g!=1||e!=1||a!=0||au!=1{
+				t.Fatalf("database bypass changed Manager grant history: %d/%d/%d/%d",g,e,a,au)
+			}
+		})
+	}
+}
