@@ -18,7 +18,7 @@ Issuer: within a PostgreSQL transaction, lock the Agent and server rows; obtain 
 
 Consumer rehearsal: validate the supplied exact 32-byte canonical base64url nonce and current Agent bearer token **against Manager-held token hash**, match the immutable attempt identity/generation, check expiration and outstanding work, then atomically change the one-time attempt state and append its audit. Wrong bearer or unknown nonce cannot consume the attempt; a valid challenge with the wrong genesis digest is consumed permanently as `reply_rejected`. A matching digest remains **`reply_matched_unattested`**, never `enrolled`, `ready`, `can_dispatch`, or `can_unlock`. Both racing consumers cannot succeed.
 
-Tests simulate expiry by changing timestamps **inside their disposable schema only**. Tests also inject a trigger failure on audit insertion to prove that neither issuance nor response resolution can commit without its corresponding event. Such a test fixture deliberately is not an immutable production migration.
+Tests verify actual expiry with a short TTL against the PostgreSQL clock, without rewriting the attempt history. Tests also inject a trigger failure on audit insertion to prove that neither issuance nor response resolution can commit without its corresponding event. Such a test fixture deliberately is not an immutable production migration.
 
 ## Unsolved security/protocol requirements
 
