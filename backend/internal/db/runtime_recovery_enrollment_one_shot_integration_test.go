@@ -2,8 +2,6 @@ package db
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -263,23 +261,13 @@ func TestRuntimeRecoveryEnrollmentOneShotRehearsalV1ConcurrentOnlyOneConsume(t *
 
 func blockOneShotAuditV1(t *testing.T,f enrollmentOneShotFixtureV1,target string){
 	t.Helper()
-	_,err:=f.pool.Exec(f.ctx,`
-CREATE FUNCTION rg140_test_fail_enroll_audit() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
- IF NEW.state=$1 THEN RAISE EXCEPTION 'injected enrollment audit error'; END IF;
- RETURN NEW;
-END; $$;
-`,target)
-	if err==nil{
-		t.Fatal("test invalid: CREATE FUNCTION cannot take a bound runtime placeholder")
-	}
-	// PL/pgSQL trigger body must instead have a fixed test-only constant.
+	// Only known test-case constants are interpolated, never external input.
 	stmt:=`CREATE FUNCTION rg140_test_fail_enroll_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF NEW.state='`+target+`' THEN RAISE EXCEPTION 'injected enrollment audit error'; END IF;
  RETURN NEW;
 END; $$;`
-	_,err=f.pool.Exec(f.ctx,stmt)
+	_,err:=f.pool.Exec(f.ctx,stmt)
 	if err!=nil{t.Fatal(err)}
 	_,err=f.pool.Exec(f.ctx,`
 CREATE TRIGGER rg140_test_fail_enroll_audit_trigger
@@ -336,7 +324,3 @@ VALUES($1::uuid,$2::uuid,$3::uuid,'apply','pending') RETURNING id::text`,
 	if err!=nil||job==""{t.Fatalf("test-only ledger changed existing Agent paths: %v",err)}
 }
 
-// The isolated fixture has no background cleanup, no automatic unlock and
-// no way to promote matched reply into production enrollment or dispatch.
-var _=sha256.Size
-var _=hex.EncodeToString
