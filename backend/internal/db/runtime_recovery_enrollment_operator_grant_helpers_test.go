@@ -52,6 +52,19 @@ CREATE FUNCTION rg140_test_grant_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  INSERT INTO rg140_test_enrollment_challenge_grant_events(grant_id,action)
  VALUES(NEW.id,'granted_unattested');
+ -- This INSERT is enforced by the database, not by a particular Go call.
+ -- Any failure to append operator-attributed audit vetoes the grant.
+ INSERT INTO audit_events(
+  actor_user_id,actor_type,action,resource_type,resource_id,result,metadata
+ ) VALUES(
+  NEW.actor_user_id,'user','runtime_recovery.enrollment_challenge_granted_unattested',
+  'agent',NEW.agent_id,'success',
+  jsonb_build_object('session_id',NEW.actor_session_id::text,
+    'preparation_id',NEW.preparation_id::text,
+    'grant_id',NEW.id::text,
+    'credential_generation',NEW.credential_generation,
+    'state','granted_unattested')
+ );
  RETURN NEW;
 END; $$;
 CREATE TRIGGER rg140_test_grant_audit_insert
@@ -116,6 +129,36 @@ END; $$;
 CREATE TRIGGER rg140_test_enrollment_attempt_grant_gate_insert
  BEFORE INSERT ON rg140_test_enrollment_attempts
  FOR EACH ROW EXECUTE FUNCTION rg140_test_enrollment_attempt_grant_gate();
+-- This attributed audit MUST run even for a direct, grant-authorized SQL
+-- INSERT. The ADR-0037 attempt-event trigger runs in the same transaction.
+-- A failed audit automatically rolls back the entire one-shot issuance.
+CREATE FUNCTION rg140_test_enrollment_attempt_attributed_audit()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+ actor_user uuid;
+ actor_session uuid;
+BEGIN
+ SELECT g.actor_user_id,g.actor_session_id INTO STRICT actor_user,actor_session
+ FROM rg140_test_enrollment_challenge_grants g
+ WHERE g.id=NEW.grant_id AND g.preparation_id=NEW.preparation_id
+   AND g.agent_id=NEW.agent_id AND g.server_id=NEW.server_id
+   AND g.credential_generation=NEW.credential_generation;
+ INSERT INTO audit_events(
+   actor_user_id,actor_type,action,resource_type,resource_id,result,metadata
+ ) VALUES(
+   actor_user,'user','runtime_recovery.enrollment_challenge_issued_unattested',
+   'agent',NEW.agent_id,'success',
+   jsonb_build_object('session_id',actor_session::text,
+     'grant_id',NEW.grant_id::text,
+     'attempt_id',NEW.id::text,
+     'preparation_id',NEW.preparation_id::text,
+     'state','issued_unattested')
+ );
+ RETURN NEW;
+END; $$;
+CREATE TRIGGER rg140_test_enrollment_attempt_attributed_audit_insert
+ AFTER INSERT ON rg140_test_enrollment_attempts
+ FOR EACH ROW EXECUTE FUNCTION rg140_test_enrollment_attempt_attributed_audit();
 `
 
 type enrollmentOperatorGrantV1 struct {
@@ -252,18 +295,8 @@ RETURNING id::text
 `,p.ID,p.AgentID,p.ServerID,p.AgentCredentialGeneration,
 		operator.ID,operator.SessionID,ttl.Milliseconds()).Scan(&id)
 	if err!=nil{return deny()}
-	_,err=tx.Exec(ctx,`
-INSERT INTO audit_events(
- actor_user_id,actor_type,action,resource_type,resource_id,result,metadata
-) VALUES(
- $1::uuid,'user','runtime_recovery.enrollment_challenge_granted_unattested',
- 'agent',$2::uuid,'success',
- jsonb_build_object('session_id',$3::text,
-   'preparation_id',$4::text,'grant_id',$5::text,
-   'credential_generation',$6::bigint,'state','granted_unattested')
-)
-`,operator.ID,p.AgentID,operator.SessionID,p.ID,id,p.AgentCredentialGeneration)
-	if err!=nil{return deny()}
+	// The test-only PostgreSQL AFTER INSERT trigger appends BOTH audits in
+	// the same transaction; no Go call may selectively skip attribution.
 	if err=tx.Commit(ctx);err!=nil{return deny()}
 	return enrollmentOperatorGrantV1{
 		ID:id,PreparationID:p.ID,AgentID:p.AgentID,ServerID:p.ServerID,
@@ -355,15 +388,8 @@ RETURNING id::text
 `,grant.PreparationID,grant.AgentID,grant.ServerID,grant.Generation,
 	expected,digestEnrollmentOneShotNonceV1(nonce),grant.ID).Scan(&attemptID)
 	if err!=nil{return deny()}
-	_,err=tx.Exec(ctx,`
-INSERT INTO audit_events(
- actor_user_id,actor_type,action,resource_type,resource_id,result,metadata
-) VALUES($1::uuid,'user','runtime_recovery.enrollment_challenge_issued_unattested',
- 'agent',$2::uuid,'success',
- jsonb_build_object('session_id',$3::text,'grant_id',$4::text,
-  'attempt_id',$5::text,'preparation_id',$6::text,'state','issued_unattested'))
-`,operator.ID,grant.AgentID,operator.SessionID,grant.ID,attemptID,grant.PreparationID)
-	if err!=nil{return deny()}
+	// The table's AFTER INSERT triggers persist the challenge event and
+	// attributed audit; an audit failure aborts issuance and nonce receipt.
 	if err=tx.Commit(ctx);err!=nil{return deny()}
 	return enrollmentOneShotRehearsalIssueV1{
 		ID:attemptID,Nonce:base64.RawURLEncoding.EncodeToString(nonce),
