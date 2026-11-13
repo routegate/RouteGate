@@ -100,6 +100,9 @@ jobs:
       - name: Verify Manager-derived offline enrollment genesis digest and stale identity refusal
         run: go test -race ./internal/recoveryenroll ./internal/db -run '^TestRuntimeRecoveryEnrollmentGenesisExpectationV1' -count=1 -timeout=180s -v
 
+      - name: Rehearse one-use Manager enrollment nonce, rollback and concurrency in isolated PostgreSQL
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentOneShotRehearsalV1' -count=1 -timeout=180s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 
