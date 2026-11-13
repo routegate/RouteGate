@@ -261,3 +261,40 @@ func TestRuntimeRecoveryEnrollmentSignedConsumeV1AuditFailureRollsBack(t *testin
 	}
 	assertUnconsumedSignedEnrollmentV1(t,f,issued.ID)
 }
+
+func TestRuntimeRecoveryEnrollmentSignedConsumeV1ValidMACCannotOverrideManagerIdentity(t *testing.T){
+	for name,mutate:=range map[string]func(*recoveryenroll.EnrollmentProbeReplyV1){
+		"other_attempt":func(r *recoveryenroll.EnrollmentProbeReplyV1){
+			r.AttemptID="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		},
+		"other_preparation":func(r *recoveryenroll.EnrollmentProbeReplyV1){
+			r.ManagerPreparationID="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		},
+		"other_agent":func(r *recoveryenroll.EnrollmentProbeReplyV1){
+			r.AgentID="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		},
+		"other_server":func(r *recoveryenroll.EnrollmentProbeReplyV1){
+			r.ServerID="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		},
+		"newer_generation":func(r *recoveryenroll.EnrollmentProbeReplyV1){
+			r.AgentCredentialGeneration++
+		},
+	}{
+		t.Run(name,func(t *testing.T){
+			f:=newEnrollmentOneShotFixtureV1(t);defer f.done()
+			issued,err:=issueEnrollmentOneShotRehearsalV1(f.ctx,f.pool,f.agentID)
+			if err!=nil{t.Fatal(err)}
+			reply:=signedEnrollmentRehearsalReplyV1(t,f,issued)
+			mutate(&reply)
+			// The attacker has the proper Agent token and can produce a
+			// valid MAC for a DIFFERENT tuple. Manager must still reject
+			// because the committed attempt's identity cannot be changed.
+			mac:=signedEnrollmentRehearsalMACV1(t,recoveryFixtureAgentToken,reply)
+			_,err=consumeSignedEnrollmentProbeRehearsalV1(
+				f.ctx,f.pool,recoveryFixtureAgentToken,reply,mac,
+			)
+			requireOneShotRefusedV1(t,err)
+			assertUnconsumedSignedEnrollmentV1(t,f,issued.ID)
+		})
+	}
+}
