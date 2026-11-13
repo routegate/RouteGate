@@ -6,7 +6,7 @@
 
 Manager's existing `prepared_unattested` record (ADR-0034) is authorized for **preparation**, not for creating a live challenge. ADR-0037's disposable one-shot challenge issuer was intentionally a lower-level test that had no fresh operator authorization. ADR-0039 subsequently made the response HMAC check one atomic one-use transaction, but it does not authorize the challenge **issuance**.
 
-A prepared Agent must therefore not become eligible for remote enrollment merely because an administrator approved a different earlier action, because the same account had privileges yesterday, or because a token is still valid.
+A prepared Agent must therefore not become eligible for remote enrollment merely because an administrator approved a different earlier action, because the same account had privileges yesterday, or because a token is still valid. The one-off grant also has a bounded validity period (60 seconds by default in the rehearsal; never more than 120 seconds), checked by the Manager database clock during issuance, so a long-lived administrative session cannot revive a stale approval.
 
 ## Two distinct explicit test-only operations
 
@@ -29,7 +29,7 @@ Within one PostgreSQL transaction, `grantEnrollmentChallengeRehearsalV1` recheck
 
 ## Acceptance tests
 
-`TestRuntimeRecoveryEnrollmentOperatorGrantV1*` exercises separate explicit action, committed human/session/grant provenance, one-time issue, signed reply still unattested, invalid operator/session, role or permission revocation, disabled human, Agent generation rotation, a newly pending Manager job, a held recovery reservation, competing grant and issue transactions, and injected attributed audit failure at both stages. All run with Go race detector against isolated PostgreSQL; the full CI and Workspace integration must also succeed.
+`TestRuntimeRecoveryEnrollmentOperatorGrantV1*` exercises separate explicit action, committed human/session/grant provenance, one-time issue, signed reply still unattested, invalid operator/session, role or permission revocation, disabled human, an expired grant using a short PostgreSQL-clock TTL, Agent generation rotation, a newly pending Manager job, a held recovery reservation, competing grant and issue transactions, and injected attributed audit failure at both stages. All run with Go race detector against isolated PostgreSQL; the full CI and Workspace integration must also succeed.
 
 ## Gate before anything deployable
 
