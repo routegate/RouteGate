@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { content, type CardIcon, type Locale, type SiteContent } from './content'
-import { buildInstallCommand, publishedStableTag, stableReleaseApi } from './release'
+import { buildInstallCommand, publishedStableInstall, publishedStableTag, stableReleaseApi } from './release'
 
 const githubUrl = 'https://github.com/routegate/RouteGate'
 const docsUrl = `${githubUrl}/tree/main/docs`
@@ -11,7 +11,7 @@ const licenseUrl = `${githubUrl}/blob/main/LICENSE`
 const sourceCodeUrl = `${githubUrl}/blob/main/agent/internal/diagnostics/diagnostics.go#L22-L35`
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
 
-type StableRelease = { status: 'loading' | 'legacy' | 'ready' | 'unavailable'; tag: string | null }
+type StableRelease = { status: 'loading' | 'legacy' | 'ready' | 'unavailable'; tag: string | null; installerSha256?: string }
 
 function readStoredLocale(): Locale | null {
   try {
@@ -262,8 +262,8 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
   const [installCopied, setInstallCopied] = useState(false)
   const [stableRelease, setStableRelease] = useState<StableRelease>({ status: 'loading', tag: null })
   const t = content[locale]
-  const installCommand = stableRelease.status === 'ready' && stableRelease.tag
-    ? buildInstallCommand(stableRelease.tag)
+  const installCommand = stableRelease.status === 'ready' && stableRelease.tag && stableRelease.installerSha256
+    ? buildInstallCommand(stableRelease.tag, stableRelease.installerSha256)
     : null
 
   useEffect(() => {
@@ -281,7 +281,13 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
         const payload: unknown = await response.json()
         const tag = publishedStableTag(payload)
         if (!tag) throw new Error('No valid published stable release')
-        if (!unmounted) setStableRelease({ status: tag === 'v0.1.0' ? 'legacy' : 'ready', tag })
+        if (tag === 'v0.1.0') {
+          if (!unmounted) setStableRelease({ status: 'legacy', tag })
+          return
+        }
+        const install = publishedStableInstall(payload)
+        if (!install) throw new Error('Release installer asset missing verified SHA-256 digest')
+        if (!unmounted) setStableRelease({ status: 'ready', tag, installerSha256: install.installerSha256 })
       } catch {
         // Fail closed: no silently outdated command or mutable branch fallback.
         if (!unmounted) setStableRelease({ status: 'unavailable', tag: null })
