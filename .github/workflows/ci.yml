@@ -103,6 +103,9 @@ jobs:
       - name: Rehearse one-use Manager enrollment nonce, rollback and concurrency in isolated PostgreSQL
         run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentOneShotRehearsalV1' -count=1 -timeout=180s -v
 
+      - name: Verify offline Manager HMAC enrollment reply wire contract against Agent golden vector
+        run: go test -race ./internal/recoveryenroll -run '^TestEnrollmentProbeReplyMACOfflineV1' -count=1 -timeout=120s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 
@@ -203,6 +206,9 @@ jobs:
 
       - name: Verify offline Agent enrollment genesis double anchor and eight fsync crash boundaries
         run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryEnrollmentGenesisOfflineV1' -count=1 -timeout=120s -v
+
+      - name: Verify offline Agent enrollment reply HMAC matches Manager vector and refuses tampering
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryEnrollmentProbeReplyMACOfflineV1' -count=1 -timeout=120s -v
 
 
       - name: Test scoped Agent removal with systemd and real Reality traffic
