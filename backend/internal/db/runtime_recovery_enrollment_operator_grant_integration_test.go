@@ -346,3 +346,27 @@ func TestRuntimeRecoveryEnrollmentOperatorGrantV1ExpiredApprovalCannotIssue(t *t
 		requireOperatorGrantRefusedV1(t,err)
 	}
 }
+
+func TestRuntimeRecoveryEnrollmentOperatorGrantV1GrantAndEventsAreAppendOnly(t *testing.T){
+	f:=newEnrollmentOperatorGrantFixtureV1(t)
+	defer f.done()
+	grant:=grantForFixtureV1(t,f)
+	for _,sql:=range []string{
+		`UPDATE rg140_test_enrollment_challenge_grants
+ SET state='granted_unattested' WHERE id=$1::uuid`,
+		`DELETE FROM rg140_test_enrollment_challenge_grants WHERE id=$1::uuid`,
+		`UPDATE rg140_test_enrollment_challenge_grant_events
+ SET action='granted_unattested'`,
+		`DELETE FROM rg140_test_enrollment_challenge_grant_events`,
+		`TRUNCATE rg140_test_enrollment_challenge_grants CASCADE`,
+		`TRUNCATE rg140_test_enrollment_challenge_grant_events`,
+	}{
+		if _,err:=f.pool.Exec(f.ctx,sql,grant.ID);err==nil{
+			t.Fatalf("immutable grant history accepted destructive operation: %s",sql)
+		}
+	}
+	g,e,a,au:=operatorGrantCountsV1(t,f)
+	if g!=1||e!=1||a!=0||au!=1{
+		t.Fatalf("grant history changed after destructive attempt: %d/%d/%d/%d",g,e,a,au)
+	}
+}
