@@ -99,3 +99,25 @@ func TestEnrollmentProbeReplyMACOfflineV1RejectsInvalidTokenAndShape(t *testing.
 		})
 	}
 }
+
+func TestEnrollmentProbeReplyMACOfflineV1VerifierRejectsBadMAC(t *testing.T) {
+	v:=readEnrollmentProbeVectorV1(t)
+	if !VerifyEnrollmentProbeReplyMACOfflineV1(v.TestAgentToken,v.Reply,v.ExpectedMAC){
+		t.Fatal("known-good test-only Agent MAC refused")
+	}
+	for _,bad:=range []string{
+		"", "bad", strings.Repeat("0",64), strings.ToUpper(v.ExpectedMAC), v.ExpectedMAC+"0",
+	}{
+		if VerifyEnrollmentProbeReplyMACOfflineV1(v.TestAgentToken,v.Reply,bad){
+			t.Fatalf("malformed or altered MAC accepted: %q",bad)
+		}
+	}
+	different:=v.Reply
+	different.AgentCredentialGeneration++
+	if VerifyEnrollmentProbeReplyMACOfflineV1(v.TestAgentToken,different,v.ExpectedMAC){
+		t.Fatal("replayed HMAC accepted across Agent generations")
+	}
+	if VerifyEnrollmentProbeReplyMACOfflineV1("incorrect-token",v.Reply,v.ExpectedMAC){
+		t.Fatal("invalid Agent credential accepted")
+	}
+}
