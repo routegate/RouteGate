@@ -67,6 +67,12 @@ CREATE TRIGGER rg140_test_grant_immutable_row
 CREATE TRIGGER rg140_test_grant_events_immutable_row
  BEFORE UPDATE OR DELETE ON rg140_test_enrollment_challenge_grant_events
  FOR EACH ROW EXECUTE FUNCTION rg140_test_grant_immutable();
+CREATE TRIGGER rg140_test_grant_no_truncate
+ BEFORE TRUNCATE ON rg140_test_enrollment_challenge_grants
+ FOR EACH STATEMENT EXECUTE FUNCTION rg140_test_grant_immutable();
+CREATE TRIGGER rg140_test_grant_events_no_truncate
+ BEFORE TRUNCATE ON rg140_test_enrollment_challenge_grant_events
+ FOR EACH STATEMENT EXECUTE FUNCTION rg140_test_grant_immutable();
 ALTER TABLE rg140_test_enrollment_attempts
  ADD COLUMN grant_id uuid UNIQUE
  REFERENCES rg140_test_enrollment_challenge_grants(id) ON DELETE RESTRICT;
