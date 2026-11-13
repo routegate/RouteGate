@@ -11,6 +11,7 @@ import {
   publishedStableInstall,
   publishedStableTag,
   stableReleaseApi,
+  stableReleaseSnapshotUrl,
 } from '../src/release.ts'
 
 const goodDigest = 'sha256:' + 'a'.repeat(64)
@@ -82,6 +83,7 @@ test('quick start refuses incomplete, draft or unverifiable release assets', () 
 
 test('copied install command is one shell line, exact-tag pinned and checks before sudo', () => {
   assert.equal(stableReleaseApi, 'https://api.github.com/repos/routegate/RouteGate/releases/latest')
+  assert.equal(stableReleaseSnapshotUrl, '/quickstart-release.json')
   const command = buildInstallCommand('v1.2.3', 'a'.repeat(64))
   assert.ok(command.startsWith('( f=$(mktemp) && trap '))
   assert.ok(!command.includes('\n'))
@@ -194,6 +196,39 @@ test('one copied shell line truly verifies installer, cleans temp file and rejec
   }
 })
 
+test('Pages builds a trustworthy same-origin release snapshot without leaking asset URLs', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'routegate-release-snapshot-'))
+  try {
+    const input = join(dir, 'source.json')
+    const output = join(dir, 'snapshot.json')
+    const run = source => {
+      writeFileSync(input, JSON.stringify(source))
+      return spawnSync(process.execPath, ['scripts/generate-release-snapshot.mjs', input, output], {
+        cwd: new URL('..', import.meta.url).pathname,
+        encoding: 'utf8',
+      })
+    }
+    const ok = run(releaseFixture())
+    assert.equal(ok.status, 0, ok.stderr)
+    const verified = JSON.parse(readFileSync(output, 'utf8'))
+    assert.deepEqual(publishedStableInstall(verified), { tag: 'v1.2.3', installerSha256: 'a'.repeat(64) })
+    assert.equal(verified.assets.length, requiredAssets('v1.2.3').length)
+    assert.ok(!JSON.stringify(verified).includes('browser_download_url'))
+    rmSync(output)
+    const legacy = run({ tag_name: 'v0.1.0' })
+    assert.equal(legacy.status, 0, legacy.stderr)
+    assert.equal(JSON.parse(readFileSync(output, 'utf8')).tag_name, 'v0.1.0')
+    rmSync(output)
+    const wrong = run({ ...releaseFixture(), assets: releaseFixture().assets.map(a =>
+      a.name === 'install.sh' ? { ...a, digest: undefined } : a,
+    ) })
+    assert.notEqual(wrong.status, 0, 'missing installer digest cannot generate release snapshot')
+    assert.equal(existsSync(output), false, 'failed release verification does not publish a snapshot')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.ok(!app.includes('VERSION=v0.1.0'))
@@ -208,6 +243,11 @@ test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   assert.match(app, /status: 'legacy'/)
   assert.match(app, /publishedStableTag\(payload\)/)
   assert.match(app, /publishedStableInstall\(payload\)/)
+  assert.match(app, /fetch\(stableReleaseSnapshotUrl/)
+  const pages = readFileSync(new URL('../../.github/workflows/pages.yml', import.meta.url), 'utf8')
+  assert.match(pages, /types: \[published, unpublished, deleted, edited\]/)
+  assert.match(pages, /scripts\/generate-release-snapshot\.mjs/)
+  assert.match(pages, /ref: main/)
   assert.match(app, /installerSha256: install\.installerSha256/)
   const styles = readFileSync(new URL('../src/site-refresh.css', import.meta.url), 'utf8')
   assert.match(styles, /white-space: pre-wrap/)
