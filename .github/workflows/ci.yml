@@ -121,6 +121,9 @@ jobs:
       - name: Verify manual read-only enrollment reconciliation after process loss and ambiguous commits
         run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentCrashReconciliationV1' -count=1 -timeout=180s -v
 
+      - name: Verify PostgreSQL socket termination before and after one-shot enrollment COMMIT
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentTransportLossV1' -count=1 -timeout=180s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 
