@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"regexp"
-	"time"
 
 	"github.com/ikaevus/routegate/backend/internal/auth"
 	"github.com/ikaevus/routegate/backend/internal/recoveryenroll"
@@ -307,4 +306,3 @@ INSERT INTO audit_events(
 	},nil
 }
 
-var _=time.Second
