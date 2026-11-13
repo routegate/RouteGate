@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 
 	"github.com/ikaevus/routegate/backend/internal/recoveryenroll"
@@ -126,4 +127,12 @@ UPDATE rg140_test_enrollment_attempts
 	// same transaction; a failed audit cancels the state change.
 	if err := tx.Commit(ctx); err != nil { return deny() }
 	return enrollmentOneShotRehearsalReplyV1{State:state,Unattested:true},nil
+}
+
+func decodeEnrollmentProbeNonceRehearsalV1(encoded string) ([]byte,error) {
+	raw,err:=base64.RawURLEncoding.DecodeString(encoded)
+	if err!=nil || len(raw)!=32 || base64.RawURLEncoding.EncodeToString(raw)!=encoded {
+		return nil,errEnrollmentOneShotRehearsalRefusedV1
+	}
+	return raw,nil
 }
