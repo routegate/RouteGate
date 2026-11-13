@@ -12,6 +12,7 @@ import (
 	"github.com/ikaevus/routegate/backend/internal/recoveryenroll"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"time"
 )
 
 // TEST-ONLY transaction rehearsal. This file ends in _test.go and is never
@@ -80,10 +81,16 @@ func digestEnrollmentOneShotNonceV1(raw []byte) string {
 func issueEnrollmentOneShotRehearsalV1(
 	ctx context.Context, pool *pgxpool.Pool, agentID string,
 ) (enrollmentOneShotRehearsalIssueV1, error) {
+	return issueEnrollmentOneShotRehearsalWithTTLV1(ctx,pool,agentID,30*time.Second)
+}
+
+func issueEnrollmentOneShotRehearsalWithTTLV1(
+	ctx context.Context, pool *pgxpool.Pool, agentID string, ttl time.Duration,
+) (enrollmentOneShotRehearsalIssueV1, error) {
 	deny := func() (enrollmentOneShotRehearsalIssueV1, error) {
 		return enrollmentOneShotRehearsalIssueV1{}, errEnrollmentOneShotRehearsalRefusedV1
 	}
-	if ctx == nil || ctx.Err()!=nil || pool == nil || agentID=="" {
+	if ctx == nil || ctx.Err()!=nil || pool == nil || agentID=="" || ttl < time.Millisecond || ttl > 59*time.Second {
 		return deny()
 	}
 	// Secure source and unique nonce; only its digest is stored in the DB.
@@ -145,9 +152,10 @@ INSERT INTO rg140_test_enrollment_attempts(
  expected_genesis_sha256,nonce_sha256,issued_at,expires_at
 )
 SELECT $1::uuid,$2::uuid,$3::uuid,$4,$5,$6,
-       clock_timestamp(),clock_timestamp()+interval '30 seconds'
+       stamp.issued_at,stamp.issued_at+($7::bigint*interval '1 millisecond')
+FROM (SELECT clock_timestamp() AS issued_at) stamp
 RETURNING id::text
-`,p.ID,p.AgentID,p.ServerID,p.AgentCredentialGeneration,expected,nonceDigest).Scan(&id)
+`,p.ID,p.AgentID,p.ServerID,p.AgentCredentialGeneration,expected,nonceDigest,ttl.Milliseconds()).Scan(&id)
 	if err!=nil || id=="" {return deny()}
 	if err=tx.Commit(ctx);err!=nil {return deny()}
 	return enrollmentOneShotRehearsalIssueV1{
