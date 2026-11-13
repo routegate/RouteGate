@@ -177,17 +177,17 @@ VALUES($1::uuid,$2::uuid,$3::uuid,'apply','pending')`,
 func TestRuntimeRecoveryEnrollmentOneShotRehearsalV1ExpiresWithoutReplay(t *testing.T){
 	f:=newEnrollmentOneShotFixtureV1(t)
 	defer f.done()
-	issued,err:=issueEnrollmentOneShotRehearsalV1(f.ctx,f.pool,f.agentID)
+	// Actual short TTL with the PostgreSQL clock, not a rewritten audit row.
+	issued,err:=issueEnrollmentOneShotRehearsalWithTTLV1(f.ctx,f.pool,f.agentID,5*time.Millisecond)
 	if err!=nil{t.Fatal(err)}
-	// Controlled clock simulation in disposable test schema only.
-	_,err=f.pool.Exec(f.ctx,`UPDATE rg140_test_enrollment_attempts
- SET issued_at=clock_timestamp()-interval '61 seconds',
-     expires_at=clock_timestamp()-interval '31 seconds'
- WHERE id=$1::uuid`,issued.ID)
-	if err!=nil{t.Fatal(err)}
+	time.Sleep(40*time.Millisecond)
 	_,err=consumeEnrollmentOneShotRehearsalV1(f.ctx,f.pool,issued.ID,
 		issued.Nonce,recoveryFixtureAgentToken,issued.ExpectedGenesisSHA256)
 	requireOneShotRefusedV1(t,err)
+	state,n:=observedOneShotStateV1(t,f,issued.ID)
+	if state!="issued_unattested"||n!=1{
+		t.Fatalf("expired attempt was consumed or audit changed: %s/%d",state,n)
+	}
 	_,err=issueEnrollmentOneShotRehearsalV1(f.ctx,f.pool,f.agentID)
 	requireOneShotRefusedV1(t,err)
 }
