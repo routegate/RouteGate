@@ -19,23 +19,26 @@ Do not manually install PostgreSQL, nginx, RouteGate Agent, or VPN protocol runt
 
 The public DNS name is required for the Manager. RouteGate does not support an IP-only Manager installation. An additional remote VPN Node does not need its own DNS name merely to connect its Agent to this Manager.
 
-## 1. Download the installer
+## 1. Copy the verified Quick Start command
 
-Choose the RouteGate release you intend to install. Download the installer to a file and review the exact script before running it as root.
+Open [routegate.org — Quick Start](https://routegate.org/#install) and click
+**Copy**. Paste the **single command** into the SSH terminal on your clean VPS.
 
-```bash
-VERSION=<release-tag>
-curl -fL --proto '=https' --tlsv1.2 \
-  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
-  -o routegate-install.sh
-less routegate-install.sh
-```
+The command is available only for a complete, published stable release with a
+verified SHA-256 digest for its `install.sh` artifact. It downloads the
+installer to a temporary file, checks the digest **before** invoking `sudo`,
+and removes the temporary file when it exits. The installer will then verify
+the selected release bundle and manifest. There is no manual ZIP download,
+`git clone`, Go/Node toolchain, artifact identifier, or separate pager step.
 
-## 2. Run the Clean VPS Installer
+If the site shows **Quick Start temporarily unavailable**, do not substitute
+`v0.1.0`, the `main` branch or a CI artifact for a published stable installer.
+Wait until the project has a verified published release. Advanced operators
+can inspect release scripts and attestations in
+[GitHub Releases](https://github.com/routegate/RouteGate/releases) and
+perform a separate manual installation only after validating provenance.
 
-```bash
-sudo bash routegate-install.sh --version "${VERSION}"
-```
+## 2. Follow the interactive installer
 
 The installer asks for the public RouteGate hostname and contact/administrator email values.
 

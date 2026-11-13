@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { content, type CardIcon, type Locale, type SiteContent } from './content'
+import { buildInstallCommand, publishedStableInstall, publishedStableTag, stableReleaseApi, stableReleaseSnapshotUrl } from './release'
 
 const githubUrl = 'https://github.com/routegate/RouteGate'
 const docsUrl = `${githubUrl}/tree/main/docs`
@@ -10,14 +11,7 @@ const licenseUrl = `${githubUrl}/blob/main/LICENSE`
 const sourceCodeUrl = `${githubUrl}/blob/main/agent/internal/diagnostics/diagnostics.go#L22-L35`
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
 
-const installCommand = [
-  'VERSION=v0.1.0',
-  'curl -fL --proto \'=https\' --tlsv1.2 \\',
-  '  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \\',
-  '  -o routegate-install.sh',
-  'less routegate-install.sh',
-  'sudo bash routegate-install.sh --version "${VERSION}"',
-].join('\n')
+type StableRelease = { status: 'loading' | 'legacy' | 'ready' | 'unavailable'; tag: string | null; installerSha256?: string }
 
 function readStoredLocale(): Locale | null {
   try {
@@ -266,7 +260,67 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
   }, [requestedLocale])
   const [locale, setLocale] = useState<Locale>(initialLocale)
   const [installCopied, setInstallCopied] = useState(false)
+  const [stableRelease, setStableRelease] = useState<StableRelease>({ status: 'loading', tag: null })
   const t = content[locale]
+  const installCommand = stableRelease.status === 'ready' && stableRelease.tag && stableRelease.installerSha256
+    ? buildInstallCommand(stableRelease.tag, stableRelease.installerSha256)
+    : null
+
+  useEffect(() => {
+    let unmounted = false
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 8000)
+
+    const loadPublishedStable = async () => {
+      try {
+        // A same-origin snapshot is produced at Pages build time from the
+        // latest verified published GitHub release. Visitors need not reach
+        // api.github.com merely to copy a terminal command.
+        let payload: unknown
+        try {
+          const snapshot = await fetch(stableReleaseSnapshotUrl, {
+            signal: controller.signal,
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+          })
+          if (!snapshot.ok || !snapshot.headers.get('content-type')?.includes('json')) {
+            throw new Error('No published stable release snapshot')
+          }
+          payload = await snapshot.json()
+        } catch {
+          // Local/preview builds need not contain a published snapshot.
+          // The API fallback remains fail-closed for incomplete assets.
+          const response = await fetch(stableReleaseApi, {
+            signal: controller.signal,
+            headers: { Accept: 'application/vnd.github+json' },
+          })
+          if (!response.ok) throw new Error('GitHub release lookup failed')
+          payload = await response.json()
+        }
+        const tag = publishedStableTag(payload)
+        if (!tag) throw new Error('No valid published stable release')
+        if (tag === 'v0.1.0') {
+          if (!unmounted) setStableRelease({ status: 'legacy', tag })
+          return
+        }
+        const install = publishedStableInstall(payload)
+        if (!install) throw new Error('Release installer asset missing verified SHA-256 digest')
+        if (!unmounted) setStableRelease({ status: 'ready', tag, installerSha256: install.installerSha256 })
+      } catch {
+        // Fail closed: no silently outdated command or mutable branch fallback.
+        if (!unmounted) setStableRelease({ status: 'unavailable', tag: null })
+      } finally {
+        window.clearTimeout(timeout)
+      }
+    }
+
+    void loadPublishedStable()
+    return () => {
+      unmounted = true
+      controller.abort()
+      window.clearTimeout(timeout)
+    }
+  }, [])
 
   const handleLocaleChange = (nextLocale: Locale) => {
     setLocale(nextLocale)
@@ -277,6 +331,7 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
   }
 
   const handleCopyInstall = async () => {
+    if (!installCommand) return
     try {
       await copyText(installCommand)
       setInstallCopied(true)
@@ -387,12 +442,31 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
           </div>
           <div className="install-panel">
             <div className="install-panel-heading">
-              <div><span>{t.deployment.commandLabel}</span><strong>{t.deployment.commandTitle}</strong></div>
-              <button type="button" onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
+              <div><span>{t.deployment.commandLabel}</span><strong>{
+                stableRelease.status === 'ready' && stableRelease.tag
+                  ? t.deployment.commandTitle.replace('{version}', stableRelease.tag)
+                  : stableRelease.status === 'legacy'
+                    ? t.deployment.legacyReleaseTitle
+                    : stableRelease.status === 'loading'
+                      ? t.deployment.releaseLoadingTitle
+                      : t.deployment.releaseUnavailableTitle
+              }</strong></div>
+              <button type="button" disabled={!installCommand} onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
             </div>
-            <pre><code>{installCommand}</code></pre>
+            <pre aria-live="polite"><code>{installCommand ?? (
+              stableRelease.status === 'loading'
+                ? t.deployment.releaseLoading
+                : stableRelease.status === 'legacy'
+                  ? t.deployment.legacyReleaseDisabled
+                  : t.deployment.releaseUnavailable
+            )}</code></pre>
             <div className="install-panel-footer">
-              <span>{t.deployment.commandNote}</span>
+              <span>{stableRelease.status === 'legacy'
+                ? t.deployment.legacyReleaseNote
+                : stableRelease.status === 'ready'
+                  ? t.deployment.commandNote
+                  : t.deployment.releaseUnavailableNote}</span>
+              <a href={releasesUrl} target="_blank" rel="noreferrer">{t.deployment.releaseListLabel}<span>↗</span></a>
               <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
             </div>
           </div>

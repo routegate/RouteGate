@@ -139,6 +139,8 @@
   margin: 0;
   padding: 22px;
   overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: #d4dfeb;
   font: 12px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }

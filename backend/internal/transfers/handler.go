@@ -1,11 +1,13 @@
 package transfers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/ikaevus/routegate/backend/internal/audit"
 	"github.com/ikaevus/routegate/backend/internal/auth"
@@ -30,6 +32,39 @@ func actor(r *http.Request) string {
 	}
 	return "system"
 }
+// NodeTransferBlocker is safe, read-only metadata for an unrelated account's
+// in-flight transfer reserving the selected account's node. No bearer tokens,
+// protocol credentials, error payloads or private inventory are returned.
+type NodeTransferBlocker struct {
+	AccountID      string    `json:"accountId"`
+	State          string    `json:"state"`
+	SourceServerID string    `json:"sourceServerId"`
+	TargetServerID string    `json:"targetServerId"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+func (h *Handler) blockingTransfer(ctx context.Context, accountID string) (*NodeTransferBlocker, error) {
+	var blocker NodeTransferBlocker
+	err := h.service.pool.QueryRow(ctx, `
+		SELECT t.vpn_account_id::text, t.state, t.source_server_id::text,
+		       t.target_server_id::text, t.updated_at
+		FROM vpn_accounts a
+		JOIN vpn_account_transfer_nodes reservation ON reservation.server_id = a.server_id
+		JOIN vpn_account_transfers t ON t.id = reservation.transfer_id
+		WHERE a.id = $1::uuid AND t.completed_at IS NULL
+		  AND t.vpn_account_id <> a.id
+		LIMIT 1
+	`, accountID).Scan(&blocker.AccountID, &blocker.State, &blocker.SourceServerID,
+		&blocker.TargetServerID, &blocker.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &blocker, nil
+}
+
 func (h *Handler) Latest(w http.ResponseWriter, r *http.Request) {
 	tr, err := h.service.Latest(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -42,7 +77,16 @@ func (h *Handler) Latest(w http.ResponseWriter, r *http.Request) {
 		h.failure(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"transfer": tr, "requiresTransfer": requires})
+	blocker, err := h.blockingTransfer(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.failure(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"transfer": tr,
+		"requiresTransfer": requires,
+		"blockingTransfer": blocker,
+	})
 }
 func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
 	var request struct {

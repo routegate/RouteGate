@@ -7,6 +7,10 @@ on:
     paths:
       - "website/**"
       - ".github/workflows/pages.yml"
+  # Rebuild a same-origin verified release snapshot whenever public release
+  # availability changes; browsers need not fetch GitHub API themselves.
+  release:
+    types: [published, unpublished, deleted, edited]
   workflow_dispatch:
 
 permissions:
@@ -29,6 +33,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: main
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -42,6 +48,17 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Generate same-origin verified Quick Start release snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -H "Accept: application/vnd.github+json" \
+            repos/routegate/RouteGate/releases/latest \
+            > "$RUNNER_TEMP/routegate-stable-release.json"
+          node scripts/generate-release-snapshot.mjs \
+            "$RUNNER_TEMP/routegate-stable-release.json" \
+            dist/quickstart-release.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0

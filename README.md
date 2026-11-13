@@ -209,18 +209,24 @@ Before installation:
 - make TCP ports 80 and 443 reachable;
 - connect as `root` or a user with working `sudo`.
 
-Choose the RouteGate release you intend to install, download the installer to a
-local file, review it, and only then run it with privileges. For example:
+For normal installation, open [routegate.org](https://routegate.org/#install) and
+**copy the single Quick Start command** from the current published stable release.
+The site enables the command only when GitHub confirms that all required release
+assets were uploaded and provides the SHA-256 digest of the release `install.sh`.
+That command downloads `install.sh` into a temporary file, verifies the digest
+**before** running it with `sudo`, and starts the guided installer. The installer
+separately verifies the pinned binary archive and manifest before changing the VPS.
+A domain and reachable TCP 80/443 are still required for public HTTPS.
 
-```bash
-VERSION=v0.1.0
-curl -fL --proto '=https' --tlsv1.2 \
-  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
-  -o routegate-install.sh
-less routegate-install.sh
-sudo bash routegate-install.sh --version "${VERSION}"
-rm -f routegate-install.sh
-```
+When only archived `v0.1.0` or incomplete/unverified release assets are available,
+Quick Start intentionally remains disabled: it will never silently install an
+outdated build or substitute `main` code. See [#715](https://github.com/routegate/RouteGate/issues/715).
+
+Security-conscious operators can instead review source and signed/attested release
+materials in [GitHub Releases](https://github.com/routegate/RouteGate/releases),
+inspect the downloaded installer, and perform the same SHA-256 validation
+manually **before** running any code with elevated privileges. Do not mix scripts
+from `main` with historical release bundles.
 
 Published releases built with the current release workflow also attach
 `install.sh`, `install-agent.sh`, `install-grafana.sh`,
@@ -230,7 +236,7 @@ releases.
 
 Before any APT network operation, the installer also checks the host's active package sources and fails closed unless they are inside RouteGate's approved repository boundary. Approved provider mirrors are explicit; unrelated third-party sources are not silently trusted or rewritten.
 
-The installer downloads a published RouteGate release bundle and verifies it against `SHA256SUMS`. To install v0.1.0 explicitly, use `--version v0.1.0` as documented in the [Clean VPS Installer guide](docs/deployment/clean-vps-installer.md).
+The installer downloads the selected published RouteGate release bundle and verifies it against `SHA256SUMS`. Always match the pinned installer tag to its archive. For older v0.1.0 installations and recovery limitations, see the [Clean VPS Installer guide](docs/deployment/clean-vps-installer.md).
 
 After installation, open the single-use `/setup` link printed by the installer, choose the administrator password, and continue through the guided Dashboard workflow.
 
