@@ -224,7 +224,7 @@ func TestRuntimeRecoveryEnrollmentReplyRevocationV1ConcurrentCommittedRevocation
 	// premature success is never permitted while revocation is pending.
 	select {
 	case err:=<-done:
-		if err==nil {t.Fatal("consumer committed while revocation transaction held the session lock")}
+		t.Fatalf("consumer bypassed held session revocation lock (early result): %v",err)
 	case <-time.After(80*time.Millisecond):
 	}
 	if err:=tx.Commit(f.ctx);err!=nil{t.Fatal(err)}
