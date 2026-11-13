@@ -76,6 +76,46 @@ CREATE TRIGGER rg140_test_grant_events_no_truncate
 ALTER TABLE rg140_test_enrollment_attempts
  ADD COLUMN grant_id uuid UNIQUE
  REFERENCES rg140_test_enrollment_challenge_grants(id) ON DELETE RESTRICT;
+-- The TEST-ONLY low-level issuer from ADR-0037 must cease to work once
+-- the explicit-grant schema exists. Enforce at the ledger INSERT boundary,
+-- not merely in the new wrapper, to prevent accidentally bypassing consent.
+CREATE FUNCTION rg140_test_enrollment_attempt_grant_gate()
+RETURNS trigger LANGUAGE plpgsql AS $
+BEGIN
+ IF NEW.grant_id IS NULL THEN
+  RAISE EXCEPTION 'rg140_test_enrollment_challenge_grant_required';
+ END IF;
+ PERFORM 1
+ FROM rg140_test_enrollment_challenge_grants g
+ JOIN auth_sessions sess ON sess.id=g.actor_session_id
+ JOIN users u ON u.id=g.actor_user_id AND sess.user_id=u.id
+ JOIN user_roles ur ON ur.user_id=u.id
+ JOIN roles r ON r.id=ur.role_id
+ JOIN role_permissions rp ON rp.role_id=r.id
+ JOIN permissions perm ON perm.id=rp.permission_id
+ WHERE g.id=NEW.grant_id
+   AND g.preparation_id=NEW.preparation_id
+   AND g.agent_id=NEW.agent_id
+   AND g.server_id=NEW.server_id
+   AND g.credential_generation=NEW.credential_generation
+   AND g.state='granted_unattested'
+   AND clock_timestamp()<g.expires_at
+   AND sess.revoked_at IS NULL AND sess.expires_at>clock_timestamp()
+   AND u.user_type='human' AND u.status='active'
+   AND r.code='super_admin'
+   AND perm.code='runtime_recovery:enrollment_challenge_issue'
+   AND (SELECT count(*) FROM rg140_test_enrollment_challenge_grant_events e
+         WHERE e.grant_id=g.id AND e.action='granted_unattested')=1
+ LIMIT 1
+ FOR SHARE OF g,sess,u,ur,r,rp,perm;
+ IF NOT FOUND THEN
+  RAISE EXCEPTION 'rg140_test_enrollment_challenge_grant_stale';
+ END IF;
+ RETURN NEW;
+END; $;
+CREATE TRIGGER rg140_test_enrollment_attempt_grant_gate_insert
+ BEFORE INSERT ON rg140_test_enrollment_attempts
+ FOR EACH ROW EXECUTE FUNCTION rg140_test_enrollment_attempt_grant_gate();
 `
 
 type enrollmentOperatorGrantV1 struct {
