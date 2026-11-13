@@ -80,7 +80,7 @@ ALTER TABLE rg140_test_enrollment_attempts
 -- the explicit-grant schema exists. Enforce at the ledger INSERT boundary,
 -- not merely in the new wrapper, to prevent accidentally bypassing consent.
 CREATE FUNCTION rg140_test_enrollment_attempt_grant_gate()
-RETURNS trigger LANGUAGE plpgsql AS $
+RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF NEW.grant_id IS NULL THEN
   RAISE EXCEPTION 'rg140_test_enrollment_challenge_grant_required';
@@ -112,7 +112,7 @@ BEGIN
   RAISE EXCEPTION 'rg140_test_enrollment_challenge_grant_stale';
  END IF;
  RETURN NEW;
-END; $;
+END; $$;
 CREATE TRIGGER rg140_test_enrollment_attempt_grant_gate_insert
  BEFORE INSERT ON rg140_test_enrollment_attempts
  FOR EACH ROW EXECUTE FUNCTION rg140_test_enrollment_attempt_grant_gate();
