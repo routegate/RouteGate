@@ -2,6 +2,8 @@ package db
 
 import (
 	"strings"
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -182,6 +184,58 @@ func TestRuntimeRecoveryEnrollmentReplyRevocationV1FailedResolutionAuditLeavesUn
 	_,err:=consumeSignedEnrollmentProbeRehearsalV1(
 		f.ctx,f.pool,recoveryFixtureAgentToken,reply,mac)
 	requireOneShotRefusedV1(t,err)
+	assertUnconsumedSignedEnrollmentV1(
+		t,enrollmentOneShotFixtureV1{f.recoveryReservationFixture},issued.ID)
+}
+
+func TestRuntimeRecoveryEnrollmentReplyRevocationV1ConcurrentCommittedRevocationWins(t *testing.T){
+	f:=newEnrollmentOperatorGrantFixtureV1(t)
+	defer f.done()
+	_,issued,reply,mac:=issueGrantedReplyForRevocationV1(t,f)
+	// Hold an uncommitted operator-session revocation while a different
+	// transaction tries to resolve the already-issued challenge. The
+	// database trigger's FOR SHARE must not accept stale session data
+	// after the revoker commits.
+	tx,err:=f.pool.Begin(f.ctx)
+	if err!=nil{t.Fatal(err)}
+	defer tx.Rollback(f.ctx)
+	var lockedSession string
+	if err:=tx.QueryRow(f.ctx,`SELECT id::text FROM auth_sessions
+ WHERE id=$1::uuid FOR UPDATE`,f.operator.SessionID).Scan(&lockedSession);
+		err!=nil||lockedSession!=f.operator.SessionID {
+		t.Fatalf("could not lock synthetic human session: %q %v",lockedSession,err)
+	}
+	if _,err:=tx.Exec(f.ctx,`UPDATE auth_sessions
+ SET revoked_at=clock_timestamp() WHERE id=$1::uuid`,f.operator.SessionID);
+		err!=nil{t.Fatal(err)}
+	ctx,cancel:=context.WithTimeout(f.ctx,10*time.Second)
+	defer cancel()
+	started:=make(chan struct{})
+	done:=make(chan error,1)
+	go func(){
+		close(started)
+		_,err:=consumeSignedEnrollmentProbeRehearsalV1(
+			ctx,f.pool,recoveryFixtureAgentToken,reply,mac,
+		)
+		done<-err
+	}()
+	<-started
+	// The consumer has a chance to reach its row-locking UPDATE. A
+	// premature success is never permitted while revocation is pending.
+	select {
+	case err:=<-done:
+		if err==nil {t.Fatal("consumer committed while revocation transaction held the session lock")}
+	case <-time.After(80*time.Millisecond):
+	}
+	if err:=tx.Commit(f.ctx);err!=nil{t.Fatal(err)}
+	select{
+	case err:=<-done:
+		if !errors.Is(err,errEnrollmentOneShotRehearsalRefusedV1){
+			t.Fatalf("consumer accepted after committed revocation: %v",err)
+		}
+	case <-ctx.Done():
+		t.Fatal("signed consumer never resolved after session revocation committed")
+	}
 	assertUnconsumedSignedEnrollmentV1(
 		t,enrollmentOneShotFixtureV1{f.recoveryReservationFixture},issued.ID)
 }
