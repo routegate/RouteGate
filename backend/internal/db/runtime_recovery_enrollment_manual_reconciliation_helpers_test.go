@@ -80,7 +80,7 @@ SELECT
  (SELECT count(*) FROM audit_events
     WHERE action='runtime_recovery.enrollment_challenge_granted_unattested'
       AND actor_user_id=$2::uuid AND resource_id=$3::uuid
-      AND metadata->>'grant_id'=$1
+      AND metadata->>'grant_id'=$1::text
       AND metadata->>'session_id'=$4),
  (SELECT count(*) FROM vpn_runtime_recovery_enrollment_preparation_events
     WHERE preparation_id=$5::uuid AND action='prepared_unattested')
@@ -110,7 +110,7 @@ SELECT id::text,state,COALESCE(response_sha256,''),
 		err = tx.QueryRow(ctx, `
 SELECT count(*) FROM audit_events
  WHERE action='runtime_recovery.enrollment_challenge_issued_unattested'
-   AND metadata->>'grant_id'=$1
+   AND metadata->>'grant_id'=$1::text
 `,history.GrantID).Scan(&unexpectedAudit)
 		if err != nil || unexpectedAudit != 0 { return deny() }
 		history.HistoricalState = enrollmentManualGrantOnlyStateV1
@@ -137,7 +137,7 @@ SELECT
  (SELECT count(*) FROM audit_events
     WHERE action='runtime_recovery.enrollment_challenge_issued_unattested'
       AND actor_user_id=$2::uuid AND resource_id=$3::uuid
-      AND metadata->>'attempt_id'=$1
+      AND metadata->>'attempt_id'=$1::text
       AND metadata->>'grant_id'=$4
       AND metadata->>'session_id'=$5)
 `,history.AttemptID,actorID,history.AgentID,history.GrantID,sessionID).Scan(
