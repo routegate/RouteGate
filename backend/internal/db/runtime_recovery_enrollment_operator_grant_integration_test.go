@@ -315,3 +315,34 @@ func TestRuntimeRecoveryEnrollmentOperatorGrantV1AuditFailureCannotCreateGrantOr
 	}
 }
 
+
+func TestRuntimeRecoveryEnrollmentOperatorGrantV1ExpiredApprovalCannotIssue(t *testing.T) {
+	f:=newEnrollmentOperatorGrantFixtureV1(t)
+	defer f.done()
+	grant,err:=grantEnrollmentChallengeWithTTLV1(
+		f.ctx,f.pool,f.preparationID,explicitEnrollmentChallengeActionV1,
+		f.operator,5*time.Millisecond,
+	)
+	if err!=nil{t.Fatal(err)}
+	// Only the database clock controls expiry; no rewriting of historical
+	// grant rows and no fake timestamp mutation is performed.
+	time.Sleep(40*time.Millisecond)
+	got,err:=issueGrantedEnrollmentChallengeRehearsalV1(
+		f.ctx,f.pool,grant.ID,f.operator,
+	)
+	requireOperatorGrantRefusedV1(t,err)
+	if got!=(enrollmentOneShotRehearsalIssueV1{}){
+		t.Fatal("expired human approval returned a nonce",got)
+	}
+	g,e,a,au:=operatorGrantCountsV1(t,f)
+	if g!=1||e!=1||a!=0||au!=1{
+		t.Fatalf("expired grant still issued nonce: %d/%d/%d/%d",g,e,a,au)
+	}
+	for _,ttl:=range []time.Duration{0,-time.Second,121*time.Second}{
+		_,err:=grantEnrollmentChallengeWithTTLV1(
+			f.ctx,f.pool,f.preparationID,explicitEnrollmentChallengeActionV1,
+			f.operator,ttl,
+		)
+		requireOperatorGrantRefusedV1(t,err)
+	}
+}
