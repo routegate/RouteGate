@@ -86,7 +86,8 @@ test('copied install command is one shell line, exact-tag pinned and checks befo
   assert.ok(command.startsWith('( f=$(mktemp) && trap '))
   assert.ok(!command.includes('\n'))
   assert.match(command, /releases\/download\/v1\.2\.3\/install\.sh/)
-  assert.match(command, /sha256sum -c - && sudo bash/)
+  assert.match(command, /sha256sum -c - && if \[ "\$\(id -u\)" -eq 0 \]; then bash/)
+  assert.match(command, /else sudo bash/)
   assert.match(command, /--version 'v1\.2\.3'/)
   assert.match(command, /curl -q -fLsS --proto '=https' --proto-redir '=https' --tlsv1\.2/)
   assert.ok(!command.includes('nightly.link'))
@@ -111,6 +112,7 @@ test('one copied shell line truly verifies installer, cleans temp file and rejec
     const fixture = join(dir, 'installer-source.sh')
     const marker = join(dir, 'sudo-called')
     const capture = join(dir, 'sudo-received-script')
+    const downloadPath = join(dir, 'download-path')
     const source = '#!/usr/bin/env bash\nprintf "reviewed sample\\n"\n'
     writeFileSync(fixture, source)
     const digest = createHash('sha256').update(source).digest('hex')
@@ -129,6 +131,7 @@ test('one copied shell line truly verifies installer, cleans temp file and rejec
       'done',
       '[[ "$url" == "https://github.com/routegate/RouteGate/releases/download/v1.2.3/install.sh" ]]',
       'cp "$ROUTEGATE_TEST_SOURCE" "$dest"',
+      'printf "%s" "$dest" > "$ROUTEGATE_TEST_DOWNLOAD_PATH"',
     ].join('\n') + '\n')
     const fakeSudo = join(bin, 'sudo')
     writeFileSync(fakeSudo, [
@@ -137,9 +140,15 @@ test('one copied shell line truly verifies installer, cleans temp file and rejec
       'printf "%s\\n" "$@" > "$ROUTEGATE_TEST_MARKER"',
       'cp "$2" "$ROUTEGATE_TEST_CAPTURE"',
     ].join('\n') + '\n')
+    const fakeId = join(bin, 'id')
+    writeFileSync(fakeId, [
+      '#!/usr/bin/env bash',
+      'if [[ "${1:-}" == "-u" ]]; then printf "%s\\n" "$ROUTEGATE_TEST_UID"; else /usr/bin/id "$@"; fi',
+    ].join('\n') + '\n')
     chmodSync(fakeCurl, 0o755)
     chmodSync(fakeSudo, 0o755)
-    const run = expectedHash => spawnSync('bash', ['-c', buildInstallCommand('v1.2.3', expectedHash)], {
+    chmodSync(fakeId, 0o755)
+    const run = (expectedHash, uid = '1000') => spawnSync('bash', ['-c', buildInstallCommand('v1.2.3', expectedHash)], {
       cwd: dir,
       encoding: 'utf8',
       env: {
@@ -148,6 +157,8 @@ test('one copied shell line truly verifies installer, cleans temp file and rejec
         ROUTEGATE_TEST_SOURCE: fixture,
         ROUTEGATE_TEST_MARKER: marker,
         ROUTEGATE_TEST_CAPTURE: capture,
+        ROUTEGATE_TEST_DOWNLOAD_PATH: downloadPath,
+        ROUTEGATE_TEST_UID: uid,
       },
     })
     const success = run(digest)
@@ -157,6 +168,7 @@ test('one copied shell line truly verifies installer, cleans temp file and rejec
     const usedTemp = readFileSync(marker, 'utf8').trim().split('\n')[1]
     assert.equal(existsSync(usedTemp), false, 'temporary installer must be deleted')
     assert.equal(readFileSync(capture, 'utf8'), source)
+    assert.equal(existsSync(readFileSync(downloadPath, 'utf8')), false)
 
     rmSync(marker)
     rmSync(capture)
@@ -164,6 +176,19 @@ test('one copied shell line truly verifies installer, cleans temp file and rejec
     assert.notEqual(mismatch.status, 0, 'digest mismatch must fail')
     assert.equal(existsSync(marker), false, 'no privileged command after digest mismatch')
     assert.equal(existsSync(capture), false)
+    assert.equal(existsSync(readFileSync(downloadPath, 'utf8')), false)
+
+    const rootSuccess = run(digest, '0')
+    assert.equal(rootSuccess.status, 0, rootSuccess.stderr)
+    assert.match(rootSuccess.stdout, /reviewed sample/)
+    assert.equal(existsSync(marker), false, 'root runs direct bash, without sudo')
+    assert.equal(existsSync(readFileSync(downloadPath, 'utf8')), false)
+
+    const rootMismatch = run('b'.repeat(64), '0')
+    assert.notEqual(rootMismatch.status, 0)
+    assert.ok(!rootMismatch.stdout.includes('reviewed sample'), 'corrupt installer cannot run as root')
+    assert.equal(existsSync(marker), false)
+    assert.equal(existsSync(readFileSync(downloadPath, 'utf8')), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
