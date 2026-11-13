@@ -184,4 +184,7 @@ test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   assert.match(app, /publishedStableTag\(payload\)/)
   assert.match(app, /publishedStableInstall\(payload\)/)
   assert.match(app, /installerSha256: install\.installerSha256/)
+  const styles = readFileSync(new URL('../src/site-refresh.css', import.meta.url), 'utf8')
+  assert.match(styles, /white-space: pre-wrap/)
+  assert.match(styles, /overflow-wrap: anywhere/)
 })
