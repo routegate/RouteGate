@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"strings"
 	"testing"
 	"time"
 )
@@ -361,7 +362,13 @@ func TestRuntimeRecoveryEnrollmentOperatorGrantV1GrantAndEventsAreAppendOnly(t *
 		`TRUNCATE rg140_test_enrollment_challenge_grants CASCADE`,
 		`TRUNCATE rg140_test_enrollment_challenge_grant_events`,
 	}{
-		if _,err:=f.pool.Exec(f.ctx,sql,grant.ID);err==nil{
+		var err error
+		if strings.Contains(sql,"$1") {
+			_,err=f.pool.Exec(f.ctx,sql,grant.ID)
+		}else{
+			_,err=f.pool.Exec(f.ctx,sql)
+		}
+		if err==nil{
 			t.Fatalf("immutable grant history accepted destructive operation: %s",sql)
 		}
 	}
