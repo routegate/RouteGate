@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { content, type CardIcon, type Locale, type SiteContent } from './content'
-import { buildInstallCommand, publishedStableInstall, publishedStableTag, stableReleaseApi } from './release'
+import { buildInstallCommand, publishedStableInstall, publishedStableTag, stableReleaseApi, stableReleaseSnapshotUrl } from './release'
 
 const githubUrl = 'https://github.com/routegate/RouteGate'
 const docsUrl = `${githubUrl}/tree/main/docs`
@@ -273,12 +273,30 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
 
     const loadPublishedStable = async () => {
       try {
-        const response = await fetch(stableReleaseApi, {
-          signal: controller.signal,
-          headers: { Accept: 'application/vnd.github+json' },
-        })
-        if (!response.ok) throw new Error('GitHub release lookup failed')
-        const payload: unknown = await response.json()
+        // A same-origin snapshot is produced at Pages build time from the
+        // latest verified published GitHub release. Visitors need not reach
+        // api.github.com merely to copy a terminal command.
+        let payload: unknown
+        try {
+          const snapshot = await fetch(stableReleaseSnapshotUrl, {
+            signal: controller.signal,
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+          })
+          if (!snapshot.ok || !snapshot.headers.get('content-type')?.includes('json')) {
+            throw new Error('No published stable release snapshot')
+          }
+          payload = await snapshot.json()
+        } catch {
+          // Local/preview builds need not contain a published snapshot.
+          // The API fallback remains fail-closed for incomplete assets.
+          const response = await fetch(stableReleaseApi, {
+            signal: controller.signal,
+            headers: { Accept: 'application/vnd.github+json' },
+          })
+          if (!response.ok) throw new Error('GitHub release lookup failed')
+          payload = await response.json()
+        }
         const tag = publishedStableTag(payload)
         if (!tag) throw new Error('No valid published stable release')
         if (tag === 'v0.1.0') {
