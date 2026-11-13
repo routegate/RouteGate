@@ -3,6 +3,7 @@ package recoveryenroll
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -78,4 +79,19 @@ func EnrollmentProbeReplyMACOfflineV1(token string, reply EnrollmentProbeReplyV1
 	_, _ = mac.Write([]byte{0})
 	_, _ = mac.Write(encoded)
 	return hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+// VerifyEnrollmentProbeReplyMACOfflineV1 is ONLY a pure wire verifier.
+// It does not look up the Agent's CURRENT token, preparation, nonce, deadline
+// or attempt state. The caller must validate all those Manager-owned values
+// and consume a one-use attempt inside a separately reviewed DB transaction.
+func VerifyEnrollmentProbeReplyMACOfflineV1(token string, reply EnrollmentProbeReplyV1, claimedMAC string) bool {
+	if !enrollmentProbeHashV1.MatchString(claimedMAC) {
+		return false
+	}
+	expected, err := EnrollmentProbeReplyMACOfflineV1(token, reply)
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(claimedMAC)) == 1
 }
