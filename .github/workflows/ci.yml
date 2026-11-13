@@ -115,6 +115,9 @@ jobs:
       - name: Verify database-enforced operator attribution for direct enrollment ledger inserts
         run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentDatabaseEnforcedAuditV1' -count=1 -timeout=150s -v
 
+      - name: Rehearse revoked and expired operator grants at signed enrollment reply resolution
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentReplyRevocationV1' -count=1 -timeout=180s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 
