@@ -109,6 +109,9 @@ jobs:
       - name: Rehearse signed one-use enrollment reply with PostgreSQL locks and audit
         run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentSignedConsumeV1' -count=1 -timeout=180s -v
 
+      - name: Rehearse fresh human enrollment grant, one-use challenge and atomic audits
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentOperatorGrantV1' -count=1 -timeout=240s -v
+
       - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
         run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
 
