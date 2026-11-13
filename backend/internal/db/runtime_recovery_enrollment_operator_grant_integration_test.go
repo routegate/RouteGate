@@ -3,12 +3,9 @@ package db
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/ikaevus/routegate/backend/internal/auth"
 )
 
 type enrollmentOperatorGrantFixtureV1 struct {
@@ -318,5 +315,3 @@ func TestRuntimeRecoveryEnrollmentOperatorGrantV1AuditFailureCannotCreateGrantOr
 	}
 }
 
-var _ = auth.RoleSuperAdmin
-var _ = strings.TrimSpace
