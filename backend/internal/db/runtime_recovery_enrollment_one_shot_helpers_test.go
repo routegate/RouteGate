@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"time"
 
 	"github.com/ikaevus/routegate/backend/internal/recoveryenroll"
 	"github.com/jackc/pgx/v5"
@@ -254,6 +253,3 @@ WHERE id=$1::uuid AND state='issued_unattested'
 	return enrollmentOneShotRehearsalReplyV1{State:state,Unattested:true},nil
 }
 
-// The test returns a zero receipt on any ambiguous failure; the caller must
-// inspect historical Manager ledger, never infer enrollment/authorization.
-var _ = time.Second
