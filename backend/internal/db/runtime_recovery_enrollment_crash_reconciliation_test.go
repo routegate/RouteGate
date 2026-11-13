@@ -221,3 +221,41 @@ func TestRuntimeRecoveryEnrollmentCrashReconciliationV1InvalidInputRefused(t *te
 	cancel()
 	requireManualEnrollmentHistoryRefusedV1(t,f,ctx,f.preparationID)
 }
+
+func TestRuntimeRecoveryEnrollmentCrashReconciliationV1UncommittedReplyRollsBack(t *testing.T){
+	f:=newEnrollmentOperatorGrantFixtureV1(t)
+	defer f.done()
+	_,issued,_,_:=issueGrantedReplyForRevocationV1(t,f)
+	tx,err:=f.pool.Begin(f.ctx)
+	if err!=nil{t.Fatal(err)}
+	defer tx.Rollback(f.ctx)
+	// A crash after writing tentative reply state but BEFORE COMMIT.
+	// Direct SQL models only PostgreSQL's transaction boundary; this
+	// does not exercise Agent authentication (covered separately in ADR-0039).
+	tag,err:=tx.Exec(f.ctx,`
+UPDATE rg140_test_enrollment_attempts
+ SET state='reply_matched_unattested',resolved_at=clock_timestamp(),
+     response_sha256=$2
+ WHERE id=$1::uuid AND state='issued_unattested'
+`,issued.ID,strings.Repeat("4",64))
+	if err!=nil||tag.RowsAffected()!=1{
+		t.Fatalf("could not stage uncommitted reply: %v, affected=%d",err,tag.RowsAffected())
+	}
+	var tentativeEvents int64
+	err=tx.QueryRow(f.ctx,`SELECT count(*)
+ FROM rg140_test_enrollment_attempt_events WHERE attempt_id=$1::uuid
+`,issued.ID).Scan(&tentativeEvents)
+	if err!=nil||tentativeEvents!=2{
+		t.Fatalf("uncommitted reply not audit-atomic: events=%d %v",tentativeEvents,err)
+	}
+	if err=tx.Rollback(f.ctx);err!=nil{t.Fatal(err)}
+	got:=expectManualEnrollmentHistoryV1(t,f,"issued_unattested")
+	if got.AttemptID!=issued.ID{
+		t.Fatalf("aborted reply promoted to a terminal state: %+v",got)
+	}
+	state,events:=observedOneShotStateV1(
+		t,enrollmentOneShotFixtureV1{f.recoveryReservationFixture},issued.ID)
+	if state!="issued_unattested"||events!=1{
+		t.Fatalf("failed reply transaction left a terminal audit: %s/%d",state,events)
+	}
+}
