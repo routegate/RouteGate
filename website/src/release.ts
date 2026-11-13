@@ -74,5 +74,6 @@ export function buildInstallCommand(tag: string, installerSha256: string): strin
   const url = 'https://github.com/routegate/RouteGate/releases/download/' + tag + '/install.sh'
   return "( f=$(mktemp) && trap 'rm -f \"$f\"' EXIT && curl -q -fLsS --proto '=https' --proto-redir '=https' --tlsv1.2 -o \"$f\" '" +
     url + "' && printf '%s  %s\\n' '" + installerSha256 +
-    "' \"$f\" | sha256sum -c - && sudo bash \"$f\" --version '" + tag + "' )"
+    "' \"$f\" | sha256sum -c - && if [ \"$(id -u)\" -eq 0 ]; then bash \"$f\" --version '" +
+    tag + "'; else sudo bash \"$f\" --version '" + tag + "'; fi )"
 }
