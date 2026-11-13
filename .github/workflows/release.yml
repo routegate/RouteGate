@@ -18,8 +18,78 @@ permissions:
   artifact-metadata: write
 
 jobs:
+  source-policy:
+    name: Enforce tagged source and Hybrid CI policy
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Require included native Hybrid acceptance test
+        run: |
+          # Fail CLOSED when a release tag references a commit that predates
+          # the tested Clean VPS/Hybrid pipeline. The reusable CI must contain
+          # the exact disposable native smoke job, not just source-unit tests.
+          test -s scripts/hybrid-disposable-installer-e2e.sh
+          test -s scripts/hybrid-vpn-e2e.py
+          grep -Eq '^  hybrid-native-e2e:' .github/workflows/ci.yml
+          grep -Fq 'bash scripts/hybrid-disposable-installer-e2e.sh' .github/workflows/ci.yml
+          grep -Fq 'python3 "$ROOT/scripts/hybrid-vpn-e2e.py"' scripts/hybrid-disposable-installer-e2e.sh
+          # Both supported platforms must be tested from the tagged source.
+          test -s scripts/test-release-candidate-dry-run.sh
+          grep -Eq '^  tagless-release-candidate:' .github/workflows/ci.yml
+          grep -Fq 'bash scripts/test-release-candidate-dry-run.sh' .github/workflows/ci.yml
+          test -s scripts/check-release-tag-identity.sh
+          test -s scripts/test-release-tag-identity.sh
+          grep -Fq 'bash scripts/test-release-tag-identity.sh' .github/workflows/ci.yml
+          test -s scripts/check-manual-release-source.sh
+          test -s scripts/test-manual-release-source.sh
+          grep -Fq 'bash scripts/test-manual-release-source.sh' .github/workflows/ci.yml
+
+      - name: Reject tags not in canonical main history
+        if: github.event_name == 'push'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || {
+            echo "::error::Release tags must be semantic vX.Y.Z or vX.Y.Z-rc.N."
+            exit 1
+          }
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main || {
+            echo "::error::Refusing to build a release tag outside reviewed main history."
+            exit 1
+          }
+          # The tag may have been moved or deleted after triggering CI.
+          # Compare the live origin ref, not the locally checked out tag.
+          bash scripts/check-release-tag-identity.sh "$REF_NAME" "$SOURCE_SHA"
+
+      - name: Require manual rehearsal from the current main commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          bash scripts/check-manual-release-source.sh \
+            "$EVENT_NAME" "$EVENT_REF" "$SOURCE_SHA" "$MANUAL_VERSION"
+
+  ci:
+    name: Same-commit RouteGate CI including native Hybrid E2E
+    needs: source-policy
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   bundles:
     name: Build native release bundles
+    needs: ci
     runs-on: ubuntu-24.04
 
     steps:
@@ -42,6 +112,17 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Recheck manual release origin before building
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          bash scripts/check-manual-release-source.sh \
+            "$EVENT_NAME" "$EVENT_REF" "$SOURCE_SHA" "$MANUAL_VERSION"
 
       - name: Resolve bundle version
         id: version
@@ -78,6 +159,13 @@ jobs:
             grep -Fxq './bin/routegate-manager' "$listing"
             grep -Fxq './bin/routegate-agent' "$listing"
             grep -Fxq './frontend/index.html' "$listing"
+            # Check what will actually SHIP, not the working tree or
+            # standalone frontend build. A stale theme must block drafts.
+            index_html=$(tar -xOzf "$bundle" ./frontend/index.html)
+            if [[ "$index_html" != *'data-theme="dark"'* || "$index_html" != *'color-scheme: dark'* ]]; then
+              echo "::error::Release bundle $bundle has a stale frontend (dark-only UI contract missing)."
+              exit 1
+            fi
             grep -Fq './manager/migrations/' "$listing"
             grep -Fxq './tools/release_manifest.py' "$listing"
             grep -Fxq './tools/routegate-update-bootstrap.sh' "$listing"
@@ -151,6 +239,17 @@ jobs:
               --bundle dist/installer-scripts.attestation.json
           done
 
+      - name: Recheck manual main before preserving attested artifacts
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          bash scripts/check-manual-release-source.sh \
+            "$EVENT_NAME" "$EVENT_REF" "$SOURCE_SHA" "$MANUAL_VERSION"
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -180,8 +279,20 @@ jobs:
           if [[ "$TAG_NAME" == *-rc.* ]]; then
             release_flags+=(--prerelease)
           fi
+          # Recheck the live remote ref immediately before creating a
+          # draft. Do not publish if a tag was moved during this run.
+          bash scripts/check-release-tag-identity.sh "$TAG_NAME" "$GITHUB_SHA"
+          # Tag builds create candidates only; public release requires
+          # verified Hybrid E2E and explicit RG-140 review.
+          # See docs/release/promotion-gate.md before manually publishing.
+          # Never overwrite assets already associated with a version/tag.
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release upload "$TAG_NAME" \
+            echo "::error::Release $TAG_NAME already exists. Refusing to replace assets; choose a new version/tag."
+            exit 1
+          fi
+          notes_file="docs/release/${TAG_NAME}.md"
+          if [[ -f "$notes_file" ]]; then
+            gh release create "$TAG_NAME" \
               dist/routegate-*.tar.gz \
               dist/SHA256SUMS \
               dist/INSTALLER_SHA256SUMS \
@@ -192,40 +303,26 @@ jobs:
               dist/release-manifest.attestation.json \
               dist/release-bundles.attestation.json \
               dist/installer-scripts.attestation.json \
-              --clobber
+              --verify-tag \
+              --notes-file "$notes_file" \
+              --draft \
+              "${release_flags[@]}" \
+              --title "RouteGate $TAG_NAME"
           else
-            notes_file="docs/release/${TAG_NAME}.md"
-            if [[ -f "$notes_file" ]]; then
-              gh release create "$TAG_NAME" \
-                dist/routegate-*.tar.gz \
-                dist/SHA256SUMS \
-                dist/INSTALLER_SHA256SUMS \
-                dist/install.sh \
-                dist/install-agent.sh \
-                dist/install-grafana.sh \
-                dist/release-manifest.json \
-                dist/release-manifest.attestation.json \
-                dist/release-bundles.attestation.json \
-                dist/installer-scripts.attestation.json \
-                --verify-tag \
-                --notes-file "$notes_file" \
-                "${release_flags[@]}" \
-                --title "RouteGate $TAG_NAME"
-            else
-              gh release create "$TAG_NAME" \
-                dist/routegate-*.tar.gz \
-                dist/SHA256SUMS \
-                dist/INSTALLER_SHA256SUMS \
-                dist/install.sh \
-                dist/install-agent.sh \
-                dist/install-grafana.sh \
-                dist/release-manifest.json \
-                dist/release-manifest.attestation.json \
-                dist/release-bundles.attestation.json \
-                dist/installer-scripts.attestation.json \
-                --verify-tag \
-                --generate-notes \
-                "${release_flags[@]}" \
-                --title "RouteGate $TAG_NAME"
-            fi
+            gh release create "$TAG_NAME" \
+              dist/routegate-*.tar.gz \
+              dist/SHA256SUMS \
+              dist/INSTALLER_SHA256SUMS \
+              dist/install.sh \
+              dist/install-agent.sh \
+              dist/install-grafana.sh \
+              dist/release-manifest.json \
+              dist/release-manifest.attestation.json \
+              dist/release-bundles.attestation.json \
+              dist/installer-scripts.attestation.json \
+              --verify-tag \
+              --generate-notes \
+              --draft \
+              "${release_flags[@]}" \
+              --title "RouteGate $TAG_NAME"
           fi
