@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"regexp"
+	"time"
 
 	"github.com/ikaevus/routegate/backend/internal/auth"
 	"github.com/ikaevus/routegate/backend/internal/recoveryenroll"
@@ -37,7 +38,9 @@ CREATE TABLE rg140_test_enrollment_challenge_grants(
  actor_session_id uuid NOT NULL REFERENCES auth_sessions(id) ON DELETE RESTRICT,
  state text NOT NULL DEFAULT 'granted_unattested'
    CHECK(state='granted_unattested'),
- granted_at timestamptz NOT NULL DEFAULT clock_timestamp()
+ granted_at timestamptz NOT NULL,
+ expires_at timestamptz NOT NULL,
+ CHECK(expires_at>granted_at AND expires_at<=granted_at+interval '120 seconds')
 );
 CREATE TABLE rg140_test_enrollment_challenge_grant_events(
  sequence bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -141,12 +144,22 @@ func grantEnrollmentChallengeRehearsalV1(
 	ctx context.Context, pool *pgxpool.Pool, preparationID, action string,
 	operator auth.AuthenticatedUser,
 ) (enrollmentOperatorGrantV1,error) {
+	return grantEnrollmentChallengeWithTTLV1(
+		ctx,pool,preparationID,action,operator,60*time.Second,
+	)
+}
+
+func grantEnrollmentChallengeWithTTLV1(
+	ctx context.Context, pool *pgxpool.Pool, preparationID, action string,
+	operator auth.AuthenticatedUser, ttl time.Duration,
+) (enrollmentOperatorGrantV1,error) {
 	deny:=func()(enrollmentOperatorGrantV1,error){
 		return enrollmentOperatorGrantV1{},errEnrollmentOperatorGrantRefusedV1
 	}
 	if ctx==nil || ctx.Err()!=nil || pool==nil ||
 		action!=explicitEnrollmentChallengeActionV1 ||
-		!enrollmentGrantCanonicalUUIDV1.MatchString(preparationID) {
+		!enrollmentGrantCanonicalUUIDV1.MatchString(preparationID) ||
+		ttl<time.Millisecond || ttl>120*time.Second {
 		return deny()
 	}
 	tx,err:=pool.BeginTx(ctx,pgx.TxOptions{IsoLevel:pgx.ReadCommitted})
@@ -184,11 +197,14 @@ FOR UPDATE OF a,s
 	err=tx.QueryRow(ctx,`
 INSERT INTO rg140_test_enrollment_challenge_grants(
  preparation_id,agent_id,server_id,credential_generation,
- actor_user_id,actor_session_id
-) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5::uuid,$6::uuid)
+ actor_user_id,actor_session_id,granted_at,expires_at
+)
+SELECT $1::uuid,$2::uuid,$3::uuid,$4,$5::uuid,$6::uuid,
+ stamp.granted_at,stamp.granted_at+($7::bigint*interval '1 millisecond')
+FROM (SELECT clock_timestamp() AS granted_at) stamp
 RETURNING id::text
 `,p.ID,p.AgentID,p.ServerID,p.AgentCredentialGeneration,
-		operator.ID,operator.SessionID).Scan(&id)
+		operator.ID,operator.SessionID,ttl.Milliseconds()).Scan(&id)
 	if err!=nil{return deny()}
 	_,err=tx.Exec(ctx,`
 INSERT INTO audit_events(
@@ -255,6 +271,7 @@ JOIN vpn_runtime_recovery_enrollment_preparations p
 JOIN agents a ON a.id=g.agent_id AND a.server_id=g.server_id
 JOIN servers s ON s.id=g.server_id
 WHERE g.id=$1::uuid AND g.state='granted_unattested'
+  AND clock_timestamp()<g.expires_at
 FOR UPDATE OF g,a,s
 `,grantID).Scan(
 		&grant.ID,&grant.PreparationID,&grant.AgentID,&grant.ServerID,
@@ -286,6 +303,8 @@ INSERT INTO rg140_test_enrollment_attempts(
 SELECT $1::uuid,$2::uuid,$3::uuid,$4,$5,$6,
        stamp.issued_at,stamp.issued_at+interval '30 seconds',$7::uuid
 FROM (SELECT clock_timestamp() AS issued_at) stamp
+WHERE EXISTS(SELECT 1 FROM rg140_test_enrollment_challenge_grants g
+ WHERE g.id=$7::uuid AND clock_timestamp()<g.expires_at)
 RETURNING id::text
 `,grant.PreparationID,grant.AgentID,grant.ServerID,grant.Generation,
 	expected,digestEnrollmentOneShotNonceV1(nonce),grant.ID).Scan(&attemptID)
