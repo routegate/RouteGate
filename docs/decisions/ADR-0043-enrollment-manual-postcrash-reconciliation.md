@@ -33,10 +33,11 @@ The `TestRuntimeRecoveryEnrollmentCrashReconciliationV1*` suite tests:
 1. Preparation alone cannot be reconciled as an authorized challenge. A committed grant with no attempt produces only `grant_only_unattested`, without a nonce.
 2. Insert a challenge + its DB-triggered audits inside a transaction; simulate a process crash **before COMMIT** by explicitly rolling back the transaction. Readback shows only the prior grant and one attributed grant audit.
 3. Commit a valid challenge, **discard the application-level issuance receipt**, then read from a fresh transaction. Manager sees one historical issued attempt, but cannot recover the plaintext nonce or create another attempt automatically. Reissue is rejected.
-4. Commit a valid signed Agent response, **discard its application-level receipt**, and read from a fresh transaction. Matching and rejected responses remain separately auditable and unattested; replay is refused.
-5. Inject a response audit failure. The whole resolution rolls back; readback still shows the previously issued challenge.
-6. Revoke the human session after challenge issuance. Historical read remains available for manual review, while a new signed consume is refused.
-7. Inject an extra historical attempt event in the *disposable test schema*. Inconsistent audit counts are rejected with a zero value. Invalid or cancelled contexts are rejected without mutation.
+4. Stage an otherwise authorized attempt-resolution UPDATE inside a transaction, then simulate process loss **before COMMIT** with a rollback. Neither the terminal state nor its pending audit survives. This is a storage-boundary rehearsal, not a substitute for HMAC verification.
+5. Commit a valid signed Agent response, **discard its application-level receipt**, and read from a fresh transaction. Matching and rejected responses remain separately auditable and unattested; replay is refused.
+6. Inject a response audit failure. The whole resolution rolls back; readback still shows the previously issued challenge.
+7. Revoke the human session after challenge issuance. Historical read remains available for manual review, while a new signed consume is refused.
+8. Inject an extra historical attempt event in the *disposable test schema*. Inconsistent audit counts are rejected with a zero value. Invalid or cancelled contexts are rejected without mutation.
 
 These are controlled transaction/receipt-loss simulations; **they do not kill a production process, reboot PostgreSQL, sever a real network or simulate a full VM snapshot rollback**. Those are separate pre-canary tests.
 
