@@ -41,22 +41,38 @@ export function publishedStableTag(payload: unknown): string | null {
   return required.size === 0 ? tag : null
 }
 
+// A published tag alone does not authorize executing privileged installer code.
+// GitHub's uploaded release asset digest pins the first script *before* sudo.
+// The installer itself separately verifies the matching binary bundle.
+export function publishedStableInstall(payload: unknown): { tag: string; installerSha256: string } | null {
+  const tag = publishedStableTag(payload)
+  if (!tag || tag === 'v0.1.0' || !payload || typeof payload !== 'object') return null
+  const assets = (payload as { assets?: unknown }).assets
+  if (!Array.isArray(assets)) return null
+  const installer = assets.find(asset =>
+    asset && typeof asset === 'object' && (asset as { name?: unknown }).name === 'install.sh',
+  ) as { digest?: unknown } | undefined
+  const digest = installer?.digest
+  if (typeof digest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(digest)) return null
+  return { tag, installerSha256: digest.slice('sha256:'.length) }
+}
+
 export function isSupportedQuickStartTag(tag: string): boolean {
   // Preserve historical v0.1.0 downloads, but do not automatically recommend
   // its outdated installer as the current safe first-install experience.
   return stableTagPattern.test(tag) && tag !== 'v0.1.0'
 }
 
-export function buildInstallCommand(tag: string): string {
-  if (!isSupportedQuickStartTag(tag)) {
-    throw new Error('Install command requires a verified stable release tag')
+export function buildInstallCommand(tag: string, installerSha256: string): string {
+  if (!isSupportedQuickStartTag(tag) || !/^[a-f0-9]{64}$/.test(installerSha256)) {
+    throw new Error('Install command requires a verified stable release and installer SHA-256')
   }
-  return [
-    `VERSION=${tag}`,
-    "curl -fL --proto '=https' --tlsv1.2 \\",
-    '  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \\',
-    '  -o routegate-install.sh',
-    'less routegate-install.sh',
-    'sudo bash routegate-install.sh --version "${VERSION}"',
-  ].join('\n')
+
+  // A single copy/paste shell statement: temporary file, verified installer
+  // *before* sudo, pinned release asset, automatic cleanup even on error.
+  // Never pipe remote script bytes directly into a privileged shell.
+  const url = 'https://github.com/routegate/RouteGate/releases/download/' + tag + '/install.sh'
+  return "( f=$(mktemp) && trap 'rm -f \"$f\"' EXIT && curl -fLsS --proto '=https' --tlsv1.2 -o \"$f\" '" +
+    url + "' && printf '%s  %s\\n' '" + installerSha256 +
+    "' \"$f\" | sha256sum -c - && sudo bash \"$f\" --version '" + tag + "' )"
 }
