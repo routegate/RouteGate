@@ -88,7 +88,7 @@ test('copied install command is one shell line, exact-tag pinned and checks befo
   assert.match(command, /releases\/download\/v1\.2\.3\/install\.sh/)
   assert.match(command, /sha256sum -c - && sudo bash/)
   assert.match(command, /--version 'v1\.2\.3'/)
-  assert.match(command, /curl -fLsS --proto '=https' --tlsv1\.2/)
+  assert.match(command, /curl -q -fLsS --proto '=https' --proto-redir '=https' --tlsv1\.2/)
   assert.ok(!command.includes('nightly.link'))
   assert.ok(!command.includes('raw.githubusercontent.com/routegate/RouteGate/main'))
   assert.ok(!command.includes('curl | sudo bash'))
