@@ -72,7 +72,7 @@ export function buildInstallCommand(tag: string, installerSha256: string): strin
   // *before* sudo, pinned release asset, automatic cleanup even on error.
   // Never pipe remote script bytes directly into a privileged shell.
   const url = 'https://github.com/routegate/RouteGate/releases/download/' + tag + '/install.sh'
-  return "( f=$(mktemp) && trap 'rm -f \"$f\"' EXIT && curl -fLsS --proto '=https' --tlsv1.2 -o \"$f\" '" +
+  return "( f=$(mktemp) && trap 'rm -f \"$f\"' EXIT && curl -q -fLsS --proto '=https' --proto-redir '=https' --tlsv1.2 -o \"$f\" '" +
     url + "' && printf '%s  %s\\n' '" + installerSha256 +
     "' \"$f\" | sha256sum -c - && sudo bash \"$f\" --version '" + tag + "' )"
 }
