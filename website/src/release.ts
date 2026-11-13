@@ -1,6 +1,8 @@
 // The public quick-start is derived exclusively from a published GitHub
 // stable release, never a moving main branch, prerelease, or hardcoded MVP.
 export const stableReleaseApi = 'https://api.github.com/repos/routegate/RouteGate/releases/latest'
+// Same-origin, build-verified snapshot avoids requiring GitHub API access in visitors' browsers.
+export const stableReleaseSnapshotUrl = '/quickstart-release.json'
 const stableTagPattern = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/
 
 export function publishedStableTag(payload: unknown): string | null {
