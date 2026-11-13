@@ -390,7 +390,7 @@ RETURNING id::text
 	if err!=nil{return deny()}
 	// The table's AFTER INSERT triggers persist the challenge event and
 	// attributed audit; an audit failure aborts issuance and nonce receipt.
-	if err=tx.Commit(ctx);err!=nil{return deny()
+	if err=tx.Commit(ctx);err!=nil{return deny()}
 	return enrollmentOneShotRehearsalIssueV1{
 		ID:attemptID,Nonce:base64.RawURLEncoding.EncodeToString(nonce),
 		ExpectedGenesisSHA256:expected,Unattested:true,
