@@ -209,26 +209,24 @@ Before installation:
 - make TCP ports 80 and 443 reachable;
 - connect as `root` or a user with working `sudo`.
 
-Select a **published stable tag** from
-[GitHub Releases](https://github.com/routegate/RouteGate/releases/latest) or
-use the live, version-pinned quick-start on [routegate.org](https://routegate.org/).
-The installer and bundle **must come from the same immutable tag**; do not mix
-`main/install.sh` with a historical release. The old `v0.1.0` is an archived
-MVP and does not include newer UI/features (see [#715](https://github.com/routegate/RouteGate/issues/715)).
+For normal installation, open [routegate.org](https://routegate.org/#install) and
+**copy the single Quick Start command** from the current published stable release.
+The site enables the command only when GitHub confirms that all required release
+assets were uploaded and provides the SHA-256 digest of the release `install.sh`.
+That command downloads `install.sh` into a temporary file, verifies the digest
+**before** running it with `sudo`, and starts the guided installer. The installer
+separately verifies the pinned binary archive and manifest before changing the VPS.
+A domain and reachable TCP 80/443 are still required for public HTTPS.
 
-When installing from the README, replace `REPLACE_WITH_STABLE_TAG` below with
-the exact published tag you reviewed. Download the installer locally, inspect
-it, then run it with privileges:
+When only archived `v0.1.0` or incomplete/unverified release assets are available,
+Quick Start intentionally remains disabled: it will never silently install an
+outdated build or substitute `main` code. See [#715](https://github.com/routegate/RouteGate/issues/715).
 
-```bash
-VERSION=REPLACE_WITH_STABLE_TAG
-curl -fL --proto '=https' --tlsv1.2 \
-  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
-  -o routegate-install.sh
-less routegate-install.sh
-sudo bash routegate-install.sh --version "${VERSION}"
-rm -f routegate-install.sh
-```
+Security-conscious operators can instead review source and signed/attested release
+materials in [GitHub Releases](https://github.com/routegate/RouteGate/releases),
+inspect the downloaded installer, and perform the same SHA-256 validation
+manually **before** running any code with elevated privileges. Do not mix scripts
+from `main` with historical release bundles.
 
 Published releases built with the current release workflow also attach
 `install.sh`, `install-agent.sh`, `install-grafana.sh`,
