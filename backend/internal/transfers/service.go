@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var errNodeReserved = errors.New("node reserved for account transfer")
+
 var ErrGuard = errors.New("transfer safety gate blocked the action")
 
 type Transfer struct {
@@ -191,14 +193,17 @@ func (s *Service) StartInTransaction(ctx context.Context, tx pgx.Tx, accountID, 
 	if err = lockNodes(ctx, tx, sourceID, targetID); err != nil {
 		return Transfer{}, err
 	}
-	var busy bool
-	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM vpn_account_transfer_nodes WHERE server_id IN ($1::uuid,$2::uuid))
- OR EXISTS(SELECT 1 FROM config_apply_jobs WHERE server_id IN ($1::uuid,$2::uuid) AND status IN ('pending','in_progress'))
+	var reserved, busy bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM vpn_account_transfer_nodes WHERE server_id IN ($1::uuid,$2::uuid)),
+ EXISTS(SELECT 1 FROM config_apply_jobs WHERE server_id IN ($1::uuid,$2::uuid) AND status IN ('pending','in_progress'))
  OR EXISTS(SELECT 1 FROM agent_operation_jobs WHERE server_id IN ($1::uuid,$2::uuid) AND status IN ('pending','in_progress'))
  OR EXISTS(SELECT 1 FROM agent_platform_update_jobs WHERE server_id IN ($1::uuid,$2::uuid) AND status IN ('pending','in_progress','mutation_dispatched','outcome_unknown'))
- OR EXISTS(SELECT 1 FROM update_jobs WHERE operation='apply' AND status IN ('pending','running'))`, sourceID, targetID).Scan(&busy)
+ OR EXISTS(SELECT 1 FROM update_jobs WHERE operation='apply' AND status IN ('pending','running'))`, sourceID, targetID).Scan(&reserved, &busy)
 	if err != nil {
 		return Transfer{}, err
+	}
+	if reserved {
+		return Transfer{}, fmt.Errorf("%w: %w", ErrGuard, errNodeReserved)
 	}
 	if busy {
 		return Transfer{}, guard("node_has_conflicting_operation")
