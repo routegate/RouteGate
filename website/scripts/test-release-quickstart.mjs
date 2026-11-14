@@ -241,6 +241,8 @@ test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   assert.ok(!deploymentGuide.includes('VERSION=v0.1.0'), 'legacy installer guidance must not suggest v0.1.0 for new installs')
   assert.ok(!deploymentGuide.includes('sudo bash routegate-install-v0.1.0.sh'))
   assert.ok(!deploymentGuide.includes('By default, the installer resolves the latest published RouteGate release'))
+  assert.ok(!deploymentGuide.includes('- Release: RouteGate v0.1.0 MVP'), 'current guide must not advertise archived MVP as the target release')
+  assert.ok(!deploymentGuide.includes('disposable production-like `us.routegate.org`'), 'test TLS is not proof of live external acceptance')
   const prerender = readFileSync(new URL('./prerender.mjs', import.meta.url), 'utf8')
   assert.ok(!prerender.includes('Stable v0.1.0 supports'))
   assert.ok(!prerender.includes('Стабильный v0.1.0'))
