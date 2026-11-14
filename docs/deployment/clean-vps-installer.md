@@ -158,37 +158,30 @@ may not itself support `--verify-bundle`; this flag is for newer candidate
 installers going forward. Passing this check is **not** full Hybrid E2E
 acceptance, which also requires real DNS/TLS/Agent/runtime tests.
 
-### Interactive installation
+### Recommended interactive installation — one verified command
 
-Choose the release first. Download its installer to a file, inspect the exact
-bytes that will run as root, then execute it:
+For a **new** Ubuntu VPS, the canonical end-user entrypoint is
+[routegate.org — Quick Start](https://routegate.org/#install).
+After a reviewed stable release is published, copy **the one command shown on
+the site** into your SSH terminal. Do not manually choose `latest`, substitute
+`v0.1.0`, or fetch a moving `main` installer.
 
-```bash
-VERSION=v0.1.0
-curl -fL --proto '=https' --tlsv1.2 \
-  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
-  -o routegate-install.sh
-less routegate-install.sh
-sudo bash routegate-install.sh --version "${VERSION}"
-rm -f routegate-install.sh
-```
+The copied command downloads `install.sh` from a **pinned published tag**,
+checks the installer against the uploaded release asset's SHA-256 **before root
+or sudo**, and opens the installer configuration wizard. The installer then
+verifies the matching release bundle/manifest before package or service
+changes. No `git clone`, `less`, ZIP extraction, compiler, or manual artifact
+identifier is required for ordinary users.
 
-Do not pipe a mutable branch such as `main` directly into `sudo bash`.
+If the site's Copy button is disabled, **a verified current stable installer is
+not available yet**. Do not work around that safety gate using an old stable
+release, an unreviewed prerelease or a CI artifact. For full first-time setup
+instructions, see the [first-install guide](../guides/first-install.md).
 
-For releases produced by the current release workflow, the GitHub Release also
-contains the installer scripts, `INSTALLER_SHA256SUMS`, and
-`installer-scripts.attestation.json`. These artifacts let an operator verify
-the installer separately before privileged execution.
-
-The installer asks for:
-
-- the public RouteGate FQDN;
-- the Let's Encrypt contact email;
-- whether the same email should be used for the first RouteGate administrator.
-
-Pressing Enter accepts the recommended same-email choice.
-
-By default, the installer resolves the latest published RouteGate release and verifies the selected bundle against the release `SHA256SUMS` file.
+Advanced operators may separately inspect the `install.sh`,
+`INSTALLER_SHA256SUMS`, attestations and SHA-256 digests uploaded with the
+**same** immutable GitHub Release. The `--verify-bundle` mode above remains
+available for an independent non-mutating compatibility check.
 
 ### Numbered terminal configuration menu (new reviewed releases)
 
@@ -261,37 +254,23 @@ This is a **test-only trusted CA** and synthetic DNS name, not public
 Let's Encrypt or proof of any real client/ISP reachability. A public
 release still requires the external VPS acceptance from #715.
 
-### Pin v0.1.0 explicitly
+### Historical v0.1.0 — existing installations only
 
-```bash
-curl -fL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/routegate/RouteGate/v0.1.0/install.sh \
-  -o routegate-install-v0.1.0.sh
-less routegate-install-v0.1.0.sh
-sudo bash routegate-install-v0.1.0.sh \
-  --domain vpn.example.com \
-  --email owner@example.com \
-  --version v0.1.0
-rm -f routegate-install-v0.1.0.sh
-```
+The `v0.1.0` release remains archived for operators maintaining an existing
+MVP deployment. It is **not** the supported first-install path for the newer
+Hybrid/Grafana and multi-protocol experience, and its installer does not
+implement the current wizard, bundle compatibility gate, or one-paste
+SHA-256 verification. See the [v0.1.0 release notes](../release/v0.1.0.md)
+for historical scope. Do not mix the old bundle with a current installer.
 
-### Unattended confirmation
+### Unattended automation (advanced)
 
-Download and verify the installer first; `--yes` only skips RouteGate's final
-interactive confirmation and does not weaken the bootstrap checks:
-
-```bash
-curl -fL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/routegate/RouteGate/v0.1.0/install.sh \
-  -o routegate-install-v0.1.0.sh
-less routegate-install-v0.1.0.sh
-sudo bash routegate-install-v0.1.0.sh \
-  --domain vpn.example.com \
-  --email owner@example.com \
-  --version v0.1.0 \
-  --yes
-rm -f routegate-install-v0.1.0.sh
-```
+For a **reviewed, pinned, published** release, a previously downloaded and
+independently verified matching installer may be invoked with `--yes` and
+explicit domain/email parameters. This skips the interactive menu and
+confirmation but does **not** bypass release checks or DNS/TLS requirements.
+For the ordinary first installation, use the verified website command and
+interactive wizard instead.
 
 ## Installer options
 
@@ -300,7 +279,7 @@ rm -f routegate-install-v0.1.0.sh
 --email EMAIL          Let's Encrypt contact; prompted when omitted.
 --admin-email EMAIL    Optional first administrator email.
 --server-name NAME     Optional local All-in-One server display name.
---version VERSION      Release tag; defaults to latest.
+--version VERSION      Exact published release tag (pin explicitly; do not use latest for new installs).
 --bundle-file PATH     Local release bundle for controlled E2E/offline staging.
 --checksum-file PATH   Matching SHA256SUMS file for --bundle-file.
 --bundle-url URL       Explicit HTTPS bundle URL.
