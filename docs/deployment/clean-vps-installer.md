@@ -2,13 +2,13 @@
 
 ## Status
 
-- Release: RouteGate v0.1.0 MVP
+- First-install release: available only after a reviewed current stable version passes external acceptance; v0.1.0 is historical
 - Supported live installation target: Ubuntu 24.04 LTS on amd64
 - Deployment model: native systemd services on one VPS
-- Validation environment: disposable production-like `us.routegate.org`
+- CI validation environment: disposable Ubuntu 24.04 with test TLS; independent public Let's Encrypt/VPS acceptance remains pending
 - VPN Core: sing-box, installed after first login through RouteGate
 
-The Clean VPS Installer is the canonical public installation boundary for the RouteGate MVP. The operator supplies a supported Ubuntu host, DNS, and working SSH/sudo access. RouteGate owns the management-platform installation from that point forward.
+The Clean VPS Installer is the intended public installation boundary for a reviewed RouteGate release. The operator supplies a supported Ubuntu host, DNS, and working SSH/sudo access. RouteGate owns the management-platform installation from that point forward.
 
 ### VPN runtime ownership
 
