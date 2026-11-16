@@ -10,18 +10,13 @@ import {
   isSupportedQuickStartTag,
   publishedStableInstall,
   publishedStableTag,
+  requiredPublishedAssets,
   stableReleaseApi,
   stableReleaseSnapshotUrl,
 } from '../src/release.ts'
 
 const goodDigest = 'sha256:' + 'a'.repeat(64)
-const requiredAssets = tag => [
-  'install.sh',
-  'SHA256SUMS',
-  'INSTALLER_SHA256SUMS',
-  'release-manifest.json',
-  'routegate-' + tag + '-linux-amd64.tar.gz',
-]
+const requiredAssets = requiredPublishedAssets
 
 const releaseFixture = (tag = 'v1.2.3') => ({
   tag_name: tag,
@@ -48,6 +43,10 @@ test('published stable tag is validated and not mutable, injected or prerelease'
 
 test('quick start refuses incomplete, draft or unverifiable release assets', () => {
   const valid = releaseFixture()
+  assert.equal(requiredAssets('v1.2.3').length, 11, 'canonical release bundle contract must cover Grafana, Agent and attestations')
+  for (const critical of ['install-agent.sh', 'install-grafana.sh', 'release-manifest.attestation.json', 'release-bundles.attestation.json', 'installer-scripts.attestation.json', 'routegate-v1.2.3-linux-arm64.tar.gz']) {
+    assert.ok(requiredAssets('v1.2.3').includes(critical), 'missing required release asset ' + critical)
+  }
   assert.equal(publishedStableTag(valid), 'v1.2.3')
   assert.deepEqual(publishedStableInstall(valid), {
     tag: 'v1.2.3',
