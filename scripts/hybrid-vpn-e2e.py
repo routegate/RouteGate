@@ -18,7 +18,7 @@ import time
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 # Reuse the already-proven remote-node data-plane helpers. Its filename
 # contains dashes (remote-node-vpn-e2e.py), so a regular import cannot work.
@@ -95,6 +95,15 @@ def wait_for_agent(api: common.API, base: str) -> None:
     raise RuntimeError("Hybrid Agent did not report a recent heartbeat")
 
 
+class RejectSubscriptionRedirect(HTTPRedirectHandler):
+    """Never follow redirects when testing a URL containing a bearer secret."""
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        # The original bearer URL must not be sent to a new destination,
+        # even when the server accidentally returns a same-origin redirect.
+        return None
+
+
 def public_subscription(url: str, client: str) -> tuple[int, dict, bytes]:
     """Read the real canonical /sub bearer through nginx HTTPS, not internal API.
 
@@ -104,10 +113,11 @@ def public_subscription(url: str, client: str) -> tuple[int, dict, bytes]:
     parsed = urlsplit(url)
     require(parsed.scheme == "https" and parsed.hostname == DOMAIN
             and parsed.port is None and parsed.path.startswith("/sub/")
-            and not parsed.query and not parsed.fragment and not parsed.username,
+            and not parsed.query and not parsed.fragment and parsed.netloc == DOMAIN,
             "Subscription URL is not on the canonical HTTPS Manager origin")
     request = Request(url, headers={"User-Agent": client})
-    opener = build_opener(ProxyHandler({}))
+    # No implicit redirect following: 3xx remains an unexpected HTTP status.
+    opener = build_opener(ProxyHandler({}), RejectSubscriptionRedirect())
     try:
         with opener.open(request, timeout=15) as response:
             code = response.status
