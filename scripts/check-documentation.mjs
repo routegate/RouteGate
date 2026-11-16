@@ -87,7 +87,7 @@ for (const file of docs) scan(file, readFileSync(resolve(root, file), 'utf8'))
 
 // Only actively recommended new-host docs are subject to the current install
 // contract. Historical release notes and acceptance reports must remain intact.
-for (const file of ['README.md', 'docs/guides/first-install.md', 'docs/deployment/clean-vps-installer.md']) {
+for (const file of ['README.md', 'docs/guides/first-install.md', 'docs/deployment/clean-vps-installer.md', 'docs/observability/grafana.md', 'docs/deployment/mvp-deployment-baseline.md']) {
   const body = readFileSync(resolve(root, file), 'utf8')
   if (!body.includes('https://routegate.org/#install')) flag(file, 1, 'missing-current-Quick-Start', 'https://routegate.org/#install')
   for (const pattern of [
