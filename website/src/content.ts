@@ -20,7 +20,7 @@ export type SiteContent = {
   source: { eyebrow: string; title: string; text: string; points: string[]; repository: string }
   deployment: {
     eyebrow: string; title: string; text: string; cards: Card[]
-    commandLabel: string; commandTitle: string; commandNote: string; commandButton: string
+    commandLabel: string; commandTitle: string; commandNote: string; commandButton: string; commandStatusLink: string
   }
   roadmap: { eyebrow: string; title: string; intro: string; columns: RoadmapColumn[] }
   faq: {
@@ -90,6 +90,7 @@ export const content: Record<Locale, SiteContent> = {
       commandTitle: 'Установщик v0.2.0 готовится к выпуску',
       commandNote: 'Пока нет опубликованного и проверенного стабильного релиза с новым установщиком, команда установки недоступна. Не используйте v0.1.0 для проверки новых возможностей RouteGate. После завершения приёмки здесь появится одна команда с проверкой SHA-256.',
       commandButton: 'Недоступно',
+      commandStatusLink: 'Статус подготовки релиза',
     },
     roadmap: {
       eyebrow: 'ДОРОЖНАЯ КАРТА',
@@ -195,6 +196,7 @@ export const content: Record<Locale, SiteContent> = {
       commandTitle: 'RouteGate v0.2.0 installer is being prepared',
       commandNote: 'The install command is unavailable until a new stable release with the verified installer has been published. Do not use v0.1.0 to test current RouteGate features. Once acceptance is complete, one SHA-256-verified command will appear here.',
       commandButton: 'Unavailable',
+      commandStatusLink: 'Release readiness status',
     },
     roadmap: {
       eyebrow: 'ROADMAP',
