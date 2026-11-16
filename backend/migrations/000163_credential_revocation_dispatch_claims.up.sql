@@ -17,23 +17,17 @@ CREATE TABLE vpn_credential_revocation_dispatch_claims (
  claimed_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 
--- Cancellation locks server FOR UPDATE, then the prepared operation.
--- A claim INSERT also checks a servers FK, implicitly taking KEY SHARE.
--- Take server KEY SHARE before the operation here (including direct SQL
--- insertion paths); otherwise the FK could invert the lock order and
--- deadlock with cancellation. Future dispatch still needs separate proof.
-CREATE FUNCTION routegate_revocation_dispatch_claim_guard() RETURNS trigger LANGUAGE plpgsql AS $
+-- Lock only the prepared operation, not the parent server row: cancellation
+-- locks server -> operation. The opposite lock order would deadlock.
+-- A prepared operation already fences conflicting Apply/transfer mutations
+-- in schema 161. Future dispatch STILL requires fresh, authenticated checks.
+CREATE FUNCTION routegate_revocation_dispatch_claim_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
  original vpn_credential_revocations%ROWTYPE;
  confirmed vpn_credential_revocation_confirmations%ROWTYPE;
- locked_server_id uuid;
 BEGIN
  IF TG_OP <> 'INSERT' THEN
   RAISE EXCEPTION USING ERRCODE='P0141',MESSAGE='revocation_dispatch_claim_immutable';
- END IF;
- SELECT id INTO locked_server_id FROM servers WHERE id=NEW.server_id FOR KEY SHARE;
- IF NOT FOUND THEN
-  RAISE EXCEPTION USING ERRCODE='P0141',MESSAGE='revocation_dispatch_claim_stale_node';
  END IF;
  SELECT * INTO original FROM vpn_credential_revocations WHERE id=NEW.operation_id FOR UPDATE;
  IF NOT FOUND OR original.state <> 'prepared' THEN
