@@ -21,6 +21,7 @@ Record evidence, including exact artifact version and source commit, in the rele
 - [ ] RG-140 open work is reviewed separately: [#509](https://github.com/routegate/RouteGate/issues/509) subscription continuity, [#538](https://github.com/routegate/RouteGate/issues/538) readiness/FI 503 recovery, [#545](https://github.com/routegate/RouteGate/issues/545) verified credential revocation, plus transfer/apply safety regressions. **Do not imply verified revocation of cached VPN credentials by merely invalidating a subscription URL.** Block release on unresolved security-critical scenarios; document any other known limitations explicitly.
 - [ ] Update and recovery paths are exercised against a disposable installation: backup/restore, failed update rollback, safe repeat install and troubleshooting instructions. No secret/token should appear in public CI logs or issue attachments.
 - [ ] Public website, README and installer docs point to the **same verified tag** and accurately explain supported protocols. Update them only with the reviewed release promotion.
+- [ ] Public Quick Start remains **disabled** unless the GitHub Release has the exact complete bundle: `install.sh`, `install-agent.sh`, `install-grafana.sh`, both installer/bundle checksum sets, `release-manifest.json`, genuine linux/amd64 and linux/arm64 archives, and the three attestation bundles. The site's uploaded-asset checks are a safety prerequisite, **not** proof that provenance checks or real-VPS acceptance passed.
 
 ## Publishing and immutability
 
@@ -31,7 +32,7 @@ Record evidence, including exact artifact version and source commit, in the rele
 5. Test the **exact published prerelease assets** using one verified, pinned, copy/paste installer invocation on the disposable RU VPS. Run genuine public DNS/Let's Encrypt, setup/login, Agent, protocol/client and reboot smoke. Redact and record the evidence. This does not count as testing the future stable archive byte-for-byte.
 6. If the prerelease passes and the remaining security gates are cleared, prepare a **separate stable tag** from reviewed canonical `main`, verify its exact SHA, rebuilt bundles, release manifest/attestations and installer checksum again, and obtain explicit operator approval before publishing stable. Never promote an untested candidate by merely dropping a `-rc` suffix without verification.
 7. After stable publication, check that the Pages snapshot selects that verified stable release, then **actually open the public site and click Copy**, paste into a clean VPS SSH terminal, and confirm the same pinned tag reaches the installer wizard. If it fails, leave the public Quick Start disabled and address the regression. Publishing is intentionally a separate operator action, not part of CI.
-5. Never replace release assets or re-point an existing published tag. If anything changes, cut a **new** version and regenerate artifacts/attestations. The workflow refuses to upload into an existing draft or release.
+8. Never replace release assets or re-point an existing published tag. If anything changes, cut a **new** version and regenerate artifacts/attestations. The workflow refuses to upload into an existing draft or release.
 
 ## External acceptance sequencing and the one-command contract
 
