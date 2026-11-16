@@ -92,45 +92,45 @@ func validateMigrationOrdinals(files []string) error {
 	// grandfathered. New collisions at old ordinals are never safe merely
 	// because the number precedes the forward-only boundary.
 	legacyAliases := map[uint64]map[string]struct{}{
-        3: {
-            "000003_auth_foundation.up.sql": {},
-            "000003_config_apply_jobs.up.sql": {},
-        },
-        101: {
-            "000101_initial_setup_tokens.up.sql": {},
-            "000101_vless_reality_credentials.up.sql": {},
-        },
-        102: {
-            "000102_agent_protocol_version.up.sql": {},
-            "000102_config_apply_success_marks_version_applied.up.sql": {},
-            "000102_vpn_client_profiles.up.sql": {},
-        },
-        103: {
-            "000103_agent_operation_jobs.up.sql": {},
-            "000103_protocol_settings_timestamp.up.sql": {},
-        },
-        130: {
-            "000130_multi_protocol_account_profiles.up.sql": {},
-            "000130z_client_profile_schema_invariant_repair.up.sql": {},
-        },
-        131: {
-            "000131_security_event_visibility.up.sql": {},
-            "000131z_safe_client_protocol_activation_repair.up.sql": {},
-            "000131zz_runtime_install_operations_repair.up.sql": {},
-        },
-        140: {
-            "000140_platform_update_rollouts.up.sql": {},
-            "000140_platform_update_unknown_outcome_interlock.up.sql": {},
-        },
-        141: {
-            "000141_platform_update_rollout_planning_snapshot.up.sql": {},
-            "000141z_platform_update_history_truncate_guard.up.sql": {},
-        },
-        150: {
-            "000150_delivery_device_scope.up.sql": {},
-            "000150a_vpn_subscription_token_pkey_repair.up.sql": {},
-            "000150b_client_profile_schema_invariant_repair.up.sql": {},
-        },
+		3: {
+			"000003_auth_foundation.up.sql": {},
+			"000003_config_apply_jobs.up.sql": {},
+		},
+		101: {
+			"000101_initial_setup_tokens.up.sql": {},
+			"000101_vless_reality_credentials.up.sql": {},
+		},
+		102: {
+			"000102_agent_protocol_version.up.sql": {},
+			"000102_config_apply_success_marks_version_applied.up.sql": {},
+			"000102_vpn_client_profiles.up.sql": {},
+		},
+		103: {
+			"000103_agent_operation_jobs.up.sql": {},
+			"000103_protocol_settings_timestamp.up.sql": {},
+		},
+		130: {
+			"000130_multi_protocol_account_profiles.up.sql": {},
+			"000130z_client_profile_schema_invariant_repair.up.sql": {},
+		},
+		131: {
+			"000131_security_event_visibility.up.sql": {},
+			"000131z_safe_client_protocol_activation_repair.up.sql": {},
+			"000131zz_runtime_install_operations_repair.up.sql": {},
+		},
+		140: {
+			"000140_platform_update_rollouts.up.sql": {},
+			"000140_platform_update_unknown_outcome_interlock.up.sql": {},
+		},
+		141: {
+			"000141_platform_update_rollout_planning_snapshot.up.sql": {},
+			"000141z_platform_update_history_truncate_guard.up.sql": {},
+		},
+		150: {
+			"000150_delivery_device_scope.up.sql": {},
+			"000150a_vpn_subscription_token_pkey_repair.up.sql": {},
+			"000150b_client_profile_schema_invariant_repair.up.sql": {},
+		},
 	}
 	seen := make(map[uint64]string, len(files))
 	for _, path := range files {
