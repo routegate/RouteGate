@@ -27,6 +27,8 @@ jobs:
         run: node scripts/check-documentation.mjs --inventory
       - name: Inventory external URLs across code blocks and prose
         run: node scripts/check-documentation.mjs --external-inventory
+      - name: Inventory linked Markdown heading anchors
+        run: node scripts/check-documentation.mjs --anchor-inventory
       - name: Check all tracked Markdown/TXT links and public first-install commands
         run: node scripts/check-documentation.mjs
       - name: Verify pinned GitHub installer/tag and release-download URLs exist
