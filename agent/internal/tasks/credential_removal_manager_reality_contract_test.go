@@ -3,17 +3,20 @@ package tasks
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -92,7 +95,11 @@ func TestCredentialRemovalManagerPreparedRealityTraffic(t *testing.T) {
 	target.StartTLS()
 	defer target.Close()
 
+	var revokedProbeHits atomic.Int32
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/revoked-probe" {
+			revokedProbeHits.Add(1)
+		}
 		if r.URL.Path == "/stream" {
 			_, _ = io.WriteString(w, "open")
 			w.(http.Flusher).Flush()
@@ -179,8 +186,25 @@ func TestCredentialRemovalManagerPreparedRealityTraffic(t *testing.T) {
 		}
 	}
 	removalWaitTraffic(t,ctx,survivor,origin.URL)
-	if removalTraffic(ctx,revoked,origin.URL) {
-		t.Fatal("Manager revoked account's cached UUID still authenticates")
+	// Do not confuse a crashed local proxy or a silent transport timeout
+	// with a credential that the live Reality server actually rejected.
+	proxy := &url.URL{Scheme:"http",Host:fmt.Sprintf("127.0.0.1:%d",revoked)}
+	transport := &http.Transport{Proxy:http.ProxyURL(proxy),DisableKeepAlives:true}
+	defer transport.CloseIdleConnections()
+	var reachedProxy atomic.Bool
+	probeCtx := httptrace.WithClientTrace(ctx,&httptrace.ClientTrace{
+		GotConn:func(httptrace.GotConnInfo){reachedProxy.Store(true)},
+	})
+	probe,err := http.NewRequestWithContext(probeCtx,http.MethodGet,origin.URL+"/revoked-probe",nil)
+	if err != nil {t.Fatal(err)}
+	response,probeErr := (&http.Client{Transport:transport,Timeout:3*time.Second}).Do(probe)
+	if response != nil {_ = response.Body.Close()}
+	var networkErr net.Error
+	if !reachedProxy.Load() || ctx.Err()!=nil ||
+		(errors.As(probeErr,&networkErr) && networkErr.Timeout()) ||
+		(probeErr==nil && (response==nil || response.StatusCode<500)) ||
+		revokedProbeHits.Load()!=0 {
+		t.Fatal("revoked UUID denial inconclusive: proxy unreachable, timed out or origin received request")
 	}
 	removalWaitTraffic(t,ctx,survivor,origin.URL)
 	t.Log("Manager PostgreSQL candidate revoked actual Reality credential, severed both old streams and preserved unaffected account")
