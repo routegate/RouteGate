@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '20 4 * * 1' # weekly link-rot audit, UTC
 
 permissions:
   contents: read
@@ -25,3 +27,7 @@ jobs:
         run: node scripts/check-documentation.mjs --inventory
       - name: Check all tracked Markdown/TXT links and public first-install commands
         run: node scripts/check-documentation.mjs
+      - name: Verify pinned GitHub installer/tag and release-download URLs exist
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-release-doc-assets.mjs
