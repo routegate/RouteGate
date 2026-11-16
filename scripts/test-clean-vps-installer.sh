@@ -394,7 +394,7 @@ test_all_in_one_role_contract() {
   # /bootstrap/ needs Cache-Control, so enforce the full security header set
   # inside that specific location instead of trusting server-level defaults.
   local bootstrap_headers
-  bootstrap_headers=$(sed -n '/location \\^~ \\/bootstrap\\/ {/,/^    }/p' "$nginx_template")
+  bootstrap_headers=$(sed -n '/location \^~ \/bootstrap\/ {/,/^    }/p' "$nginx_template")
   assert_true "bootstrap location is present for header audit" \
     test -n "$bootstrap_headers"
   assert_true "bootstrap keeps HTTPS HSTS on success and errors" \
