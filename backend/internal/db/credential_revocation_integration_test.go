@@ -306,6 +306,15 @@ func TestCredentialRevocationSeesJobCommittedWhileAdmissionWaits(t *testing.T) {
 func TestCredentialRevocationDowngradePreservesHistory(t *testing.T) {
 	ctx, pool, in, _, done := removalPreparationFixture(t)
 	defer done()
+	// The legacy 161 downgrade test must first remove the empty, newer
+	// schema-162 dependent table. This fixture deliberately has no confirmation.
+	confirmationDown, err := os.ReadFile("../../migrations/000162_credential_revocation_confirmations.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, string(confirmationDown)); err != nil {
+		t.Fatal("drop empty dependent schema 162 before 161 downgrade", err)
+	}
 	down, err := os.ReadFile("../../migrations/000161_credential_revocation_preparations.down.sql")
 	if err != nil {
 		t.Fatal(err)
