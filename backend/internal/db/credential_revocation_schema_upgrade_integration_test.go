@@ -72,7 +72,7 @@ func TestCredentialRevocationPreparationUpgradesCurrent160WithoutDataLoss(t *tes
 		t.Fatalf("re-run upgraded migration idempotently: %v", err)
 	}
 	version, err = NewSchemaVersionRepository(pool).AppliedSchemaVersion(ctx)
-	if err != nil || version != "000164_credential_revocation_dispatch_lock_order" {
+	if err != nil || version != "000165_credential_revocation_task_identity" {
 		t.Fatalf("latest version = %q (%v), expected 162 confirmation history", version, err)
 	}
 
