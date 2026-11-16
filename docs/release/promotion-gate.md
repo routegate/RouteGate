@@ -11,7 +11,7 @@ Successful build/tests do not prove that a fresh VPS installer, admin setup, ngi
 Record evidence, including exact artifact version and source commit, in the release notes or the tracking issue:
 
 - [ ] Same-commit CI includes a **tagless, two-architecture release rehearsal** for genuine linux/amd64 and linux/arm64 archives: checksums, embedded commit/version, native binary ELF architecture, frontend parity and corruption rejection. This does not run ARM64 binaries or prove actual tag attestation/publication.
-- [ ] GitHub ruleset/permissions prevent force-moving or deleting release tags `v*`. The release workflow re-reads the **live origin tag** at both source validation and immediately before draft creation, rejecting changed/deleted tags (including annotated tags). This extra check narrows the race but **does not replace protected tags**; an administrator must verify the ruleset before publication.
+- [ ] GitHub ruleset/permissions prevent force-moving or deleting release tags `v*`. The release workflow **now blocks tagged release builds** unless `scripts/check-release-tag-ruleset.mjs` confirms an active GitHub tag ruleset covering `refs/tags/v*` (or all tags) with both `update` and `deletion` restrictions. It also re-reads the **live origin tag** before building and creating a draft. Neither the code check nor the live-tag check replaces administrator review of **bypass actors** in GitHub settings; do not publish with unrestricted bypasses.
 - [ ] Tag points to the expected reviewed commit, and CI for that exact commit is green. The release workflow's attested bundle, installer scripts, release manifest and both checksum sets verify. Do not publish if the version/commit/bundle mismatch.
 - [ ] Installer from the **same release tag** is used with matching bundle, never mixed with `main` or `latest`. A deliberately stale bundle fails **before** packages, services and RouteGate installation state are changed.
 - [ ] On disposable, fresh Ubuntu 24.04 amd64, a dedicated DNS name resolves to the test VPS, TCP 80/443 are reachable, and the exact candidate is installed as **Hybrid/All-in-One**, not as a remote-only node. Record redacted stage-by-stage logs.
@@ -22,6 +22,34 @@ Record evidence, including exact artifact version and source commit, in the rele
 - [ ] Update and recovery paths are exercised against a disposable installation: backup/restore, failed update rollback, safe repeat install and troubleshooting instructions. No secret/token should appear in public CI logs or issue attachments.
 - [ ] Public website, README and installer docs point to the **same verified tag** and accurately explain supported protocols. Update them only with the reviewed release promotion.
 - [ ] Public Quick Start remains **disabled** unless the GitHub Release has the exact complete bundle: `install.sh`, `install-agent.sh`, `install-grafana.sh`, both installer/bundle checksum sets, `release-manifest.json`, genuine linux/amd64 and linux/arm64 archives, and the three attestation bundles. The site's uploaded-asset checks are a safety prerequisite, **not** proof that provenance checks or real-VPS acceptance passed.
+
+## Configure the required protected release tags
+
+**Owner action — still pending.** GitHub's repository rulesets API returned `[]`
+at the time this gate was added. A tag such as `v0.2.0-rc.3` must not be
+published until protection is configured and independently confirmed.
+
+In `routegate/RouteGate` open **Settings → Rules → Rulesets → New ruleset → New tag ruleset**.
+Set the target tag pattern to `v*`, enforcement to **Active**, and enable
+**Restrict updates** and **Restrict deletions**. Do not enable "Restrict
+creations" without separately defining which release identity may create a
+new tag. Review all bypass actors carefully: a blanket administrator bypass
+can still permit history changes even with active rules.
+
+The tagged release workflow invokes the read-only
+`node scripts/check-release-tag-ruleset.mjs "$GITHUB_REF_NAME"` preflight
+after verifying the tag's SHA and canonical `main` ancestry, **before**
+running release CI/build/attestation or creating a draft. This check calls the
+authenticated GitHub rulesets API, reads rule details and fails when a required
+rule is absent, incomplete or unenforced. It uses a conservative pattern match
+so unusual rulesets require explicit review rather than an assumed green gate.
+The helper has offline negative tests as part of website CI.
+
+The repository settings are not changed by this script. The actual
+protection must be configured by someone with administration permissions, and
+the resulting ruleset (including bypass actors) reviewed before release.
+Official guidance:
+[GitHub tag rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository).
 
 ## Publishing and immutability
 
