@@ -47,10 +47,12 @@ func TestCredentialRemovalTaskIdentityCurrentAgentAndDurableReservation(t *testi
  if err!=nil{t.Fatal(err)}
 
  var originalAccount,originalClaims string
+ var beforeApplyJobs int
  err=pool.QueryRow(ctx,`SELECT
   (SELECT row_to_json(a)::text FROM vpn_accounts a WHERE id=$1::uuid),
-  (SELECT jsonb_agg(to_jsonb(c))::text FROM vpn_credential_revocation_dispatch_claims c WHERE operation_id=$2::uuid)
- `,in.AccountID,prepared.ID).Scan(&originalAccount,&originalClaims)
+  (SELECT jsonb_agg(to_jsonb(c))::text FROM vpn_credential_revocation_dispatch_claims c WHERE operation_id=$2::uuid),
+  (SELECT count(*) FROM config_apply_jobs WHERE server_id=$3::uuid)
+ `,in.AccountID,prepared.ID,in.ServerID).Scan(&originalAccount,&originalClaims,&beforeApplyJobs)
  if err!=nil{t.Fatal(err)}
  var v revocations.CredentialRemovalTaskIdentityV1
  err=pool.QueryRow(ctx,`
@@ -111,16 +113,16 @@ func TestCredentialRemovalTaskIdentityCurrentAgentAndDurableReservation(t *testi
  if _,err=pool.Exec(ctx,`UPDATE agents SET last_authenticated_heartbeat_at=now() WHERE id=$1::uuid`,agentID);err!=nil{t.Fatal(err)}
 
  var afterAccount,afterClaims string
- var jobs,versions int
+ var jobs,afterApplyJobs int
  err=pool.QueryRow(ctx,`SELECT
   (SELECT row_to_json(a)::text FROM vpn_accounts a WHERE id=$1::uuid),
   (SELECT jsonb_agg(to_jsonb(c))::text FROM vpn_credential_revocation_dispatch_claims c WHERE operation_id=$2::uuid),
   (SELECT count(*) FROM agent_operation_jobs WHERE server_id=$3::uuid),
   (SELECT count(*) FROM config_apply_jobs WHERE server_id=$3::uuid)
- `,in.AccountID,prepared.ID,in.ServerID).Scan(&afterAccount,&afterClaims,&jobs,&versions)
+ `,in.AccountID,prepared.ID,in.ServerID).Scan(&afterAccount,&afterClaims,&jobs,&afterApplyJobs)
  if err!=nil{t.Fatal(err)}
- if afterAccount!=originalAccount || afterClaims!=originalClaims || jobs!=0 || versions!=0{
-  t.Fatalf("identity observation mutated runtime/control: account=%v claim=%v jobs=%d versions=%d",
-   afterAccount==originalAccount,afterClaims==originalClaims,jobs,versions)
+ if afterAccount!=originalAccount || afterClaims!=originalClaims || jobs!=0 || afterApplyJobs!=beforeApplyJobs{
+  t.Fatalf("identity observation mutated runtime/control: account=%v claim=%v jobs=%d apply_before=%d apply_after=%d",
+   afterAccount==originalAccount,afterClaims==originalClaims,jobs,beforeApplyJobs,afterApplyJobs)
  }
 }
