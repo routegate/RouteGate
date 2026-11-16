@@ -100,6 +100,35 @@ for (const file of ['README.md', 'docs/guides/first-install.md', 'docs/deploymen
   }
 }
 
+// Optional full-source inventory: Markdown links alone cannot see install URLs
+// inside shell code blocks or inline code. Print every suspicious reference in
+// every documentation file for human review without breaking historical notes.
+if (process.argv.includes('--inventory')) {
+  const references = []
+  const checks = [
+    ['legacy-install-tag', /(?:VERSION\s*=\s*v0\.1\.0\b|--version\s+v0\.1\.0\b|\/v0\.1\.0\/install\.sh\b)/],
+    ['unpublished-version-url', /\/releases\/download\/v0\.2\.0(?:-[^/\s]+)?\//],
+    ['legacy-github-owner', /(?:github\.com|raw\.githubusercontent\.com)\/ikaevus\/RouteGate/],
+    ['old-pages-host', /routegate\.github\.io\/RouteGate/],
+    ['moving-branch-installer', /(?:githubusercontent\.com\/routegate\/RouteGate\/(?:main|HEAD)\/install\.sh|raw\.githubusercontent\.com\/routegate\/RouteGate\/(?:main|HEAD)\/install\.sh)/],
+    ['explicit-install-script', /(?:curl|wget|bash|sudo).{0,130}(?:install\.sh|routegate-install)/],
+  ]
+  for (const file of docs) {
+    for (const [index, line] of readFileSync(resolve(root, file), 'utf8').split('\n').entries()) {
+      for (const [type, re] of checks) {
+        if (re.test(line)) references.push({ file, line: index + 1, type, text: line.trim().slice(0, 185) })
+      }
+    }
+  }
+  const counts = {}
+  for (const ref of references) counts[ref.type] = (counts[ref.type] ?? 0) + 1
+  console.log('[docs-inventory] source-level install references by type: ' + JSON.stringify(counts))
+  for (const ref of references.slice(0, 175)) {
+    console.log('[docs-inventory] ' + ref.file + ':' + ref.line + ' [' + ref.type + '] ' + ref.text)
+  }
+  if (references.length > 175) console.log('[docs-inventory] +' + (references.length - 175) + ' further references')
+}
+
 findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
 for (const f of findings) console.error('[docs] ' + f.file + ':' + f.line + ' [' + f.category + '] ' + f.target)
 console.log('[docs] scanned ' + docs.length + ' documents; ' + internalCount + ' local links; ' +
