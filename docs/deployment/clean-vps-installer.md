@@ -388,9 +388,30 @@ The release workflow verifies SHA-256 checksums and required bundle structure be
 
 Both amd64 and arm64 bundles are published to keep the native packaging contract multi-architecture. **The v0.1.0 Clean VPS installation support boundary is Ubuntu 24.04 LTS amd64**, because that is the architecture that completed the production-like clean-host E2E acceptance.
 
+### Combined Grafana, VPN and device-subscription review test
+
+The review-only combined Hybrid CI path uses the **same disposable Ubuntu
+24.04 host** to install Grafana and Prometheus, recover from an optional
+add-on failure, complete administrator `/setup`, configure VLESS/Reality,
+and exercise actual local VPN-client traffic. It retrieves the public-shaped
+`/sub/` HTTPS endpoints for Hiddify (iOS) and v2rayNG (Android), verifying
+`503` before first Apply, stable applied profiles through failed Apply and
+service restart, and a scoped `404` for a revoked *subscription URL* while
+the other URL and existing VPN credentials remain operational.
+The test client rejects redirects and unexpected URL authorities rather
+than following a redirect that might expose a subscription bearer.
+
+The certificates and DNS in these checks are synthetic and local to the
+runner. No claim is made about public Let's Encrypt, an external VPN client
+or physical VPS reboot. Revoking a subscription bearer **does not revoke
+a previously imported VLESS credential**; runtime credential removal
+still requires separate review and evidence under [#545](https://github.com/routegate/RouteGate/issues/545).
+The tests are not a substitute for #715 manual release acceptance.
+
 ## Security boundaries
 
 - Manager listens only on loopback and is exposed through nginx/HTTPS.
+- nginx enforces one `Referrer-Policy: no-referrer` for Manager API and `/sub/` bearer responses by suppressing duplicated upstream policies. This is checked in disposable CI and protects subscription tokens in URLs from referrer disclosure.
 - PostgreSQL is local-only.
 - The installer fails closed before APT network access when active package sources leave the RouteGate-approved repository boundary (Ubuntu archive/security or the two approved Yandex mirror paths above).
 - RouteGate does not silently rewrite a host's APT sources; repository trust remains an explicit operator decision.
