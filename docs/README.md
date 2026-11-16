@@ -13,6 +13,8 @@ have different acceptance boundaries. A feature described on `main` is
   presents an obsolete `v0.1.0` command, do not use it for current features.
 - [Clean VPS installer reference](deployment/clean-vps-installer.md) —
   installation preflight, ownership, DNS/HTTPS and recovery boundaries.
+- [PostgreSQL migration safety](development/database-migrations.md) —
+  schema-history compatibility, forward-only ordinals and RG-140 collisions.
 - [Add a remote VPN node](guides/add-vpn-node.md) — Manager/Agent onboarding
   on versions that include it.
 - [Recovery toolkit](operations/recovery-tool.md) and
