@@ -1030,6 +1030,81 @@ EOF_DISABLED
   assert_true     "ignores explicitly disabled deb822 repository stanzas"     bash -c 'source "$1"; apt_repository_trust_report "$2" >/dev/null'       _ "$ROOT_DIR/install.sh" "$root"
 }
 
+test_completed_host_grafana_apt_trust() {
+  local case_name state events report managed addon
+  for case_name in needs_grafana managed_grafana core_only; do
+    managed=0
+    addon=1
+    [[ "$case_name" != managed_grafana ]] || managed=1
+    [[ "$case_name" != core_only ]] || addon=0
+    state="$TEST_TMP/apt-trust-$case_name.env"
+    events="$TEST_TMP/apt-trust-$case_name.events"
+    report="$TEST_TMP/apt-trust-$case_name.log"
+    : >"$events"
+    cat >"$state" <<EOF_STATE
+STATUS=complete
+DOMAIN=ci.routegate.example
+VERSION=v3.1.4
+PROMETHEUS_MANAGED=1
+GRAFANA_REQUESTED=1
+GRAFANA_MANAGED=$managed
+EOF_STATE
+
+    # All services/network activity are mocked; the real production
+    # completed-install control flow decides whether to call APT preflight.
+    # shellcheck disable=SC2016
+    if bash -c '
+      source "$1"
+      ROUTEGATE_STATE_FILE="$2"
+      ROUTEGATE_LOG_FILE=""
+      ROUTEGATE_DOMAIN=ci.routegate.example
+      ROUTEGATE_INSTALL_PROMETHEUS=1
+      ROUTEGATE_INSTALL_GRAFANA="$3"
+      ROUTEGATE_VERSION=v3.1.4
+      EVENTS_FILE="$4"
+      systemctl() { return 0; }
+      curl() { return 0; }
+      wait_for_url() { return 0; }
+      validate_apt_repository_trust() {
+        printf "TRUST_CHECKED\n" >>"$EVENTS_FILE"
+        die "Synthetic unapproved APT repository blocked."
+      }
+      prepare_verified_grafana_installer() { printf "ADDON_VERIFIED\n" >>"$EVENTS_FILE"; }
+      install_selected_grafana() { printf "ADDON_CALLED\n" >>"$EVENTS_FILE"; }
+      verify_existing_install
+    ' _ "$ROOT_DIR/install.sh" "$state" "$addon" "$events" >"$report" 2>&1; then
+      if [[ "$case_name" == needs_grafana ]]; then
+        fail "new Grafana installation on complete host must not bypass untrusted APT sources"
+      else
+        pass "safe completed-host $case_name path does not run APT package preflight"
+      fi
+    elif [[ "$case_name" == needs_grafana ]]; then
+      pass "untrusted APT sources block completed-host Grafana before addon"
+    else
+      fail "safe completed-host $case_name check unexpectedly failed"
+    fi
+
+    if [[ "$case_name" == needs_grafana ]]; then
+      assert_true "Grafana add-on first install invokes APT trust preflight" \
+        grep -Fxq TRUST_CHECKED "$events"
+      assert_false "untrusted APT prevents helper download and addon mutation" \
+        grep -Fq ADDON_ "$events"
+      assert_true "untrusted APT failure explains rejection" \
+        grep -Fq 'Synthetic unapproved APT repository blocked' "$report"
+    else
+      assert_false "managed or core-only idempotency never invokes APT preflight" \
+        grep -Fq TRUST_CHECKED "$events"
+      if [[ "$case_name" == managed_grafana ]]; then
+        assert_true "already-managed Grafana continues through verified read-only helper" \
+          grep -Fxq ADDON_CALLED "$events"
+      else
+        assert_false "core-only re-run skips Grafana add-on" \
+          grep -Fq ADDON_ "$events"
+      fi
+    fi
+  done
+}
+
 test_existing_install_precedes_repository_preflight() {
   local main_body
   main_body=$(sed -n '/^main() {/,/^}/p' "$ROOT_DIR/install.sh")
@@ -1042,6 +1117,7 @@ test_existing_install_precedes_repository_preflight() {
 printf 'TAP version 13\n'
 test_apt_repository_trust_preflight
 test_existing_install_precedes_repository_preflight
+test_completed_host_grafana_apt_trust
 test_validation_helpers
 test_argument_parsing
 test_grafana_selection_and_install_contract
