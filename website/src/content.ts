@@ -8,7 +8,7 @@ type FAQItem = { question: string; answer: string }
 
 export type SiteContent = {
   nav: { product: string; openSource: string; docs: string; roadmap: string; changelog: string }
-  action: { start: string; github: string; installGuide: string; copy: string; copied: string }
+  action: { start: string; github: string; installGuide: string; copy: string; copied: string; installNav: string; installStatus: string }
   hero: { eyebrow: string; title: string; subtitle: string; description: string; note: string }
   dashboard: {
     overview: string; servers: string; accounts: string; clients: string; traffic: string
@@ -34,7 +34,7 @@ export type SiteContent = {
 export const content: Record<Locale, SiteContent> = {
   ru: {
     nav: { product: 'Продукт', openSource: 'Открытый код', docs: 'Документация', roadmap: 'Дорожная карта', changelog: 'История изменений' },
-    action: { start: 'Начать работу', github: 'Смотреть на GitHub', installGuide: 'Руководство по установке', copy: 'Копировать', copied: 'Скопировано' },
+    action: { start: 'Установка RouteGate', github: 'Смотреть на GitHub', installGuide: 'Руководство по установке', copy: 'Копировать', copied: 'Скопировано', installNav: 'Установка', installStatus: 'v0.2.0 готовится к выпуску · команда пока недоступна' },
     hero: {
       eyebrow: 'ОТКРЫТЫЙ КОД · AGPLv3-OR-LATER',
       title: 'RouteGate',
@@ -140,7 +140,7 @@ export const content: Record<Locale, SiteContent> = {
   },
   en: {
     nav: { product: 'Product', openSource: 'Open Source', docs: 'Docs', roadmap: 'Roadmap', changelog: 'Changelog' },
-    action: { start: 'Get Started', github: 'View on GitHub', installGuide: 'Installation guide', copy: 'Copy', copied: 'Copied' },
+    action: { start: 'Install RouteGate', github: 'View on GitHub', installGuide: 'Installation guide', copy: 'Copy', copied: 'Copied', installNav: 'Install', installStatus: 'v0.2.0 is under review · install command not yet available' },
     hero: {
       eyebrow: 'OPEN SOURCE · AGPLv3-OR-LATER',
       title: 'RouteGate',
