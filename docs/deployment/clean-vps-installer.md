@@ -196,6 +196,16 @@ Reality traffic, interruption/retry, checksum failure and service restart.
 **It does not prove** public DNS, Let's Encrypt issuance, an external VPN
 client connection or a true host reboot. Those remain #715 acceptance gates.
 
+The combined review-only CI scenario also runs real Prometheus/Grafana
+failure/retry **before** the same disposable host proceeds through one-use
+`/setup`, VLESS/Reality apply, loopback VPN-client traffic and two independent
+Hiddify/v2rayNG-compatible HTTPS `/sub/` bearer URLs. It asserts 503 before
+readiness, 200 for applied credentials, unchanged delivery after a failed
+apply and service restart, and 404 for an individually revoked subscription
+URL. **Revoking a subscription URL is not revoking already-issued VPN
+credentials**; the real credential-removal gate remains #545. The test uses
+test-only TLS, not a public certificate or external client.
+
 Advanced reviewers of the new release may separately verify the
 `install.sh` SHA-256, `INSTALLER_SHA256SUMS`, bundle checksums and
 attestations from the **same pinned published tag**. These checks do not
