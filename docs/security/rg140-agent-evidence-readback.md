@@ -21,12 +21,20 @@ Manager→Agent transport context**. The caller must source the token
 from a validated Agent authentication header. It compares that token's
 SHA-256 against the **current registered Agent** in PostgreSQL, checks
 its server and pinned credential generation, and locates the permanent
-one-shot claim and matching immutable confirmation. It then looks up a
-server-owned, applied candidate `config_versions` row with the exact
-stored candidate hash and passes the durable identifiers and runtime
-hashes through `VerifySuccess`. The comparison requires a changed
-systemd InvocationID and strictly later monotonic start timestamp,
-plus the expected shared-process restart outcome.
+one-shot claim and matching immutable confirmation. It binds durable
+operation, Agent, server, account, listener and candidate hash identities
+to `VerifySuccess`. It also checks the reported systemd InvocationID
+has changed and the reported monotonic start timestamp increased.
+
+**The report's candidate config-version UUID is only checked for valid
+format and for being different from the baseline; it is NOT independently
+matched to an applied `config_versions` row.** That limitation matters:
+the existing schema 161 correctly **rejects creating or applying another
+config version during a prepared revocation**. A previous synthetic test
+attempt to insert an applied version was rejected by PostgreSQL, proving
+that the guard works. We retained the guard instead of bypassing it.
+Actual version assignment/application must be designed with a separate,
+authenticated, reviewed transition.
 
 This read-only proof format currently assumes **claim ID = future
 credential-removal task ID**. If the later dispatcher uses a different
@@ -42,11 +50,13 @@ SHA-256 of the exact report bytes. It does **not** update
 `outcome_unknown`, create a receipt, mark an account revoked, change
 applied versions, restart sing-box, or re-enqueue a task.
 
-The disposable PostgreSQL regression creates a clearly synthetic
-candidate version and report. It verifies correct binding, rejects
-wrong Agent tokens and generation/identity/hash/session witnesses,
-rejects malformed or duplicated-key JSON, and asserts no persistent
-claim, confirmation or Agent job changes after repeat comparisons.
+The disposable PostgreSQL regression uses a clearly synthetic
+report and candidate version UUID **without creating any candidate
+config-version row**. It explicitly proves that schema 161 refuses
+a concurrent version insert, checks the bounded report's consistency
+with the claim, rejects wrong Agent tokens and generation/identity/hash
+witnesses, rejects malformed or duplicated-key JSON, and asserts no
+persistent claim, confirmation or Agent job changes after comparisons.
 
 ## Remaining release blockers
 
