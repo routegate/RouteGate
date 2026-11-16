@@ -17,16 +17,17 @@ const (
 )
 
 type ConfigTask struct {
-	ID              string          `json:"id"`
-	Kind            string          `json:"kind,omitempty"`
-	ServerID        string          `json:"serverId"`
-	AgentID         string          `json:"agentId"`
-	ConfigVersionID string          `json:"configVersionId,omitempty"`
-	Action          string          `json:"action,omitempty"`
-	Operation       string          `json:"operation,omitempty"`
-	Status          string          `json:"status"`
-	RenderedConfig  json.RawMessage `json:"renderedConfig,omitempty"`
-	ConfigHash      string          `json:"configHash,omitempty"`
+	ID                string                    `json:"id"`
+	Kind              string                    `json:"kind,omitempty"`
+	ServerID          string                    `json:"serverId"`
+	AgentID           string                    `json:"agentId"`
+	ConfigVersionID   string                    `json:"configVersionId,omitempty"`
+	Action            string                    `json:"action,omitempty"`
+	Operation         string                    `json:"operation,omitempty"`
+	Status            string                    `json:"status"`
+	RenderedConfig    json.RawMessage           `json:"renderedConfig,omitempty"`
+	ConfigHash        string                    `json:"configHash,omitempty"`
+	CredentialRemoval *CredentialRemovalRequest `json:"credentialRemoval,omitempty"`
 }
 
 func (t ConfigTask) EffectiveKind() string {
