@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// AgentEvidenceReadback is a strictly read-only internal proof comparator.
-// It is NOT an Agent endpoint, a task completion, a stored receipt, a
-// success-state transition or evidence that client sessions were terminated.
+// AgentEvidenceReadback is a strictly read-only claim/report consistency check.
+// It is NOT proof of an applied config version, a genuine Agent task, an
+// endpoint, a stored receipt, a success transition or ended client sessions.
 type AgentEvidenceReadback struct { pool *pgxpool.Pool }
 
 func NewAgentEvidenceReadback(pool *pgxpool.Pool) *AgentEvidenceReadback {
@@ -34,6 +34,9 @@ type AgentEvidenceReadbackResult struct {
 // Contract for future task wiring: the one-shot claim UUID is also the
 // intended credential-removal job ID. An alternative mapping requires a
 // separately reviewed durable authenticated mapping before activation.
+// ConfigVersionID is currently asserted only as a valid, distinct report
+// UUID; schemas 161-163 prevent new config_version deployment during
+// reservation. This comparator MUST NOT be used as a success attestation.
 // The future HTTP handler MUST obtain rawAgentToken only from the validated
 // Agent Authorization header, over protected transport, never from a user
 // or a browser form. This helper does not register such a handler.
@@ -53,7 +56,11 @@ func (v *AgentEvidenceReadback) Check(ctx context.Context, rawAgentToken, operat
 		return fail()
 	}
 
-	var bound EvidenceBinding
+	// Schemas 161-163 intentionally forbid inserting/applying a new
+	// config_versions row while the revocation holds its node reservation.
+	// Do NOT attempt to bypass that safeguard to make a report look applied.
+	// ConfigVersionID is therefore only a checked, distinct report field:
+	// this compares payload consistency, NOT actual deployment or revocation.
 	var claimed int64
 	var currentGeneration int64
 	var agentID, serverID, claimID, accountID, baselineID, oldRuntimeHash, newRuntimeHash, candidateConfigHash string
@@ -63,13 +70,12 @@ func (v *AgentEvidenceReadback) Check(ctx context.Context, rawAgentToken, operat
 		       r.vpn_account_id::text,c.baseline_version_id::text,
 		       r.baseline_runtime_hash,c.candidate_runtime_hash,
 		       c.candidate_hash,s.vless_port,c.agent_credential_generation,
-		       a.credential_generation,cv.config_hash
+		       a.credential_generation
 		FROM vpn_credential_revocation_dispatch_claims c
 		JOIN vpn_credential_revocations r ON r.id=c.operation_id
 		JOIN vpn_credential_revocation_confirmations confirmation ON confirmation.operation_id=c.operation_id
 		JOIN agents a ON a.id=c.agent_id AND a.server_id=c.server_id
 		JOIN servers s ON s.id=c.server_id
-		JOIN config_versions cv ON cv.id=$3::uuid AND cv.server_id=c.server_id
 		WHERE c.operation_id=$1::uuid AND a.token_hash=$2
 		  AND c.state='outcome_unknown' AND r.state='prepared'
 		  AND confirmation.agent_id=c.agent_id
@@ -79,11 +85,10 @@ func (v *AgentEvidenceReadback) Check(ctx context.Context, rawAgentToken, operat
 		  AND confirmation.baseline_version_id=c.baseline_version_id
 		  AND c.confirmation_at=confirmation.confirmed_at
 		  AND a.credential_generation=c.agent_credential_generation
-		  AND cv.status='applied' AND cv.config_hash=c.candidate_hash
-	`,operationID,agents.HashToken(rawAgentToken),untrusted.ConfigVersionID).Scan(
+	`,operationID,agents.HashToken(rawAgentToken)).Scan(
 		&claimID,&agentID,&serverID,&accountID,&baselineID,&oldRuntimeHash,
-		&newRuntimeHash,&candidateConfigHash,&targetPort,&claimed,&currentGeneration,&bound.ConfigHash)
-	if err!=nil||claimed<=0||currentGeneration!=claimed||bound.ConfigHash!=candidateConfigHash{
+		&newRuntimeHash,&candidateConfigHash,&targetPort,&claimed,&currentGeneration)
+	if err!=nil||claimed<=0||currentGeneration!=claimed{
 		return fail()
 	}
 	bound=EvidenceBinding{
