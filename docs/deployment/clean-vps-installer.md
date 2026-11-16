@@ -334,6 +334,20 @@ Installation state records the resolved pinned `VERSION` (not the floating
 A changed release, replaced archive under the same tag, missing legacy
 fingerprint or uncertain selector **blocks automatic recovery**.
 
+Both the core installer and the managed Grafana add-on now stage updates to
+`install-state.env` in **root-only temporary files in the same directory**
+and atomically rename them into place. A failed write or rename does not
+truncate the previous `installing` or `complete` record; only a fully
+prepared replacement becomes visible. A fatal interruption can leave a
+root-only staging file, which must never be treated as installation state.
+Grafana's rollback restoration follows the same atomic replacement rule:
+if it cannot replace the state, it preserves the original state and the
+root-only pre-Grafana backup for manual recovery instead of deleting the
+only available recovery copy.
+
+This guards the identity of an interrupted or completed install; it is not
+a substitute for database backups or physical-host acceptance.
+
 Never erase partially installed PostgreSQL data, overwrite the state file or
 bypass the guard to make a retry work. Preserve the root-only state/logs and
 review the original version and artifact identity before manual recovery.

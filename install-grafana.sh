@@ -188,8 +188,20 @@ prepare_backups() {
   ROUTEGATE_BACKUPS_READY=1
 }
 
+restore_ownership_state_from_backup() {
+  local backup_file=$1
+  local temp_state
+  temp_state=$(mktemp "${ROUTEGATE_STATE_FILE}.tmp.XXXXXXXX") || return 1
+  if ! install -m 0600 "$backup_file" "$temp_state" \
+      || ! mv -f -- "$temp_state" "$ROUTEGATE_STATE_FILE"; then
+    rm -f -- "$temp_state"
+    return 1
+  fi
+}
+
 rollback() {
   local rc=$?
+  local preserve_backup=0
   trap - EXIT ERR
   set +e
   if [[ "$ROUTEGATE_SUCCESS" != "1" && "$ROUTEGATE_MUTATED" == "1" ]]; then
@@ -200,7 +212,11 @@ rollback() {
     systemctl daemon-reload >/dev/null 2>&1 || true
 
     if [[ "$ROUTEGATE_BACKUPS_READY" == "1" ]]; then
-      install -m 0600 "$ROUTEGATE_BACKUP_DIR/install-state.env" "$ROUTEGATE_STATE_FILE"
+      # A failed restore retains both the current state and the backup.
+      if ! restore_ownership_state_from_backup "$ROUTEGATE_BACKUP_DIR/install-state.env"; then
+        preserve_backup=1
+        warn "Could not restore ownership state atomically; preserve the backup and inspect the current state before retrying."
+      fi
       install -m 0644 "$ROUTEGATE_BACKUP_DIR/nginx-routegate" "$ROUTEGATE_NGINX_SITE"
     fi
 
@@ -214,7 +230,11 @@ rollback() {
       systemctl reload nginx >/dev/null 2>&1 || true
     fi
   fi
-  [[ -z "$ROUTEGATE_BACKUP_DIR" ]] || rm -rf "$ROUTEGATE_BACKUP_DIR"
+  if [[ "$preserve_backup" == "1" ]]; then
+    warn "State restoration requires manual review; protected backup: $ROUTEGATE_BACKUP_DIR"
+  else
+    [[ -z "$ROUTEGATE_BACKUP_DIR" ]] || rm -rf "$ROUTEGATE_BACKUP_DIR"
+  fi
   exit "$rc"
 }
 
@@ -608,7 +628,9 @@ mark_managed_state() {
   python3 - "$ROUTEGATE_STATE_FILE" <<'PY_STATE'
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 import sys
+import tempfile
 
 path = Path(sys.argv[1])
 lines = path.read_text().splitlines()
@@ -626,9 +648,21 @@ for line in lines:
 if not seen:
     out.append('GRAFANA_MANAGED=1')
 out.append('UPDATED_AT=' + datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
-path.write_text('\n'.join(out) + '\n')
+# Never truncate the live ownership file in place: a SIGKILL or storage error
+# must leave the old STATUS, bundle hash and addon intent readable.
+fd, candidate = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent)
+try:
+    with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write('\n'.join(out) + '\n')
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, path)
+except BaseException:
+    if os.path.exists(candidate):
+        os.unlink(candidate)
+    raise
 PY_STATE
-  chmod 0600 "$ROUTEGATE_STATE_FILE"
 }
 
 verify_final_state() {

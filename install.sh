@@ -811,9 +811,14 @@ state_value() {
 write_install_state_status() {
   local status=$1
   local version=${2:-${ROUTEGATE_RESOLVED_VERSION:-${ROUTEGATE_VERSION}}}
-  install -d -m 0755 /etc/routegate
-  install -m 0600 /dev/null "$ROUTEGATE_STATE_FILE"
-  cat >"$ROUTEGATE_STATE_FILE" <<EOF_STATE
+  local state_dir temp_state
+  state_dir=$(dirname -- "$ROUTEGATE_STATE_FILE")
+  install -d -m 0755 "$state_dir"
+  # The previous installed/resumable state must stay intact if the process
+  # exits during write, chmod or rename. mktemp is root-only (umask 077).
+  temp_state=$(mktemp "${ROUTEGATE_STATE_FILE}.tmp.XXXXXXXX") \
+    || die "Could not create a temporary RouteGate ownership state file."
+  if ! cat >"$temp_state" <<EOF_STATE
 STATUS=${status}
 DOMAIN=${ROUTEGATE_DOMAIN}
 VERSION=${version}
@@ -823,7 +828,14 @@ PROMETHEUS_MANAGED=${ROUTEGATE_INSTALL_PROMETHEUS}
 GRAFANA_REQUESTED=${ROUTEGATE_INSTALL_GRAFANA}
 UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF_STATE
-  chmod 0600 "$ROUTEGATE_STATE_FILE"
+  then
+    rm -f -- "$temp_state"
+    die "Could not write temporary RouteGate ownership state."
+  fi
+  if ! chmod 0600 "$temp_state" || ! mv -f -- "$temp_state" "$ROUTEGATE_STATE_FILE"; then
+    rm -f -- "$temp_state"
+    die "Could not atomically replace RouteGate ownership state; original state was preserved."
+  fi
 }
 
 verify_existing_install() {

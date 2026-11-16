@@ -98,12 +98,64 @@ PROMETHEUS_MANAGED=1
 UPDATED_AT=old
 EOF_STATE
   ROUTEGATE_STATE_FILE="$state"
+  local inode_before inode_after
+  inode_before=$(stat -c '%i' "$state")
   mark_managed_state
+  inode_after=$(stat -c '%i' "$state")
 
+  assert_true "Grafana replaces ownership state rather than truncating existing inode" \
+    test "$inode_before" != "$inode_after"
+  assert_equal "Grafana ownership state remains root-only" 600 "$(stat -c '%a' "$state")"
+  assert_equal "Grafana atomic state update leaves no orphaned staging file" 0 \
+    "$(find "$TEST_TMP" -maxdepth 1 -name '.state-update.env.*.tmp' | wc -l | tr -d '[:space:]')"
   assert_true "marks Grafana as RouteGate-managed" grep -Fxq 'GRAFANA_MANAGED=1' "$state"
   assert_true "preserves Prometheus ownership state" grep -Fxq 'PROMETHEUS_MANAGED=1' "$state"
   assert_equal "stores one Grafana ownership field" "1" "$(grep -c '^GRAFANA_MANAGED=' "$state")"
   assert_equal "stores one state timestamp" "1" "$(grep -c '^UPDATED_AT=' "$state")"
+}
+
+test_atomic_rollback_state_restore() {
+  local state="$TEST_TMP/rollback-state.env"
+  local backup="$TEST_TMP/rollback-backup.env"
+  local before_hash
+  printf 'STATUS=complete\nGRAFANA_MANAGED=1\n' >"$state"
+  printf 'STATUS=complete\nGRAFANA_REQUESTED=1\n' >"$backup"
+  chmod 0600 "$state" "$backup"
+  before_hash=$(sha256sum "$state" | awk '{print $1}')
+
+  # A failed final rename cannot truncate the still-visible state or
+  # consume the independent backup required for manual recovery.
+  # shellcheck disable=SC2016
+  if bash -c '
+    source "$1"
+    ROUTEGATE_STATE_FILE="$2"
+    mv() { return 1; }
+    restore_ownership_state_from_backup "$3"
+  ' _ "$ROOT_DIR/install-grafana.sh" "$state" "$backup" \
+      >"$TEST_TMP/rollback-rename-failure.log" 2>&1; then
+    fail "Grafana rollback must refuse failed state rename"
+  else
+    assert_equal "Grafana failed rollback preserves current state" \
+      "$before_hash" "$(sha256sum "$state" | awk '{print $1}')"
+    assert_true "Grafana failed rollback preserves backup" test -s "$backup"
+  fi
+  assert_equal "Grafana failed rollback removes temp candidate" 0 \
+    "$(find "$TEST_TMP" -maxdepth 1 -name 'rollback-state.env.tmp.*' | wc -l | tr -d '[:space:]')"
+
+  # shellcheck disable=SC2016
+  if bash -c '
+    source "$1"
+    ROUTEGATE_STATE_FILE="$2"
+    restore_ownership_state_from_backup "$3"
+  ' _ "$ROOT_DIR/install-grafana.sh" "$state" "$backup" \
+      >"$TEST_TMP/rollback-restore-success.log" 2>&1; then
+    assert_equal "successful Grafana rollback restores exact previous content" \
+      "$(sha256sum "$backup" | awk '{print $1}')" \
+      "$(sha256sum "$state" | awk '{print $1}')"
+    assert_equal "successful Grafana rollback keeps state root-only" 600 "$(stat -c '%a' "$state")"
+  else
+    fail "Grafana rollback must restore ownership atomically"
+  fi
 }
 
 test_nginx_proxy_generation() {
@@ -236,6 +288,7 @@ test_entrypoint_guard() {
 printf 'TAP version 13\n'
 test_routegate_identity
 test_state_update
+test_atomic_rollback_state_restore
 test_nginx_proxy_generation
 test_dashboard_contract
 test_security_contract
