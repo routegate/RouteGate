@@ -104,6 +104,37 @@ func TestCredentialRemovalSuccessAndReplay(t *testing.T) {
 		t.Fatal(replay, err)
 	}
 }
+// A different systemd InvocationID is necessary but not sufficient:
+// the newly observed unit must have started after the previously observed
+// generation on the same monotonic boot clock.
+func TestCredentialRemovalRejectsOlderServiceGeneration(t *testing.T) {
+	e, task, adapter, original := removalExecutorFixture(t)
+	adapter.restartHook = func() error {
+		adapter.generation = RuntimeGeneration{
+			InvocationID: strings.Repeat("b", 32),
+			PID: 200,
+			StartedMonotonic: "999", // Before baseline start at 1000.
+		}
+		return nil
+	}
+	report, err := e.Execute(context.Background(), task)
+	if err == nil || report.State != "recovery_required" || report.Code != "restart_not_verified" ||
+		adapter.restarts != 1 {
+		t.Fatalf("older generation accepted: report=%+v err=%v restarts=%d", report, err, adapter.restarts)
+	}
+	current, readErr := os.ReadFile(e.activePath)
+	if readErr != nil || string(current) == string(original) {
+		t.Fatalf("uncertain outcome reinstalled baseline or lost candidate: %v", readErr)
+	}
+	if _, err := os.Stat(filepath.Join(e.receiptDir, "inflight.json")); err != nil {
+		t.Fatalf("uncertain outcome must retain recovery fence: %v", err)
+	}
+	replayed, replayErr := e.Execute(context.Background(), task)
+	if replayErr == nil || replayed.State != "recovery_required" || adapter.restarts != 1 {
+		t.Fatalf("uncertain outcome retried mutation: report=%+v err=%v", replayed, replayErr)
+	}
+}
+
 func TestCredentialRemovalPreflightNoMutation(t *testing.T) {
 	cases := map[string]func(*CredentialRemovalExecutor, *ConfigTask, *removalAdapter){
 		"wrong agent": func(e *CredentialRemovalExecutor, c *ConfigTask, a *removalAdapter) { c.AgentID = removalAccount },
@@ -248,7 +279,18 @@ func TestCredentialRemovalConfigSource(t *testing.T) {
 			t.Fatal(args, err)
 		}
 	}
-	for _, args := range [][]string{{"sing-box", "run"}, {"sing-box", "run", "-c", "stdin"}, {"sing-box", "run", "-c", active, "-C", dir}, {"sing-box", "check", "-c", active}, {"sing-box", "run", "--unknown", "-c", active}} {
+	for _, args := range [][]string{
+		{"sing-box", "run"},
+		{"sing-box", "run", "-c", "stdin"},
+		{"sing-box", "run", "-c", active, "-C", dir},
+		{"sing-box", "check", "-c", active},
+		{"sing-box", "run", "--unknown", "-c", active},
+		// -D / --directory is not config -C: it changes relative runtime
+		// asset resolution and can make the pinned source witness misleading.
+		{"sing-box", "run", "-c", active, "-D", dir},
+		{"sing-box", "run", "-c", active, "--directory=" + dir},
+		{"sing-box", "run", "--directory", dir, "-c", active},
+	} {
 		if err := verifyRemovalConfigArgs(args, active); err == nil {
 			t.Fatal(args)
 		}
