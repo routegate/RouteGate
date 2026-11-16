@@ -44,6 +44,7 @@ jobs:
           grep -Eq '^  tagless-release-candidate:' .github/workflows/ci.yml
           grep -Fq 'bash scripts/test-release-candidate-dry-run.sh' .github/workflows/ci.yml
           test -s scripts/check-release-tag-identity.sh
+          test -s scripts/check-release-tag-ruleset.mjs
           test -s scripts/test-release-tag-identity.sh
           grep -Fq 'bash scripts/test-release-tag-identity.sh' .github/workflows/ci.yml
           test -s scripts/check-manual-release-source.sh
@@ -68,6 +69,13 @@ jobs:
           # The tag may have been moved or deleted after triggering CI.
           # Compare the live origin ref, not the locally checked out tag.
           bash scripts/check-release-tag-identity.sh "$REF_NAME" "$SOURCE_SHA"
+
+      - name: Verify immutable v* tag protection is active
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+        run: node scripts/check-release-tag-ruleset.mjs "$REF_NAME"
 
       - name: Require manual rehearsal from the current main commit
         if: github.event_name == 'workflow_dispatch'
