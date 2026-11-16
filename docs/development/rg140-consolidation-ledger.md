@@ -64,3 +64,25 @@ A branch being an ancestor of a survivor is evidence that its **commits** are pr
 3. Keep development on the one consolidation branch or a small review branch *based directly on it*.
 4. Never equate a green isolated Draft with a release-ready RG-140 implementation.
 5. Do not open a new alternative migration lineage.
+
+## Consolidation cut — isolated RG-140 from release/installer/site work
+
+- Exact reviewed starting point: #812 branch commit `17e710b35b56261bcdcf6bbc762460df878fbfa7`.
+- Reverted **29 changed unrelated paths** to their `main` blobs or removed
+  the files that did not exist in `main`: website Pages/snapshot, release
+  promotion and tag enforcement, public quick start, Grafana/Hybrid installer,
+  release candidate scripts, installer documentation and published website.
+  These changes remain intact in [source #789](https://github.com/routegate/RouteGate/pull/789)
+  and the dedicated installer/release branch history; this is **scope separation,
+  not deletion of user work**.
+- `.github/workflows/ci.yml` now retains **all RG-140-specific Backend and Agent
+  test steps** from the integration source but uses the current `main` installer,
+  bootstrap, frontend and website CI jobs. This deliberately removes release
+  publication rehearsal and disposable native Grafana/Hybrid jobs from this
+  RG-140 PR; they are tested in their own release candidate line.
+- Retained `deploy/nginx/routegate.conf.example` because subscription bearer
+  protection is related to RG-140 #509/#538; verify its privacy and continuity
+  effect independently before merge.
+- Do NOT claim the entire branch is release-ready solely from this scope cut.
+  Validate the exact new head. Issue #545 two-account runtime-revocation end-to-end
+  acceptance remains separate from healthy ordinary VPN traffic tests.
