@@ -38,7 +38,7 @@ use a new forward-only ordinal. In the **schema-161 review branch**, the
 preparation ledger has consumed `000161_*` and the review-only immutable
 confirmation ledger uses `000162_*`; this review's one-time dispatch
 fence uses `000163_*`. Future migrations require a unique unused ordinal
-**164 or higher**; do not rename the existing 160/161/162/163.
+**165 or higher**; do not rename the existing 160/161/162/163/164.
 
 The existing `000160_traffic_report_checkpoints.up.sql` filename is
 also immutable, as is the unusual shipped `0001430_*` outlier. The
@@ -185,3 +185,20 @@ Review each forward-only replacement with its SQL dependencies,
 downgrade/restore semantics, integration tests, and verified data
 migration path before promotion. This guard does not itself publish a
 release or authorize deployment.
+
+## Schema 164 — server-first PostgreSQL dispatch/cancel lock order
+
+`000164_credential_revocation_dispatch_lock_order.up.sql` is a forward-only
+security repair layered over the original, **unchanged** schema-163 claim
+migration. PostgreSQL's foreign-key check on a claim's `server_id` takes a
+`FOR KEY SHARE` lock, even if application code never explicitly locks the
+server. The previous operation-first order could deadlock with cancellation,
+which locks the server `FOR UPDATE` before the operation. The service and
+SQL trigger now acquire the server `FOR KEY SHARE` **first**, and lock the
+original operation only after that. Same-operation claims still serialize.
+
+The 164 down migration intentionally refuses to restore an unsafe lock order.
+An upgrade must preserve every existing claim, confirmation, account and
+Agent job exactly; it does not create dispatch, mark any result successful,
+restart a VPN process or grant live execution. Disposable two-connection
+PostgreSQL tests exercise both cancellation-first and claim-first ordering.

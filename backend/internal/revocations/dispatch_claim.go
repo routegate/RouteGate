@@ -65,17 +65,32 @@ func (s *AuthorizedDispatchClaim) Claim(ctx context.Context, input DispatchClaim
 	}
 	defer tx.Rollback(ctx)
 
-	// Cancel acquires server-row -> operation-row locks. Do not obtain any
-	// server FOR UPDATE here: that would invert the cancellation lock order.
-	// The operation lock serializes competing claim/cancel transactions.
+	// Cancel locks server FOR UPDATE before the operation. Even a plain
+	// INSERT into dispatch_claims will later acquire a server KEY SHARE lock
+	// to check its foreign key; locking the operation first can therefore
+	// deadlock against cancellation. Take the weaker server KEY SHARE lock
+	// FIRST, then the operation lock, and pin the same server in both queries.
+	var serverID string
+	err = tx.QueryRow(ctx, `
+		SELECT s.id::text
+		FROM servers s
+		JOIN vpn_credential_revocations p ON p.server_id=s.id
+		WHERE p.id=$1::uuid
+		FOR KEY SHARE OF s
+	`, input.OperationID).Scan(&serverID)
+	if err != nil {
+		return deny()
+	}
+
+	// Both same-operation claims and cancellation now serialize safely.
 	var state, requestedBy, candidateHash, confirmedBy string
 	err = tx.QueryRow(ctx, `
 		SELECT p.state,p.requested_by,p.candidate_hash,c.confirmed_by
 		FROM vpn_credential_revocations p
 		JOIN vpn_credential_revocation_confirmations c ON c.operation_id=p.id
-		WHERE p.id=$1::uuid
+		WHERE p.id=$1::uuid AND p.server_id=$2::uuid
 		FOR UPDATE OF p
-	`, input.OperationID).Scan(&state, &requestedBy, &candidateHash, &confirmedBy)
+	`, input.OperationID, serverID).Scan(&state, &requestedBy, &candidateHash, &confirmedBy)
 	if err != nil || state != "prepared" || requestedBy != actor ||
 		confirmedBy != actor || candidateHash != input.ExpectedCandidateHash {
 		return deny()
