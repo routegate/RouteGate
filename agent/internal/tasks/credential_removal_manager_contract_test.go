@@ -10,6 +10,17 @@ import (
 	"testing"
 )
 
+// managerPreparedAdapter is only a fake listener in this test. Its port must
+// match the verified Manager candidate instead of the unrelated Agent unit
+// fixture's hardcoded localhost:443 port.
+type managerPreparedAdapter struct {
+	*removalAdapter
+	port int
+}
+func (a managerPreparedAdapter) CheckHealth(context.Context, string) (ListenerHealthResult, error) {
+	return ListenerHealthResult{Port: a.port}, nil
+}
+
 // This consumes actual PostgreSQL-backed Manager preparation bytes from the
 // isolated Backend CI job, not a second handwritten Agent-only fixture.
 // A fake local service generation proves parser/executor compatibility without
@@ -40,8 +51,9 @@ func TestCredentialRemovalManagerPreparedContract(t *testing.T) {
 	if err := json.Unmarshal(task.RenderedConfig, &envelope); err != nil {
 		t.Fatal("invalid candidate envelope")
 	}
-	if _, err := verifyRemovalRuntimeDelta(fixture.BaselineRuntime,
-		envelope.SingBox, *task.CredentialRemoval); err != nil {
+	port, err := verifyRemovalRuntimeDelta(fixture.BaselineRuntime,
+		envelope.SingBox, *task.CredentialRemoval)
+	if err != nil {
 		t.Fatal("real Manager candidate violates independent Agent runtime contract")
 	}
 	_, _, expectedHash, err := canonicalRemovalJSON(envelope.SingBox)
@@ -58,7 +70,7 @@ func TestCredentialRemovalManagerPreparedContract(t *testing.T) {
 		StartedMonotonic: "1000",
 	}}
 	executor := NewCredentialRemovalExecutor(active, filepath.Join(dir, "receipts"),
-		task.ServerID, task.AgentID, adapter, true)
+		task.ServerID, task.AgentID, managerPreparedAdapter{removalAdapter: adapter, port: port}, true)
 
 	// Reject an altered signed-intent input without touching the local runtime.
 	invalid := task
