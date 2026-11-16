@@ -94,3 +94,43 @@ At consolidated commit `3a175d301a22521a86e361d957b27776caa99277`, `backend/inte
 Do not wire the dormant executor to a generic `config_apply` job: the approved DB reservation, one-use operator confirmation, exact task identity, Agent acknowledgement, final runtime evidence, and fail-closed pending UI are not yet a single reviewed execution boundary. Plan one authorized end-to-end workflow, not a second journal.
 
 **Receipt correction:** replay of a historical `succeeded` removal receipt now uses the *same strictly increasing service generation proof* as initial completion; non-advancing systemd monotonic timestamps trigger `recovery_required` with no re-execution. Includes a concrete persisted-receipt replay regression, not a new task protocol.
+
+
+## Historical full Manager–Agent Reality E2E discovered (do not rewrite it)
+
+During reconciliation, found independent October Draft [#703](https://github.com/routegate/RouteGate/pull/703),
+HEAD `b32ab7f92c0cea65e256b3fbe0e650d3f30757ae`, stacked on [#697](https://github.com/routegate/RouteGate/pull/697).
+Its [exact-head CI](https://github.com/routegate/RouteGate/actions/runs/42183503313) and Workspace Integration were **SUCCESS**.
+The old CI explicitly builds Agent and Manager test binaries and runs
+`TestCredentialRemovalManagerAgentReality` with a disposable PostgreSQL database,
+isolated systemd and pinned sing-box 1.12.8. The test proves the old isolated
+stack could terminate an existing VLESS/Reality stream, reject the removed UUID,
+and preserve the second account. **It does not prove the current production
+`router.go` mounts that operation.** In #703 the Agent credential-removal
+claim/result endpoints are **explicitly mounted only into an isolated test
+`http.ServeMux`** via `agents.Handler.MountHeldRemoval`.
+
+Reusable, exact source files:
+- `backend/internal/db/credential_removal_manager_reality_integration_test.go`
+- `agent/internal/tasks/credential_removal_manager_reality_test.go`
+- `agent/internal/tasks/credential_removal_manager_child_test.go`
+- `backend/internal/agents/removal_transport.go` (old isolated transport)
+- `agent/internal/client/held_removal.go` (old task client)
+
+**Why not cherry-pick #703:** The legacy stack has
+`000160_credential_revocation_preparations.up.sql`, but current `main`
+uses schema **160 for traffic checkpoints**. It then introduces unrelated
+recovery schemas 161–172 and dispatch/transport schemas 173–177, while our
+canonical #812 lineage already owns 161–167 for different objects. Its
+`ExecuteHeld` and privileged dispatch contracts are not interchangeable
+with the #812 fenced Agent or task claims. Preserve source #703 and #713
+until source-level parity and authorization review are complete.
+
+**Reconciliation rule:** Use that **already validated test fixture** as the
+reference for eventual modern isolated two-account E2E, and port/adapt only
+the necessary code after defining one Manager human-authorization → immutable
+task → authenticated Agent claim → exact result/evidence → status transition
+boundary. Any additional approved schema uses **168+** in #812's canonical
+line; never import legacy migration numbers or expose unreviewed
+`MountHeldRemoval` routes in production. Keep operator confirmation and
+lost-acknowledgement behavior fail-closed.
