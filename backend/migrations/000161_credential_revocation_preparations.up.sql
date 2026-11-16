@@ -40,7 +40,7 @@ BEGIN
  RAISE EXCEPTION USING ERRCODE='P0141',MESSAGE='revocation_invalid_transition'; END IF;
  RETURN NEW;
 END; $$;
-CREATE TRIGGER rg141_ledger BEFORE UPDATE OR DELETE ON vpn_credential_revocations FOR EACH ROW EXECUTE FUNCTION routegate_revocation_ledger_guard();
+CREATE TRIGGER rg141_ledger BEFORE INSERT OR UPDATE OR DELETE ON vpn_credential_revocations FOR EACH ROW EXECUTE FUNCTION routegate_revocation_ledger_guard();
 CREATE FUNCTION routegate_revocation_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  INSERT INTO vpn_credential_revocation_events(operation_id,action,actor) VALUES(NEW.id,NEW.state,NEW.last_action_by);
