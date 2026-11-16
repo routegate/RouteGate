@@ -916,7 +916,11 @@ initialize_install_state() {
   if [[ "$ROUTEGATE_RESUME_INSTALL" == "1" ]]; then
     # This assertion runs AFTER checksum/manifest verification but BEFORE apt
     # and every platform file/service mutation.
-    validate_resume_release_identity       "$(state_value VERSION || true)" "$(state_value BUNDLE_SHA256 || true)"       "$ROUTEGATE_RESOLVED_VERSION" "$ROUTEGATE_BUNDLE_SHA256"
+    validate_resume_release_identity \
+      "$(state_value VERSION || true)" \
+      "$(state_value BUNDLE_SHA256 || true)" \
+      "$ROUTEGATE_RESOLVED_VERSION" \
+      "$ROUTEGATE_BUNDLE_SHA256"
   else
     [[ "$ROUTEGATE_BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] ||
       die "Release bundle SHA-256 is unavailable; refusing to create installation ownership state."
