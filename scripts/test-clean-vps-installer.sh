@@ -1061,15 +1061,16 @@ EOF_STATE
       ROUTEGATE_INSTALL_PROMETHEUS=1
       ROUTEGATE_INSTALL_GRAFANA="$3"
       ROUTEGATE_VERSION=v3.1.4
+      EVENTS_FILE="$4"
       systemctl() { return 0; }
       curl() { return 0; }
       wait_for_url() { return 0; }
       validate_apt_repository_trust() {
-        printf "TRUST_CHECKED\n" >>"$4"
+        printf "TRUST_CHECKED\n" >>"$EVENTS_FILE"
         die "Synthetic unapproved APT repository blocked."
       }
-      prepare_verified_grafana_installer() { printf "ADDON_VERIFIED\n" >>"$4"; }
-      install_selected_grafana() { printf "ADDON_CALLED\n" >>"$4"; }
+      prepare_verified_grafana_installer() { printf "ADDON_VERIFIED\n" >>"$EVENTS_FILE"; }
+      install_selected_grafana() { printf "ADDON_CALLED\n" >>"$EVENTS_FILE"; }
       verify_existing_install
     ' _ "$ROOT_DIR/install.sh" "$state" "$addon" "$events" >"$report" 2>&1; then
       if [[ "$case_name" == needs_grafana ]]; then
