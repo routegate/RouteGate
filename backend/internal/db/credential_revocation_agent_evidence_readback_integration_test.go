@@ -2,12 +2,14 @@ package db
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/ikaevus/routegate/backend/internal/agents"
 	"github.com/ikaevus/routegate/backend/internal/auth"
 	"github.com/ikaevus/routegate/backend/internal/revocations"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestRevocationAgentEvidenceReadbackIsAuthenticatedAndReadOnly(t *testing.T) {
@@ -39,17 +41,21 @@ func TestRevocationAgentEvidenceReadbackIsAuthenticatedAndReadOnly(t *testing.T)
 	})
 	if err!=nil{t.Fatal(err)}
 
-	// A synthetic database candidate version is used solely for testing the
-	// readback comparator. This test neither renders nor applies it to Agent.
-	var candidateVersion string
-	if err=pool.QueryRow(ctx,`
+	// Existing schema 161 MUST refuse a synthetic config version while
+	// this node is reserved. The readback comparator must not circumvent
+	// that safety boundary or pretend an unapplied config was deployed.
+	_,err=pool.Exec(ctx,`
 		INSERT INTO config_versions(server_id,version,config_hash,status,rendered_config)
 		SELECT $1::uuid,COALESCE(MAX(version),0)+1,$2,'applied','{}'::jsonb
 		FROM config_versions WHERE server_id=$1::uuid
-		RETURNING id::text
-	`,in.ServerID,candidateHash).Scan(&candidateVersion);err!=nil{
-		t.Fatalf("create synthetic readback-only candidate fixture: %v",err)
+	`,in.ServerID,candidateHash)
+	var pgErr *pgconn.PgError
+	if !errors.As(err,&pgErr)||pgErr.Code!="P0141" {
+		t.Fatalf("reserved node accepted synthetic applied candidate version: %v",err)
 	}
+	// The following UUID is a purely synthetic, non-persisted report field.
+	// It is deliberately NOT evidence of an actually applied version.
+	const candidateVersion="55555555-5555-4555-8555-555555555555"
 	var port int
 	if err=pool.QueryRow(ctx,"SELECT vless_port FROM servers WHERE id=$1::uuid",in.ServerID).Scan(&port);err!=nil{t.Fatal(err)}
 	report:=revocations.CredentialRemovalReport{
