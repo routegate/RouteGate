@@ -129,6 +129,34 @@ if (process.argv.includes('--inventory')) {
   if (references.length > 175) console.log('[docs-inventory] +' + (references.length - 175) + ' further references')
 }
 
+// Separate inventory for external URLs written inside *any* text or code
+// block. Static Markdown link checks cannot discover broken bare download
+// addresses in shell code snippets. This does not claim online reachability.
+if (process.argv.includes('--external-inventory')) {
+  const external = new Map()
+  for (const file of docs) {
+    for (const [index, line] of readFileSync(resolve(root, file), 'utf8').split('\n').entries()) {
+      for (const match of line.matchAll(/https?:\/\/[^\s<>"'`]+/g)) {
+        const url = match[0].replace(/[),;.\]}]+$/, '')
+        const uses = external.get(url) ?? []
+        uses.push(file + ':' + (index + 1))
+        external.set(url, uses)
+      }
+    }
+  }
+  const counts = {}
+  for (const url of external.keys()) {
+    try {
+      const host = new URL(url).hostname
+      counts[host] = (counts[host] ?? 0) + 1
+    } catch { counts.invalid = (counts.invalid ?? 0) + 1 }
+  }
+  console.log('[external-inventory] distinct=' + external.size + ' hosts=' + JSON.stringify(counts))
+  for (const [url, uses] of external) {
+    console.log('[external-inventory] ' + url + ' <' + uses.length + ' refs> ' + uses.slice(0, 2).join(', '))
+  }
+}
+
 findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
 for (const f of findings) console.error('[docs] ' + f.file + ':' + f.line + ' [' + f.category + '] ' + f.target)
 console.log('[docs] scanned ' + docs.length + ' documents; ' + internalCount + ' local links; ' +
