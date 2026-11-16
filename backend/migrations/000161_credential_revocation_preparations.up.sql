@@ -29,8 +29,11 @@ CREATE TABLE vpn_credential_revocation_events (
  actor text NOT NULL,
  created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE FUNCTION routegate_revocation_ledger_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION routegate_revocation_ledger_guard() RETURNS trigger LANGUAGE plpgsql AS $
 BEGIN
+ -- Serialize preparation with manager apply and global routing mutations.
+ -- A plain EXISTS check is not enough under concurrent READ COMMITTED writes.
+ IF TG_OP='INSERT' THEN PERFORM pg_advisory_xact_lock(140159); END IF;
  IF TG_OP='DELETE' THEN RAISE EXCEPTION USING ERRCODE='P0141',MESSAGE='revocation_proof_retained'; END IF;
  IF TG_OP='UPDATE' AND ((to_jsonb(OLD)-ARRAY['state','last_action_by','cancelled_at']) IS DISTINCT FROM
  (to_jsonb(NEW)-ARRAY['state','last_action_by','cancelled_at']) OR OLD.state<>'prepared' OR NEW.state<>'cancelled') THEN
@@ -133,8 +136,11 @@ BEGIN
 END; $$;
 CREATE TRIGGER rg141_version BEFORE INSERT OR UPDATE OR DELETE ON config_versions FOR EACH ROW EXECUTE FUNCTION routegate_revocation_version_guard();
 
-CREATE FUNCTION routegate_revocation_routing_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION routegate_revocation_routing_guard() RETURNS trigger LANGUAGE plpgsql AS $
 BEGIN
+ -- Take the same transaction-scoped lock as preparing a revocation and
+ -- starting a Manager apply, before inspecting the prepared ledger.
+ PERFORM pg_advisory_xact_lock(140159);
  IF EXISTS(SELECT 1 FROM vpn_credential_revocations WHERE state='prepared') THEN RAISE EXCEPTION USING ERRCODE='P0141',MESSAGE='routing_reserved_for_revocation'; END IF;
  IF TG_OP='DELETE' THEN RETURN OLD; END IF; RETURN NEW;
 END; $$;
