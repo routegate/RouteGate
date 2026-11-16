@@ -12,9 +12,9 @@
   Operate VPN nodes, accounts, protocols, routing, verified platform updates, secure client configuration delivery, and operational state from one control plane.
 </p>
 
-<p align="center">
-  <a href="https://routegate.org/#install"><strong>🚀 Quick Start · Install RouteGate / Установка RouteGate</strong></a>
-</p>
+<h2 align="center">
+  🚀 <a href="https://routegate.org/#install">Quick Start · Установка RouteGate</a>
+</h2>
 
 <p align="center">
   <strong>Release status:</strong> v0.2.0 installer is under review; the one-copy command is not published yet.
