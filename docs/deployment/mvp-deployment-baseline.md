@@ -1,8 +1,13 @@
 # MVP Deployment Baseline
 
-## Status
+## Status — historical record only
 
-**RouteGate v0.1.0 MVP — supported public deployment baseline**
+**RouteGate v0.1.0 MVP — original public deployment baseline, NOT the current
+v0.2.0 installation guide.** The supported current-feature first-install
+entrypoint, once a verified release is published, is
+[routegate.org — Quick Start](https://routegate.org/#install).
+Do not use this older baseline to initiate a new v0.2.0 installation.
+See [release readiness #715](https://github.com/routegate/RouteGate/issues/715).
 
 This document defines the canonical deployment profile for the first public RouteGate release. Docker Compose remains available for local development, but it is not the supported public installation path.
 
@@ -49,31 +54,19 @@ Before installation:
 
 The installer preserves SSH authentication policy and stops rather than silently overwriting unrelated host services or unowned RouteGate files.
 
-## Install
+## Install — historical scope
 
-Canonical installation starts from an immutable release identity. Download
-the installer, inspect it, and then execute it:
+The original `v0.1.0` deployment used an immutable tag and a multi-step
+installer. That release remains archived in
+[release notes](../release/v0.1.0.md) for maintenance and historical
+reproduction; it does not contain the verified one-copy/current-feature
+wizard and should not be recommended for new installations.
 
-```bash
-VERSION=v0.1.0
-curl -fL --proto '=https' --tlsv1.2 \
-  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
-  -o routegate-install.sh
-less routegate-install.sh
-sudo bash routegate-install.sh \
-  --domain vpn.example.com \
-  --email owner@example.com \
-  --version "${VERSION}"
-rm -f routegate-install.sh
-```
-
-Mutable branch content is not piped directly into a privileged shell. New
-releases additionally publish checksum and provenance-attestation assets for
-the installer scripts.
-
-The installer resolves a published release bundle and verifies it against the release `SHA256SUMS` before installing it.
-
-Detailed installer behavior and options are documented in [clean-vps-installer.md](clean-vps-installer.md).
+For an ordinary **new** VPS, use the
+[First-install guide](../guides/first-install.md) and verified website
+[Quick Start](https://routegate.org/#install) **only after** the current
+stable release and complete artifacts are published. Never mix `v0.1.0`
+bundles with newer installer scripts.
 
 ## What a successful platform installation provides
 

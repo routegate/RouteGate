@@ -21,26 +21,34 @@ The public DNS name is required for the Manager. RouteGate does not support an I
 
 ## 1. Copy the verified Quick Start command
 
-Open [routegate.org — Quick Start](https://routegate.org/#install) and click
-**Copy**. Paste the **single command** into the SSH terminal on your clean VPS.
+Open [routegate.org — Quick Start](https://routegate.org/#install). Once
+a new reviewed stable RouteGate release is actually published and the site
+offers a verified command, click **Copy** and paste that **single line**
+into the SSH terminal on your clean VPS.
 
-The command is available only for a complete, published stable release with a
-verified SHA-256 digest for its `install.sh` artifact. It downloads the
-installer to a temporary file, checks the digest **before** invoking `sudo`,
-and removes the temporary file when it exits. The installer will then verify
-the selected release bundle and manifest. There is no manual ZIP download,
-`git clone`, Go/Node toolchain, artifact identifier, or separate pager step.
+The copied command pins an exact published release and verifies the
+downloaded `install.sh` SHA-256 digest **before** running it with
+administrator privileges. The installer then checks the matching release
+bundle before installing packages or changing services.
 
-If the site shows **Quick Start temporarily unavailable**, do not substitute
-`v0.1.0`, the `main` branch or a CI artifact for a published stable installer.
-Wait until the project has a verified published release. Advanced operators
-can inspect release scripts and attestations in
-[GitHub Releases](https://github.com/routegate/RouteGate/releases) and
-perform a separate manual installation only after validating provenance.
+**Current release warning:** the historical published `v0.1.0` does not
+contain the newer `v0.2.0` feature set. If the website still offers
+`v0.1.0` or marks Quick Start unavailable, **do not paste an old command**,
+substitute a `main` branch installer, or mix installers and bundles from
+different versions. See [release readiness #715](https://github.com/routegate/RouteGate/issues/715).
+A first-install command will be enabled only after a verified current stable
+release is approved.
 
-## 2. Follow the interactive installer
+## 2. Follow the installer wizard
 
-The installer asks for the public RouteGate hostname and contact/administrator email values.
+Once Quick Start is enabled, the terminal installer guides the public
+hostname, Let's Encrypt contact email, administrator email and optional
+Prometheus/Grafana selection **during setup**. It then validates DNS,
+host/service conflicts, APT trust, release compatibility and HTTPS
+prerequisites before the install begins.
+
+No `git clone`, `less`, CI ZIP download, manual release archive, or local
+build is needed for the ordinary first-install path.
 
 ### Expected result
 

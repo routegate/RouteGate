@@ -161,6 +161,11 @@
   font-weight: 700;
 }
 
+.install-panel-heading button:disabled {
+  opacity: .65;
+  cursor: not-allowed;
+}
+
 .install-panel pre {
   margin: 0;
   padding: 22px;
