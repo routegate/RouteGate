@@ -7,7 +7,7 @@
 // release assets, in RU and EN.
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
-import { spawn } from 'node:child_process'
+import { createServer } from 'vite'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
@@ -31,28 +31,16 @@ const release = (tag = 'v0.2.0') => ({
 
 let vite
 let browser
-let output = ''
 
 before(async () => {
-  vite = spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '15176', '--strictPort'], {
-    cwd: websiteRoot,
-    env: { ...process.env, BROWSER: 'none' },
-    stdio: ['ignore', 'pipe', 'pipe'],
+  // Use Vite's JS server lifecycle, not a nested npm child process, so
+  // Chromium CI reliably closes all listeners even after an assertion fails.
+  vite = await createServer({
+    root: websiteRoot,
+    logLevel: 'error',
+    server: { host: '127.0.0.1', port: 15176, strictPort: true },
   })
-  for (const stream of [vite.stdout, vite.stderr]) stream.on('data', chunk => {
-    output = (output + chunk.toString()).slice(-5000)
-  })
-
-  let ready = false
-  for (let attempt = 0; attempt < 80; attempt++) {
-    if (vite.exitCode !== null) break
-    try {
-      const res = await fetch(origin + '/')
-      if (res.ok) { ready = true; break }
-    } catch { /* Vite has not started */ }
-    await new Promise(resolve => setTimeout(resolve, 250))
-  }
-  assert.equal(ready, true, 'website Vite startup failed: ' + output)
+  await vite.listen()
   browser = await chromium.launch({
     headless: true,
     ...(process.env.ROUTEGATE_CHROMIUM ? { executablePath: process.env.ROUTEGATE_CHROMIUM } : {}),
@@ -61,7 +49,7 @@ before(async () => {
 
 after(async () => {
   await browser?.close()
-  if (vite && vite.exitCode === null) vite.kill('SIGTERM')
+  await vite?.close()
 })
 
 async function openSite(path, releasePayload) {
