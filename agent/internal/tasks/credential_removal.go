@@ -118,7 +118,8 @@ func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask)
 			}
 			return deny("previous_attempt_failed")
 		}
-		if old.Report.ActiveRuntimeHash != request.CandidateRuntimeHash || !validRemovalGeneration(old.Report.Before) || !validRemovalGeneration(old.Report.After) || old.Report.Before.InvocationID == old.Report.After.InvocationID || old.Report.ListenerPort < 1 || old.Report.ListenerPort > 65535 || old.Report.Code != "" || old.Report.SessionEffect != "shared_process_restart_observed" {
+		if old.Report.ActiveRuntimeHash != request.CandidateRuntimeHash || !validRemovalGenerationTransition(old.Report.Before, old.Report.After) || old.Report.ListenerPort < 1 || old.Report.ListenerPort > 65535 || old.Report.Code != "" || old.Report.SessionEffect != "shared_process_restart_observed" {
+			report.State = "recovery_required"
 			return deny("invalid_receipt")
 		}
 		// Re-delivery after a lost acknowledgment is read-only. It must match
@@ -234,13 +235,9 @@ func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask)
 		return fail("restart_failed")
 	}
 	after, err := observer.ObserveGeneration(ctx, e.activePath)
-	// A different InvocationID is insufficient if systemd reports a process
-	// start at or before the previously measured generation. Treat that as
-	// uncertain mutation and retain the recovery fence: never auto-restart.
-	beforeStarted, beforeStartErr := strconv.ParseUint(before.StartedMonotonic, 10, 64)
-	afterStarted, afterStartErr := strconv.ParseUint(after.StartedMonotonic, 10, 64)
-	if err != nil || !validRemovalGeneration(after) || after.InvocationID == before.InvocationID ||
-		beforeStartErr != nil || afterStartErr != nil || afterStarted <= beforeStarted {
+	// An InvocationID change without a strictly newer systemd start
+	// cannot prove a restart. Use the same rule for saved success replay.
+	if err != nil || !validRemovalGenerationTransition(before, after) {
 		return fail("restart_not_verified")
 	}
 	if _, err = e.adapter.IsEnabled(ctx); err != nil {
@@ -275,6 +272,19 @@ func validRemovalGeneration(value RuntimeGeneration) bool {
 	raw, err := hex.DecodeString(value.InvocationID)
 	started, timeErr := strconv.ParseUint(value.StartedMonotonic, 10, 64)
 	return err == nil && len(raw) == 16 && value.InvocationID != strings.Repeat("0", 32) && value.PID > 0 && timeErr == nil && started > 0
+}
+
+// validRemovalGenerationTransition is shared by a new removal and durable
+// success replay. Historical results from older Agent builds must not bypass
+// the strictly-increasing systemd generation proof.
+func validRemovalGenerationTransition(before, after RuntimeGeneration) bool {
+	if !validRemovalGeneration(before) || !validRemovalGeneration(after) ||
+		before.InvocationID == after.InvocationID {
+		return false
+	}
+	beforeStart, beforeErr := strconv.ParseUint(before.StartedMonotonic, 10, 64)
+	afterStart, afterErr := strconv.ParseUint(after.StartedMonotonic, 10, 64)
+	return beforeErr == nil && afterErr == nil && afterStart > beforeStart
 }
 
 func (e CredentialRemovalExecutor) lock() (*os.File, error) {

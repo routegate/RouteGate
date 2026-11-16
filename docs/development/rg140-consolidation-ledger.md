@@ -86,3 +86,11 @@ A branch being an ancestor of a survivor is evidence that its **commits** are pr
 - Do NOT claim the entire branch is release-ready solely from this scope cut.
   Validate the exact new head. Issue #545 two-account runtime-revocation end-to-end
   acceptance remains separate from healthy ordinary VPN traffic tests.
+
+## Verified Manager → Agent delivery gap and historical success replay
+
+At consolidated commit `3a175d301a22521a86e361d957b27776caa99277`, `backend/internal/http/router.go` registers generic Agent task poll/result endpoints, **no credential-revocation operator endpoint**. `backend/internal/agents/repository.go::ClaimNextConfigTask` only claims existing generic `config_apply_jobs` and supplies `rendered_config`/hash; the current `agent/internal/heartbeat/runner.go::dispatchTaskUnfenced` switch does **not** handle `TaskKindCredentialRemoval`. The scoped `CredentialRemovalExecutor.Execute` is dormant in production. The target #545 behavior remains **unimplemented end to end**; ordinary Manager→Reality traffic and the isolated Agent two-user Reality systemd test are **not** proof of live credential revocation.
+
+Do not wire the dormant executor to a generic `config_apply` job: the approved DB reservation, one-use operator confirmation, exact task identity, Agent acknowledgement, final runtime evidence, and fail-closed pending UI are not yet a single reviewed execution boundary. Plan one authorized end-to-end workflow, not a second journal.
+
+**Receipt correction:** replay of a historical `succeeded` removal receipt now uses the *same strictly increasing service generation proof* as initial completion; non-advancing systemd monotonic timestamps trigger `recovery_required` with no re-execution. Includes a concrete persisted-receipt replay regression, not a new task protocol.

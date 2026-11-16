@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -129,6 +130,52 @@ func TestCredentialRemovalRejectsOlderServiceGeneration(t *testing.T) {
 	replayed, replayErr := e.Execute(context.Background(), task)
 	if replayErr == nil || replayed.State != "recovery_required" || adapter.restarts != 1 {
 		t.Fatalf("uncertain outcome retried mutation: report=%+v err=%v", replayed, replayErr)
+	}
+}
+
+// Historical successful receipts might predate the generation-order fix.
+// Never replay one as proof of removed credentials if systemd did not start
+// strictly after the previously observed process. This is read-only and
+// must never make another runtime mutation or clear anything.
+func TestCredentialRemovalReplayRejectsNonAdvancingHistoricalGeneration(t *testing.T) {
+	for _, newerTime := range []string{"1000", "999"} {
+		t.Run("monotonic_"+newerTime, func(t *testing.T) {
+			e, task, adapter, _ := removalExecutorFixture(t)
+			success, err := e.Execute(context.Background(), task)
+			if err != nil || success.State != "succeeded" || adapter.restarts != 1 {
+				t.Fatalf("fixture did not succeed: %+v %v", success, err)
+			}
+			path := filepath.Join(e.receiptDir, task.CredentialRemoval.OperationID+".json")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var receipt removalReceipt
+			if err := json.Unmarshal(data, &receipt); err != nil {
+				t.Fatal(err)
+			}
+			receipt.Report.After.StartedMonotonic = newerTime
+			data, err = json.Marshal(receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeRemovalFile(path, data); err != nil {
+				t.Fatal(err)
+			}
+			// Simulate the same measured service state as the historical
+			// receipt; otherwise the ordinary replay comparison alone
+			// would reject this invalid evidence and mask the gap.
+			adapter.generation.StartedMonotonic = newerTime
+			report, err := e.Execute(context.Background(), task)
+			if err == nil || report.State != "recovery_required" ||
+				report.Code != "invalid_receipt" || adapter.restarts != 1 {
+				t.Fatalf("accepted non-advancing receipt: report=%+v err=%v restarts=%d", report, err, adapter.restarts)
+			}
+			again, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(again, data) {
+				t.Fatal("failed replay changed durable evidence", err)
+			}
+		})
 	}
 }
 
