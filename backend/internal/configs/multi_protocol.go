@@ -59,6 +59,10 @@ func orderedAccountProtocols(values []string) []string {
 }
 
 func (r *Repository) ResolveServerAccountProtocols(ctx context.Context, serverID string) (map[string]accountProtocolSelection, error) {
+	return r.resolveServerAccountProtocols(ctx, serverID, true)
+}
+
+func (r *Repository) resolveServerAccountProtocols(ctx context.Context, serverID string, ensureCredentials bool) (map[string]accountProtocolSelection, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			a.id::text,
@@ -112,7 +116,7 @@ func (r *Repository) ResolveServerAccountProtocols(ctx context.Context, serverID
 		wireGuardRequired = wireGuardRequired || protocolListContains(selection.Protocols, platform.VPNProtocolWireGuard)
 		resolved[accountID] = selection
 	}
-	if wireGuardRequired {
+	if ensureCredentials && wireGuardRequired {
 		if err := wgcredentials.EnsureServerPeerCredentials(ctx, r.pool, serverID); err != nil {
 			return nil, err
 		}
