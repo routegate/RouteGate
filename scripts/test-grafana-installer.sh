@@ -98,8 +98,16 @@ PROMETHEUS_MANAGED=1
 UPDATED_AT=old
 EOF_STATE
   ROUTEGATE_STATE_FILE="$state"
+  local inode_before inode_after
+  inode_before=$(stat -c '%i' "$state")
   mark_managed_state
+  inode_after=$(stat -c '%i' "$state")
 
+  assert_true "Grafana replaces ownership state rather than truncating existing inode" \
+    test "$inode_before" != "$inode_after"
+  assert_equal "Grafana ownership state remains root-only" 600 "$(stat -c '%a' "$state")"
+  assert_equal "Grafana atomic state update leaves no orphaned staging file" 0 \
+    "$(find "$TEST_TMP" -maxdepth 1 -name '.state-update.env.*.tmp' | wc -l | tr -d '[:space:]')"
   assert_true "marks Grafana as RouteGate-managed" grep -Fxq 'GRAFANA_MANAGED=1' "$state"
   assert_true "preserves Prometheus ownership state" grep -Fxq 'PROMETHEUS_MANAGED=1' "$state"
   assert_equal "stores one Grafana ownership field" "1" "$(grep -c '^GRAFANA_MANAGED=' "$state")"
