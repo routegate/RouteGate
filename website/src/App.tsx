@@ -197,6 +197,7 @@ function CodePreview({ t }: { t: SiteContent['source'] }) {
 function AppHeader({ locale, setLocale, t }: { locale: Locale; setLocale: (value: Locale) => void; t: SiteContent }) {
   const navLinks = (
     <>
+      <a className="nav-install-link" href="#install">{t.action.installNav}</a>
       <a href="#product">{t.nav.product}</a>
       <a href="#open-source">{t.nav.openSource}</a>
       <a href={docsUrl} target="_blank" rel="noreferrer">{t.nav.docs}</a>
@@ -214,7 +215,6 @@ function AppHeader({ locale, setLocale, t }: { locale: Locale; setLocale: (value
           <summary>{locale === 'ru' ? 'Меню' : 'Menu'}</summary>
           <div className="mobile-nav-menu">
             {navLinks}
-            <a href="#install">{t.action.start}</a>
           </div>
         </details>
         <div className="header-actions">
@@ -291,6 +291,7 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
                   {t.action.github}
                 </a>
               </div>
+              <p className="hero-install-status"><a href="#install">{t.action.installStatus}</a></p>
               <div className="hero-meta">
                 <span>Linux</span>
                 <span>{locale === 'ru' ? 'Несколько протоколов' : 'Multi-protocol'}</span>
@@ -299,6 +300,23 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
               </div>
             </div>
             <HeroMapPreview locale={locale} />
+          </div>
+        </section>
+
+        <section className="section deployment-section container" id="install">
+          <div className="section-heading"><div><span>{t.deployment.eyebrow}</span><h2>{t.deployment.title}</h2></div><p>{t.deployment.text}</p></div>
+          <div className="deployment-grid">
+            {t.deployment.cards.map(card => <article key={card.title}><h3>{card.title}</h3><p>{card.text}</p></article>)}
+          </div>
+          <div className="install-panel">
+            <div className="install-panel-heading">
+              <div><span>{t.deployment.commandLabel}</span><strong>{t.deployment.commandTitle}</strong></div>
+              <button type="button" disabled aria-disabled="true">{t.deployment.commandButton}</button>
+            </div>
+            <div className="install-unavailable" role="status">{t.deployment.commandNote}</div>
+            <div className="install-panel-footer">
+              <a href={`${githubUrl}/issues/715`} target="_blank" rel="noreferrer">{t.deployment.commandStatusLink}<span>↗</span></a>
+            </div>
           </div>
         </section>
 
@@ -340,23 +358,6 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
               <a href={githubUrl} target="_blank" rel="noreferrer">{t.action.github}<span>↗</span></a>
             </div>
             <CodePreview t={t.source} />
-          </div>
-        </section>
-
-        <section className="section deployment-section container" id="install">
-          <div className="section-heading"><div><span>{t.deployment.eyebrow}</span><h2>{t.deployment.title}</h2></div><p>{t.deployment.text}</p></div>
-          <div className="deployment-grid">
-            {t.deployment.cards.map(card => <article key={card.title}><h3>{card.title}</h3><p>{card.text}</p></article>)}
-          </div>
-          <div className="install-panel">
-            <div className="install-panel-heading">
-              <div><span>{t.deployment.commandLabel}</span><strong>{t.deployment.commandTitle}</strong></div>
-              <button type="button" disabled aria-disabled="true">{t.deployment.commandButton}</button>
-            </div>
-            <div className="install-unavailable" role="status">{t.deployment.commandNote}</div>
-            <div className="install-panel-footer">
-              <a href={`${githubUrl}/issues/715`} target="_blank" rel="noreferrer">{t.deployment.commandStatusLink}<span>↗</span></a>
-            </div>
           </div>
         </section>
 
