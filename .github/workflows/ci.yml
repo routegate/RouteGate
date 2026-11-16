@@ -245,6 +245,12 @@ jobs:
           python3 scripts/release_manifest.py verify \
             --manifest "$OUTPUT_DIR/release-manifest.json" \
             --artifacts-dir "$OUTPUT_DIR"
+          # Check the REAL freshly built bundle through the installer CLI before
+          # any privileged host action. Unlike static file listings this exercises
+          # the exact checksum, extraction and manifest compatibility contract.
+          bash "$GITHUB_WORKSPACE/install.sh" --verify-bundle --version "$VERSION" \
+            --bundle-file "$OUTPUT_DIR/routegate-${VERSION}-linux-amd64.tar.gz" \
+            --checksum-file "$OUTPUT_DIR/SHA256SUMS"
           cd "$OUTPUT_DIR"
           sha256sum -c SHA256SUMS
           sha256sum -c INSTALLER_SHA256SUMS
