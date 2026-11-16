@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// v0.1.0 is the actual signed/annotated GitHub release tag from 2026-08-07,
+// v0.1.0 is the published annotated GitHub tag from 2026-08-07,
 // peeled to commit 407b08a9f357682ee3e70fe550a2e342017a33b5.
 // GitHub's published tag tree has these *exact 21* migration blobs. At
 // review time they match the same files already preserved in current main.
@@ -68,8 +68,13 @@ func TestPublishedV010SchemaUpgradesOnPostgreSQL(t *testing.T) {
 	}
 	defer pool.Close()
 
-	// This test resets only the disposable CI database, never an externally
-	// provided real host. The same environment gate protects other E2E tests.
+	// This fixture deliberately drops and rebuilds its database schema.
+	// Reject URLs pointing to non-CI databases or remote hosts, even if an
+	// operator accidentally configures ROUTEGATE_TEST_DATABASE_URL elsewhere.
+	cfg := pool.Config().ConnConfig
+	if cfg.Database != "routegate_ci" || (cfg.Host != "127.0.0.1" && cfg.Host != "localhost") {
+		t.Fatalf("published-release upgrade test requires local disposable routegate_ci database, got host=%q db=%q", cfg.Host, cfg.Database)
+	}
 	resetPublicSchema(t, ctx, pool)
 	releaseFixture := t.TempDir()
 	if len(publishedV010MigrationBlobs) != 21 {
