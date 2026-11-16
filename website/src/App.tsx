@@ -355,7 +355,7 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
             </div>
             <div className="install-unavailable" role="status">{t.deployment.commandNote}</div>
             <div className="install-panel-footer">
-              <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
+              <a href={`${githubUrl}/issues/715`} target="_blank" rel="noreferrer">{t.deployment.commandStatusLink}<span>↗</span></a>
             </div>
           </div>
         </section>
