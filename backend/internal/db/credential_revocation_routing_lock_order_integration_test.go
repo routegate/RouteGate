@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"errors"
 	"os"
 	"testing"
