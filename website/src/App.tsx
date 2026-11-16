@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { content, type CardIcon, type Locale, type SiteContent } from './content'
+import { buildInstallCommand, publishedStableInstall, publishedStableTag, stableReleaseSnapshotUrl } from './release'
 
 const githubUrl = 'https://github.com/routegate/RouteGate'
 const docsUrl = `${githubUrl}/tree/main/docs`
@@ -9,6 +10,8 @@ const securityUrl = `${githubUrl}/blob/main/SECURITY.md`
 const licenseUrl = `${githubUrl}/blob/main/LICENSE`
 const sourceCodeUrl = `${githubUrl}/blob/main/agent/internal/diagnostics/diagnostics.go#L22-L35`
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
+
+type StableRelease = { status: 'loading' | 'legacy' | 'ready' | 'unavailable'; tag: string | null; installerSha256?: string }
 
 function readStoredLocale(): Locale | null {
   try {
@@ -25,6 +28,23 @@ function persistLocale(locale: Locale) {
   } catch {
     // Storage can be unavailable in restricted/private browsing contexts.
   }
+}
+
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  textarea.remove()
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -239,13 +259,74 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
     return navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'
   }, [requestedLocale])
   const [locale, setLocale] = useState<Locale>(initialLocale)
+  const [installCopied, setInstallCopied] = useState(false)
+  const [stableRelease, setStableRelease] = useState<StableRelease>({ status: 'loading', tag: null })
   const t = content[locale]
+  const installCommand = stableRelease.status === 'ready' && stableRelease.tag && stableRelease.installerSha256
+    ? buildInstallCommand(stableRelease.tag, stableRelease.installerSha256)
+    : null
+
+  useEffect(() => {
+    let unmounted = false
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 8000)
+
+    const loadPublishedStable = async () => {
+      try {
+        // Pages publishes the authoritative release snapshot at build time.
+        // A missing, stale-looking or invalid snapshot MUST disable Copy.
+        // Never ask a browser to bypass a disabled Pages snapshot by querying
+        // GitHub's API independently: revocation depends on fail-closed state.
+        const snapshot = await fetch(stableReleaseSnapshotUrl, {
+          signal: controller.signal,
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        })
+        if (!snapshot.ok || !snapshot.headers.get('content-type')?.includes('json')) {
+          throw new Error('No verified published stable release snapshot')
+        }
+        const payload: unknown = await snapshot.json()
+        const tag = publishedStableTag(payload)
+        if (!tag) throw new Error('No valid published stable release')
+        if (tag === 'v0.1.0') {
+          if (!unmounted) setStableRelease({ status: 'legacy', tag })
+          return
+        }
+        const install = publishedStableInstall(payload)
+        if (!install) throw new Error('Release installer asset missing verified SHA-256 digest')
+        if (!unmounted) setStableRelease({ status: 'ready', tag, installerSha256: install.installerSha256 })
+      } catch {
+        // Fail closed: no silently outdated command or mutable branch fallback.
+        if (!unmounted) setStableRelease({ status: 'unavailable', tag: null })
+      } finally {
+        window.clearTimeout(timeout)
+      }
+    }
+
+    void loadPublishedStable()
+    return () => {
+      unmounted = true
+      controller.abort()
+      window.clearTimeout(timeout)
+    }
+  }, [])
 
   const handleLocaleChange = (nextLocale: Locale) => {
     setLocale(nextLocale)
     const nextPath = nextLocale === 'ru' ? '/ru/' : '/'
     if (window.location.pathname !== nextPath) {
       window.history.replaceState(null, '', nextPath)
+    }
+  }
+
+  const handleCopyInstall = async () => {
+    if (!installCommand) return
+    try {
+      await copyText(installCommand)
+      setInstallCopied(true)
+      window.setTimeout(() => setInstallCopied(false), 1800)
+    } catch {
+      setInstallCopied(false)
     }
   }
 
@@ -291,7 +372,9 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
                   {t.action.github}
                 </a>
               </div>
-              <p className="hero-install-status"><a href="#install">{t.action.installStatus}</a></p>
+              {stableRelease.status !== 'ready' && (
+                <p className="hero-install-status"><a href="#install">{t.action.installStatus}</a></p>
+              )}
               <div className="hero-meta">
                 <span>Linux</span>
                 <span>{locale === 'ru' ? 'Несколько протоколов' : 'Multi-protocol'}</span>
@@ -310,12 +393,32 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
           </div>
           <div className="install-panel">
             <div className="install-panel-heading">
-              <div><span>{t.deployment.commandLabel}</span><strong>{t.deployment.commandTitle}</strong></div>
-              <button type="button" disabled aria-disabled="true">{t.deployment.commandButton}</button>
+              <div><span>{t.deployment.commandLabel}</span><strong>{
+                stableRelease.status === 'ready' && stableRelease.tag
+                  ? t.deployment.commandTitle.replace('{version}', stableRelease.tag)
+                  : stableRelease.status === 'legacy'
+                    ? t.deployment.legacyReleaseTitle
+                    : stableRelease.status === 'loading'
+                      ? t.deployment.releaseLoadingTitle
+                      : t.deployment.releaseUnavailableTitle
+              }</strong></div>
+              <button type="button" disabled={!installCommand} onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
             </div>
-            <div className="install-unavailable" role="status">{t.deployment.commandNote}</div>
+            <pre aria-live="polite"><code>{installCommand ?? (
+              stableRelease.status === 'loading'
+                ? t.deployment.releaseLoading
+                : stableRelease.status === 'legacy'
+                  ? t.deployment.legacyReleaseDisabled
+                  : t.deployment.releaseUnavailable
+            )}</code></pre>
             <div className="install-panel-footer">
-              <a href={`${githubUrl}/issues/715`} target="_blank" rel="noreferrer">{t.deployment.commandStatusLink}<span>↗</span></a>
+              <span>{stableRelease.status === 'legacy'
+                ? t.deployment.legacyReleaseNote
+                : stableRelease.status === 'ready'
+                  ? t.deployment.commandNote
+                  : t.deployment.releaseUnavailableNote}</span>
+              <a href={releasesUrl} target="_blank" rel="noreferrer">{t.deployment.releaseListLabel}<span>↗</span></a>
+              <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
             </div>
           </div>
         </section>

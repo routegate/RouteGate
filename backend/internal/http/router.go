@@ -217,6 +217,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) stdht
 	mux.HandleFunc("POST /api/v1/agent/heartbeat", agentsHandler.Heartbeat)
 	mux.HandleFunc("GET /api/v1/agent/tasks/next", agentsHandler.NextTask)
 	mux.HandleFunc("POST /api/v1/agent/tasks/{job_id}/result", agentsHandler.CompleteTask)
+	mux.HandleFunc("POST /api/v1/agent/tasks/{job_id}/result/verify", agentsHandler.VerifyTaskResult)
 	mux.HandleFunc("POST /api/v1/agent/traffic-usage", trafficHandler.ReportUsage)
 	mux.HandleFunc("POST /api/v1/agent/traffic-batches", trafficHandler.ReportUsage)
 	mux.HandleFunc("POST /api/v1/agent/traffic-reports", trafficHandler.ReportUsage)

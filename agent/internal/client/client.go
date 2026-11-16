@@ -3,7 +3,10 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +33,22 @@ const (
 type Client struct {
 	managerURL string
 	httpClient *http.Client
+}
+
+type strictTaskAcknowledgementKey struct{}
+type durableTaskResultKey struct{}
+
+// WithDurableTaskResult persists the exact JSON envelope before any HTTP attempt.
+// The callback must be bound to the live task lease. It never receives a token.
+func WithDurableTaskResult(ctx context.Context, save func(string, []byte) error) context.Context {
+	return context.WithValue(WithStrictTaskAcknowledgement(ctx), durableTaskResultKey{}, save)
+}
+
+
+// WithStrictTaskAcknowledgement requires positive Manager acceptance for
+// safety-gated tasks. 404 after an uncertain attempt is not confirmation.
+func WithStrictTaskAcknowledgement(ctx context.Context) context.Context {
+	return context.WithValue(ctx, strictTaskAcknowledgementKey{}, true)
 }
 
 type httpStatusError struct {
@@ -71,6 +90,7 @@ type heartbeatRequest struct {
 }
 
 type HeartbeatResponse struct {
+	RuntimeMutationFencingAccepted bool `json:"runtimeMutationFencingAccepted"`
 	OK           bool   `json:"ok"`
 	AgentID      string `json:"agentId"`
 	ServerID     string `json:"serverId"`
@@ -181,9 +201,72 @@ func (c *Client) NextTask(ctx context.Context, agentToken string) (*tasks.Config
 }
 
 func (c *Client) CompleteTask(ctx context.Context, agentToken, jobID string, req completeTaskRequest) error {
+	strict, _ := ctx.Value(strictTaskAcknowledgementKey{}).(bool)
+	if strict && req.Status != "succeeded" {
+		// An ordinary failed envelope cannot represent an uncertain mutation.
+		// Retain Manager's active job until explicit reconciliation exists.
+		return errors.New("fenced task requires runtime reconciliation")
+	}
 	if strings.TrimSpace(jobID) == "" {
 		return fmt.Errorf("job id is required")
 	}
+	if save, ok := ctx.Value(durableTaskResultKey{}).(func(string, []byte) error); ok {
+		data, err := json.Marshal(req)
+		if err != nil || save(jobID, data) != nil {
+			return errors.New("durable task result unavailable")
+		}
+		// Freeze the envelope so retries match the durable bytes exactly.
+		return c.deliverTaskResult(ctx, agentToken, jobID, json.RawMessage(data), true)
+	}
+	return c.deliverTaskResult(ctx, agentToken, jobID, req, strict)
+}
+
+// ReplayTaskResult reports a historical success without executing its task.
+// A 404 is never acknowledgement, including after an uncertain HTTP attempt.
+func (c *Client) ReplayTaskResult(ctx context.Context, agentToken, jobID string, data []byte, binding tasks.RuntimeResultBinding) error {
+	if binding.ManagerURL != c.managerURL || binding.AgentID == "" || binding.ServerID == "" {
+		return errors.New("result identity mismatch")
+	}
+	var envelope completeTaskRequest
+	if json.Unmarshal(data, &envelope) != nil || envelope.Status != "succeeded" || envelope.ErrorMessage != "" || strings.TrimSpace(jobID) == "" {
+		return errors.New("invalid durable task result")
+	}
+	err := c.deliverTaskResult(ctx, agentToken, jobID, json.RawMessage(data), true)
+	if err == nil {
+		return nil
+	}
+	// Manager may have committed before the response was lost. Read back the
+	// exact historical result; a missing task alone is never acknowledgement.
+	if ctx.Err() != nil || c.verifyRuntimeResult(ctx, agentToken, jobID, data, binding) != nil {
+		return errors.New("historical runtime result remains unverified")
+	}
+	return nil
+}
+
+func (c *Client) verifyRuntimeResult(ctx context.Context, token, jobID string, data []byte, binding tasks.RuntimeResultBinding) error {
+	var result struct {
+		SchemaVersion  int    `json:"schemaVersion"`
+		Verified       bool   `json:"verified"`
+		TaskID         string `json:"taskId"`
+		AgentID        string `json:"agentId"`
+		ServerID       string `json:"serverId"`
+		EnvelopeSHA256 string `json:"envelopeSha256"`
+	}
+	if binding.ManagerURL != c.managerURL || binding.AgentID == "" || binding.ServerID == "" {
+		return errors.New("result identity mismatch")
+	}
+	path := "/api/v1/agent/tasks/" + url.PathEscape(jobID) + "/result/verify"
+	if err := c.doJSON(ctx, http.MethodPost, path, token, json.RawMessage(data), &result); err != nil {
+		return err
+	}
+	digest := sha256.Sum256(data)
+	if result.SchemaVersion != 1 || !result.Verified || result.TaskID != jobID || result.AgentID != binding.AgentID || result.ServerID != binding.ServerID || result.EnvelopeSHA256 != hex.EncodeToString(digest[:]) {
+		return errors.New("result evidence mismatch")
+	}
+	return nil
+}
+
+func (c *Client) deliverTaskResult(ctx context.Context, agentToken, jobID string, req any, strict bool) error {
 	path := "/api/v1/agent/tasks/" + url.PathEscape(jobID) + "/result"
 
 	var lastErr error
@@ -200,7 +283,7 @@ func (c *Client) CompleteTask(ctx context.Context, agentToken, jobID string, req
 			// handed it out, so a 404 after an uncertain prior completion attempt is
 			// safe to treat as an idempotent acknowledgement rather than abandoning
 			// the already-applied runtime state.
-			if statusErr.statusCode == http.StatusNotFound && hadUncertainAttempt {
+			if statusErr.statusCode == http.StatusNotFound && hadUncertainAttempt && !strict {
 				return nil
 			}
 			if statusErr.statusCode != http.StatusRequestTimeout &&

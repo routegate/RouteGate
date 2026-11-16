@@ -159,6 +159,10 @@ func stagePlatformUpdateWithPreparedReceipt(ctx context.Context, store platformU
 // attempt is fail-closed to ambiguity so a replay can never become a second
 // mutation attempt.
 func PrepareAndStartDetachedPlatformUpdate(ctx context.Context, taskID string, request PlatformUpdateRequest) (PlatformUpdateStagedCandidate, error) {
+	// No safe detached handoff exists for the experimental shared runtime fence.
+	if RuntimeMutationStatePresent(DefaultRuntimeMutationDir) {
+		return PlatformUpdateStagedCandidate{}, fmt.Errorf("%w: %w", ErrPlatformUpdateDispatchAmbiguous, ErrRuntimeMutationBlocked)
+	}
 	if !canonicalTaskIDPattern.MatchString(taskID) {
 		return PlatformUpdateStagedCandidate{}, fmt.Errorf("platform update task id must be canonical UUIDv4")
 	}
@@ -228,6 +232,10 @@ func platformUpdateDispatchHasPriorState(taskID string) (bool, error) {
 // receipt before systemd-run is invoked. The worker verifies the handoff and
 // monotonically crosses mutation_started before invoking the verified updater.
 func RunPlatformUpdateWorker(taskID string) error {
+	// A previously scheduled worker must check even if dispatch refused.
+	if RuntimeMutationStatePresent(DefaultRuntimeMutationDir) {
+		return ErrRuntimeMutationBlocked
+	}
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("platform update worker must run as root")
 	}

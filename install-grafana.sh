@@ -114,12 +114,36 @@ verify_prometheus_dependency() {
 }
 
 validate_loopback_listener() {
-  local port=$1 service_name=$2
-  if ss -ltnH | awk '{print $4}' | grep -Eq "(^0\\.0\\.0\\.0:${port}$|^\\[::\\]:${port}$)"; then
-    die "${service_name} is unexpectedly listening on a public wildcard address."
-  fi
-  ss -ltnH | awk '{print $4}' | grep -Eq "(^127\\.0\\.0\\.1:${port}$|^\\[::1\\]:${port}$)" \
-    || die "${service_name} is not listening on the expected loopback address."
+  local port=$1 service_name=$2 attempts=${3:-6}
+  local i socket found=0
+  local -a sockets=()
+  for ((i = 1; i <= attempts; i++)); do
+    sockets=()
+    # Examine EVERY bound address for this port, not just wildcards.
+    # A service bound to loopback AND a concrete public interface is unsafe.
+    mapfile -t sockets < <(
+      ss -ltnH | awk -v suffix=":${port}" '{
+        addr = $4
+        if (length(addr) >= length(suffix) &&
+            substr(addr, length(addr) - length(suffix) + 1) == suffix)
+          print addr
+      }'
+    )
+    found=0
+    for socket in "${sockets[@]}"; do
+      case "$socket" in
+        "127.0.0.1:${port}"|"[::1]:${port}")
+          found=1
+          ;;
+        *)
+          die "${service_name} is unexpectedly listening on a non-loopback address."
+          ;;
+      esac
+    done
+    [[ "$found" == "1" ]] && return 0
+    if ((i < attempts)); then sleep 1; fi
+  done
+  die "${service_name} is not listening on the expected loopback address."
 }
 
 verify_existing_managed_install() {
@@ -132,9 +156,9 @@ verify_existing_managed_install() {
   package_installed grafana || die "RouteGate state claims Grafana ownership, but the grafana package is missing."
   systemctl is-enabled --quiet "$ROUTEGATE_GRAFANA_SERVICE" || die "RouteGate-managed Grafana is not enabled."
   systemctl is-active --quiet "$ROUTEGATE_GRAFANA_SERVICE" || die "RouteGate-managed Grafana is not active."
-  validate_loopback_listener 3000 Grafana
   wait_for_http_200 "http://127.0.0.1:3000/grafana/api/health" 10 1 "$ROUTEGATE_DOMAIN" \
     || die "RouteGate-managed Grafana health endpoint is unavailable."
+  validate_loopback_listener 3000 Grafana
   grep -Fq '# BEGIN ROUTEGATE MANAGED GRAFANA' "$ROUTEGATE_NGINX_SITE" \
     || die "RouteGate-managed Grafana nginx gateway is missing."
   wait_for_http_200 "${ROUTEGATE_GRAFANA_URL}api/health" 10 1 \
