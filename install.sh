@@ -366,17 +366,28 @@ installer_configuration_menu() {
   [[ -n "$ROUTEGATE_ADMIN_EMAIL" ]] || ROUTEGATE_ADMIN_EMAIL="$ROUTEGATE_EMAIL"
   [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
 
-  local status="" saved_prom="" saved_grafana=""
+  local status="" saved_prom="" saved_grafana="" managed_grafana=""
   if [[ -f "$ROUTEGATE_STATE_FILE" ]]; then
     status=$(state_value STATUS || true)
     saved_prom=$(state_value PROMETHEUS_MANAGED || true)
     saved_grafana=$(state_value GRAFANA_REQUESTED || true)
+    managed_grafana=$(state_value GRAFANA_MANAGED || true)
     if [[ "$status" == "installing" || "$status" == "complete" ]]; then
       [[ -n "$ROUTEGATE_DOMAIN" ]] || ROUTEGATE_DOMAIN=$(state_value DOMAIN || true)
       [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
       [[ -n "$saved_prom" ]] && ROUTEGATE_INSTALL_PROMETHEUS="$saved_prom"
       if [[ "$status" == "installing" && -n "$saved_grafana" ]]; then
         ROUTEGATE_INSTALL_GRAFANA="$saved_grafana"
+      elif [[ "$status" == "complete" ]]; then
+        [[ -z "$managed_grafana" || "$managed_grafana" == "0" || "$managed_grafana" == "1" ]] \
+          || die "Existing RouteGate Grafana ownership state is invalid."
+        if [[ "$managed_grafana" == "1" ]]; then
+          # Always verify the already-installed add-on; this menu never uninstalls it.
+          ROUTEGATE_INSTALL_GRAFANA=1
+        elif [[ -z "$ROUTEGATE_INSTALL_GRAFANA" && "$saved_grafana" == "1" ]]; then
+          # Core completed but Grafana did not; present an actionable retry.
+          ROUTEGATE_INSTALL_GRAFANA=1
+        fi
       fi
     fi
   fi
@@ -389,10 +400,19 @@ installer_configuration_menu() {
   fi
   prompt_for_grafana
 
-  local choice="" domain_label=""
+  local choice="" domain_label="" grafana_label=""
   while true; do
     domain_label="$ROUTEGATE_DOMAIN"
     [[ -n "$domain_label" ]] || domain_label="not configured"
+    if [[ "$status" == "complete" && "$managed_grafana" == "1" ]]; then
+      grafana_label="INSTALLED"
+    elif [[ "$status" == "complete" && "$saved_grafana" == "1" && "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+      grafana_label="RETRY"
+    elif [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+      grafana_label="ON"
+    else
+      grafana_label="OFF"
+    fi
     {
       printf '\n\033[1;36m+----------------------------------------------------------+\033[0m\n'
       printf '\033[1;36m|               RouteGate VPN Installer                    |\033[0m\n'
@@ -400,7 +420,7 @@ installer_configuration_menu() {
       printf '  Target: %-42s\n' "$domain_label"
       printf '  1. Main settings (domain, emails, server name)\n'
       printf '  2. Prometheus       [%s]\n' "$([[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] && echo ON || echo OFF)"
-      printf '  3. Grafana          [%s]\n' "$([[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] && echo ON || echo OFF)"
+      printf '  3. Grafana          [%s]\n' "$grafana_label"
       printf '  4. View installation plan\n'
       printf '  5. Continue to preflight and installation\n'
       printf '  0. Exit without installing\n'
@@ -447,6 +467,8 @@ installer_configuration_menu() {
       3)
         if [[ "$status" == "installing" ]]; then
           printf 'Grafana selection is pinned during recovery.\n' >/dev/tty
+        elif [[ "$status" == "complete" && "$managed_grafana" == "1" ]]; then
+          printf 'Grafana is already installed. This menu cannot uninstall an owned service.\n' >/dev/tty
         elif [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
           ROUTEGATE_INSTALL_GRAFANA=0
         elif [[ "$ROUTEGATE_PROMETHEUS_EXPLICIT_NO" == "1" ]]; then
