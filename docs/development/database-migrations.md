@@ -38,7 +38,7 @@ use a new forward-only ordinal. In the **schema-161 review branch**, the
 preparation ledger has consumed `000161_*` and the review-only immutable
 confirmation ledger uses `000162_*`; this review's one-time dispatch
 fence uses `000163_*`. Future migrations require a unique unused ordinal
-**165 or higher**; do not rename the existing 160/161/162/163/164.
+**166 or higher**; do not rename the existing 160/161/162/163/164/165.
 
 The existing `000160_traffic_report_checkpoints.up.sql` filename is
 also immutable, as is the unusual shipped `0001430_*` outlier. The
@@ -133,14 +133,13 @@ trigger forbids cancelling the parent preparation even if the caller
 still sees `prepared`. Pending accounts remain fenced until
 authenticated evidence and an independently reviewed recovery policy.
 
-The before-insert trigger locks the **preparation record only** and
-revalidates its exact confirmation, actor, Agent ID/generation,
-server/baseline and hash identities, authenticated Agent heartbeat
-generation and recent liveness, and the applied baseline. It deliberately
-does **not** lock the `servers` row: the existing cancellation path
-takes server-row → operation-row locks, so reversing that order could
-create a new deadlock. The parent preparation already fences competing
-Apply/transfer changes through the earlier SQL guards.
+The original schema-163 trigger locks the preparation record to
+revalidate confirmation, actor, Agent ID/generation, server/baseline,
+hashes and liveness. **Schema 164 subsequently corrects the lock
+ordering:** PostgreSQL's implicit FK `servers FOR KEY SHARE` must be
+acquired before the parent operation lock. This applies to both direct
+SQL inserts and the internal Claim service. The parent preparation
+already fences conflicting Apply/transfer changes.
 
 `AuthorizedDispatchClaim.Claim` is **internal and unmounted**. It
 requires the trusted Manager super-admin context, exact expected
@@ -202,3 +201,39 @@ An upgrade must preserve every existing claim, confirmation, account and
 Agent job exactly; it does not create dispatch, mark any result successful,
 restart a VPN process or grant live execution. Disposable two-connection
 PostgreSQL tests exercise both cancellation-first and claim-first ordering.
+
+## Schema 165 — immutable task identity, **not** an executable Agent job
+
+`000165_credential_revocation_task_identity.up.sql` adds an immutable,
+server-generated `task_id` reservation for at most one existing,
+confirmed, `outcome_unknown` claim. Its `claim_id` and `operation_id`
+are each unique. Every actor, server, Agent identity and credential
+generation, baseline version, candidate configuration hash and runtime
+hash is copied only from the durable claim and preparation snapshots,
+not from a browser or an untrusted payload. The stored task kind is
+strictly `vless_credential_removal_v1`. Rows cannot be altered or
+deleted, and downgrade fails when history exists.
+
+`AuthorizedTaskIdentityReservation.Reserve` is **unmounted and
+non-executable**. It requires a trusted active super-admin session
+context, exact claim/operation IDs and candidate hash. A prior or
+concurrently successful reservation blocks every replay. An ambiguous
+database COMMIT is `ErrTaskIdentityOutcomeUnknown`, **not** permission
+to reserve a second ID or dispatch the existing ID.
+
+Reservation does **not** create an `agent_operation_jobs` row, enqueue
+work, establish an Agent journal, transmit a task, change VPN status,
+restart sing-box, validate a success receipt or terminate sessions.
+The existing `prepared` ledger intentionally blocks ordinary Agent
+job creation. This table is not yet joined to a task delivery mechanism.
+It must remain impossible to infer dispatchability from a reserved
+`task_id` alone. Fresh session authentication via a future
+`auth.Middleware` HTTP route is not yet present.
+
+A PostgreSQL concurrency test ensures two simultaneous reservations
+cannot create two task IDs. Negative tests reject cross-admin claims,
+wrong hashes, stale Agent heartbeat, browser-supplied IDs and UPDATE/
+DELETE. The 163→164→165 upgrade tests must prove existing claims and
+accounts survive unchanged and **no task ID is fabricated on upgrade**.
+Agent identity/receipt proof, no-redelivery, genuine remote session
+termination and disposable canary acceptance remain separate gates.
