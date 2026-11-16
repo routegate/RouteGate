@@ -29,7 +29,7 @@ CREATE TABLE vpn_credential_revocation_events (
  actor text NOT NULL,
  created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE FUNCTION routegate_revocation_ledger_guard() RETURNS trigger LANGUAGE plpgsql AS $
+CREATE FUNCTION routegate_revocation_ledger_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  -- Serialize preparation with manager apply and global routing mutations.
  -- A plain EXISTS check is not enough under concurrent READ COMMITTED writes.
@@ -136,7 +136,7 @@ BEGIN
 END; $$;
 CREATE TRIGGER rg141_version BEFORE INSERT OR UPDATE OR DELETE ON config_versions FOR EACH ROW EXECUTE FUNCTION routegate_revocation_version_guard();
 
-CREATE FUNCTION routegate_revocation_routing_guard() RETURNS trigger LANGUAGE plpgsql AS $
+CREATE FUNCTION routegate_revocation_routing_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  -- Take the same transaction-scoped lock as preparing a revocation and
  -- starting a Manager apply, before inspecting the prepared ledger.
