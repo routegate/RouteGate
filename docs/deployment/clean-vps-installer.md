@@ -398,6 +398,8 @@ and exercise actual local VPN-client traffic. It retrieves the public-shaped
 `503` before first Apply, stable applied profiles through failed Apply and
 service restart, and a scoped `404` for a revoked *subscription URL* while
 the other URL and existing VPN credentials remain operational.
+The test client rejects redirects and unexpected URL authorities rather
+than following a redirect that might expose a subscription bearer.
 
 The certificates and DNS in these checks are synthetic and local to the
 runner. No claim is made about public Let's Encrypt, an external VPN client
