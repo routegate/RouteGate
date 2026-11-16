@@ -881,7 +881,16 @@ verify_existing_install() {
 
   log "RouteGate is already installed and healthy. No core platform changes were made."
   if [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
-    local pinned_version
+    local managed_grafana pinned_version
+    managed_grafana=$(state_value GRAFANA_MANAGED || true)
+    [[ -z "$managed_grafana" || "$managed_grafana" == "0" || "$managed_grafana" == "1" ]] \
+      || die "Existing RouteGate Grafana ownership state is invalid."
+    if [[ "$managed_grafana" != "1" ]]; then
+      # A core-complete host skips the normal clean-host trust preflight.
+      # Before an actual Grafana APT install/retry, restore that boundary.
+      # A managed, already installed Grafana takes a read-only health path.
+      validate_apt_repository_trust
+    fi
     pinned_version=$(state_value VERSION || true)
     validate_release_version "$pinned_version" || die "Installed RouteGate release version is invalid."
     [[ "$pinned_version" != "latest" ]] || die "Installed release version is not pinned."
