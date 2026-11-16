@@ -91,7 +91,7 @@ func (v *AgentEvidenceReadback) Check(ctx context.Context, rawAgentToken, operat
 	if err!=nil||claimed<=0||currentGeneration!=claimed{
 		return fail()
 	}
-	bound=EvidenceBinding{
+	bound:=EvidenceBinding{
 		OperationID:operationID,JobID:claimID,AccountID:accountID,
 		ServerID:serverID,AgentID:agentID,BaselineVersionID:baselineID,
 		ConfigVersionID:untrusted.ConfigVersionID,ConfigHash:candidateConfigHash,
