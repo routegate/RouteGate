@@ -119,6 +119,15 @@ func TestCredentialRevocationGlobalReservationSerializesPreparationAndRouting(t 
     if err := tx.Commit(ctx); err != nil {
         t.Fatal(err)
     }
+    // A context deadline can race the final response. Check PostgreSQL
+    // state rather than trusting only the client's timeout error.
+    var silentlyCommitted int
+    if err := pool.QueryRow(ctx, "SELECT count(*) FROM vpn_credential_revocations WHERE state='prepared'").Scan(&silentlyCommitted); err != nil {
+        t.Fatal(err)
+    }
+    if silentlyCommitted != 0 {
+        t.Fatalf("timed-out preparation unexpectedly committed %d operations", silentlyCommitted)
+    }
 
     operationID, err := insertPreparation(ctx)
     if err != nil {
@@ -158,7 +167,7 @@ func TestCredentialRevocationGlobalReservationSerializesPreparationAndRouting(t 
     }
     routingCtx, routingCancel := context.WithTimeout(ctx, 350*time.Millisecond)
     _, err = pool.Exec(routingCtx, `
-        INSERT INTO routing_profiles (name) VALUES ('rg140-global-route-after-cancel')
+        INSERT INTO routing_profiles (name) VALUES ('rg140-global-route-blocked-at-lock')
     `)
     routingCancel()
     if err == nil {
@@ -166,6 +175,16 @@ func TestCredentialRevocationGlobalReservationSerializesPreparationAndRouting(t 
     }
     if err := routingTx.Commit(ctx); err != nil {
         t.Fatal(err)
+    }
+    var prematurelyCommitted int
+    if err := pool.QueryRow(ctx, `
+        SELECT count(*) FROM routing_profiles
+        WHERE name='rg140-global-route-blocked-at-lock'
+    `).Scan(&prematurelyCommitted); err != nil {
+        t.Fatal(err)
+    }
+    if prematurelyCommitted != 0 {
+        t.Fatalf("timed-out routing edit unexpectedly committed %d records", prematurelyCommitted)
     }
     if _, err := pool.Exec(ctx, `
         INSERT INTO routing_profiles (name) VALUES ('rg140-global-route-after-cancel')
