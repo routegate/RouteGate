@@ -188,6 +188,17 @@ prepare_backups() {
   ROUTEGATE_BACKUPS_READY=1
 }
 
+restore_ownership_state_from_backup() {
+  local backup_file=$1
+  local temp_state
+  temp_state=$(mktemp "${ROUTEGATE_STATE_FILE}.tmp.XXXXXXXX") || return 1
+  if ! install -m 0600 "$backup_file" "$temp_state" \
+      || ! mv -f -- "$temp_state" "$ROUTEGATE_STATE_FILE"; then
+    rm -f -- "$temp_state"
+    return 1
+  fi
+}
+
 rollback() {
   local rc=$?
   local preserve_backup=0
@@ -201,19 +212,11 @@ rollback() {
     systemctl daemon-reload >/dev/null 2>&1 || true
 
     if [[ "$ROUTEGATE_BACKUPS_READY" == "1" ]]; then
-      # Restore ownership atomically as well: a crash during rollback must
-      # not truncate even the state we are trying to recover.
-      local state_restore_tmp=""
-      state_restore_tmp=$(mktemp "${ROUTEGATE_STATE_FILE}.tmp.XXXXXXXX" 2>/dev/null || true)
-      if [[ -n "$state_restore_tmp" ]] \
-          && install -m 0600 "$ROUTEGATE_BACKUP_DIR/install-state.env" "$state_restore_tmp" \
-          && mv -f -- "$state_restore_tmp" "$ROUTEGATE_STATE_FILE"; then
-        :
-      else
+      # A failed restore retains both the current state and the backup.
+      if ! restore_ownership_state_from_backup "$ROUTEGATE_BACKUP_DIR/install-state.env"; then
         preserve_backup=1
         warn "Could not restore ownership state atomically; preserve the backup and inspect the current state before retrying."
       fi
-      [[ -z "$state_restore_tmp" ]] || rm -f -- "$state_restore_tmp"
       install -m 0644 "$ROUTEGATE_BACKUP_DIR/nginx-routegate" "$ROUTEGATE_NGINX_SITE"
     fi
 
