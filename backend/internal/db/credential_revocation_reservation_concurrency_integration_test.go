@@ -16,6 +16,26 @@ import (
 // An unprotected SELECT EXISTS on the prepared ledger can miss a concurrent
 // uncommitted insert. Preparation, Manager apply and global routing edits
 // therefore share one advisory transaction lock before they inspect state.
+// Check the SQL's dollar-quoted PL/pgSQL functions without requiring a
+// database. This catches accidental damage to the source when editing the
+// reservation trigger/guard, before Manager startup or runtime testing.
+func TestCredentialRevocationReservationSQLQuoting(t *testing.T) {
+    raw, err := os.ReadFile("../../migrations/000161_credential_revocation_preparations.up.sql")
+    if err != nil {
+        t.Fatal(err)
+    }
+    source := string(raw)
+    for _, name := range []string{"routegate_revocation_ledger_guard", "routegate_revocation_routing_guard"} {
+        prefix := "CREATE FUNCTION " + name + "() RETURNS trigger LANGUAGE plpgsql AS " + string([]byte{36, 36})
+        if strings.Count(source, prefix) != 1 {
+            t.Errorf("%s must start with a valid PostgreSQL double-dollar quote", name)
+        }
+    }
+    if strings.Contains(source, "LANGUAGE plpgsql AS "+string([]byte{36})+"\n") {
+        t.Fatal("single-dollar PL/pgSQL quote is invalid")
+    }
+}
+
 func TestCredentialRevocationGlobalReservationSerializesPreparationAndRouting(t *testing.T) {
     databaseURL := os.Getenv("ROUTEGATE_TEST_DATABASE_URL")
     if databaseURL == "" {
