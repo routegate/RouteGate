@@ -18,6 +18,7 @@ const headers = {
   ...(token ? { Authorization: 'Bearer ' + token } : {}),
 }
 const targets = new Map()
+const issueTargets = new Map()
 const errors = []
 
 for (const file of files) {
@@ -28,6 +29,16 @@ for (const file of files) {
       ['tag-file', /https:\/\/raw\.githubusercontent\.com\/routegate\/RouteGate\/(v[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)\/([A-Za-z0-9._/-]+)/g],
       ['release-asset', /https:\/\/github\.com\/routegate\/RouteGate\/releases\/download\/(v[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)\/([A-Za-z0-9._/-]+)/g],
     ]
+    // The same docs also link to release blockers and stacked PRs.
+    // Verify them through fixed same-repository API endpoints: a renamed,
+    // deleted or mistyped issue must not silently pass as an external link.
+    for (const match of line.matchAll(/https:\/\/github\.com\/routegate\/RouteGate\/(?:issues|pull)\/(\d+)\b/g)) {
+      const number = Number(match[1])
+      if (!Number.isSafeInteger(number) || number < 1) continue
+      const uses = issueTargets.get(number) ?? []
+      uses.push({ file, line: i + 1 })
+      issueTargets.set(number, uses)
+    }
     for (const [kind, re] of patterns) {
       for (const match of line.matchAll(re)) {
         const [_, tag, name] = match
@@ -78,10 +89,23 @@ for (const [key, uses] of targets) {
   }
 }
 
+// The Issues REST endpoint resolves both issues and PRs, with no elevated
+// permissions or arbitrary external network destinations.
+for (const [number, uses] of issueTargets) {
+  try {
+    const response = await queryJson('https://api.github.com/repos/routegate/RouteGate/issues/' + number)
+    if (response.status !== 200 || !response.body?.number || response.body.number !== number) {
+      errors.push({ key: 'issue-or-pr|' + number, uses, status: response.status })
+    }
+  } catch (e) {
+    errors.push({ key: 'issue-or-pr|' + number, uses, error: String(e) })
+  }
+}
+
 for (const e of errors) {
   console.error('[release-doc-link] BROKEN ' + e.key + ' status=' + (e.status ?? e.error) +
     ' referenced at ' + e.uses.map(x => x.file + ':' + x.line).join(', '))
 }
 console.log('[release-doc-link] checked ' + targets.size +
-  ' exact pinned GitHub release/tag URLs across ' + files.length + ' documents; broken=' + errors.length)
+  ' exact pinned release/tag URLs and ' + issueTargets.size + ' issue/PR links across ' + files.length + ' documents; broken=' + errors.length)
 if (errors.length) process.exitCode = 1
