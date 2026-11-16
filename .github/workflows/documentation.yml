@@ -1,0 +1,39 @@
+name: Documentation consistency
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '20 4 * * 1' # weekly link-rot audit, UTC
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: Validate documentation links and installer guidance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact documentation revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+      - name: Prove documentation guard fails on broken links and obsolete commands
+        run: node --test scripts/test-documentation-check.mjs
+      - name: Inventory historical installer references across all docs
+        run: node scripts/check-documentation.mjs --inventory
+      - name: Inventory external URLs across code blocks and prose
+        run: node scripts/check-documentation.mjs --external-inventory
+      - name: Inventory linked Markdown heading anchors
+        run: node scripts/check-documentation.mjs --anchor-inventory
+      - name: Check all tracked Markdown/TXT links and public first-install commands
+        run: node scripts/check-documentation.mjs
+      - name: Verify pinned GitHub installer/tag and release-download URLs exist
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-release-doc-assets.mjs

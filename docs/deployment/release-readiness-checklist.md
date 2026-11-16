@@ -1,4 +1,12 @@
-# Release Readiness Checklist
+# Release Readiness Checklist — historical v0.1.0
+
+> **Historical record, not the current release gate.** This checklist captures
+> the original `v0.1.0` MVP acceptance only; it must not be used to authorize
+> `v0.2.0` publication or a new-host installation. Current installation
+> readiness is tracked in [issue #715](https://github.com/routegate/RouteGate/issues/715).
+> The current user-facing entrypoint is
+> [routegate.org — Quick Start](https://routegate.org/#install), which must
+> remain unavailable until a verified current stable release is published.
 
 ## RouteGate v0.1.0 MVP
 

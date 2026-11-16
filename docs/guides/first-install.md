@@ -19,25 +19,36 @@ Do not manually install PostgreSQL, nginx, RouteGate Agent, or VPN protocol runt
 
 The public DNS name is required for the Manager. RouteGate does not support an IP-only Manager installation. An additional remote VPN Node does not need its own DNS name merely to connect its Agent to this Manager.
 
-## 1. Download the installer
+## 1. Copy the verified Quick Start command
 
-Choose the RouteGate release you intend to install. Download the installer to a file and review the exact script before running it as root.
+Open [routegate.org — Quick Start](https://routegate.org/#install). Once
+a new reviewed stable RouteGate release is actually published and the site
+offers a verified command, click **Copy** and paste that **single line**
+into the SSH terminal on your clean VPS.
 
-```bash
-VERSION=<release-tag>
-curl -fL --proto '=https' --tlsv1.2 \
-  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
-  -o routegate-install.sh
-less routegate-install.sh
-```
+The copied command pins an exact published release and verifies the
+downloaded `install.sh` SHA-256 digest **before** running it with
+administrator privileges. The installer then checks the matching release
+bundle before installing packages or changing services.
 
-## 2. Run the Clean VPS Installer
+**Current release warning:** the historical published `v0.1.0` does not
+contain the newer `v0.2.0` feature set. If the website still offers
+`v0.1.0` or marks Quick Start unavailable, **do not paste an old command**,
+substitute a `main` branch installer, or mix installers and bundles from
+different versions. See [release readiness #715](https://github.com/routegate/RouteGate/issues/715).
+A first-install command will be enabled only after a verified current stable
+release is approved.
 
-```bash
-sudo bash routegate-install.sh --version "${VERSION}"
-```
+## 2. Follow the installer wizard
 
-The installer asks for the public RouteGate hostname and contact/administrator email values.
+Once Quick Start is enabled, the terminal installer guides the public
+hostname, Let's Encrypt contact email, administrator email and optional
+Prometheus/Grafana selection **during setup**. It then validates DNS,
+host/service conflicts, APT trust, release compatibility and HTTPS
+prerequisites before the install begins.
+
+No `git clone`, `less`, CI ZIP download, manual release archive, or local
+build is needed for the ordinary first-install path.
 
 ### Expected result
 

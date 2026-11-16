@@ -33,6 +33,34 @@ make check
 For narrower changes, run the relevant backend, agent, or frontend checks
 documented in README.md and the project documentation.
 
+## Documentation and release-link maintenance
+
+Documentation is part of the release contract, not a post-release chore.
+When changing the installer, onboarding flow, CLI arguments, published
+assets, version labels or website Quick Start, update the root
+[README](README.md), [first-install guide](docs/guides/first-install.md),
+[Clean VPS reference](docs/deployment/clean-vps-installer.md) and applicable
+website copy **in the same change**. Do not include a runnable command for an
+unpublished tag, a historical release as the recommended install, or a moving
+`main`/unverified `latest` installer.
+
+Run the repository-wide offline link and installation-contract audit:
+
+```sh
+node scripts/check-documentation.mjs
+```
+
+The [Documentation consistency workflow](.github/workflows/documentation.yml)
+checks all tracked Markdown/TXT files on PRs and on `main`. It verifies
+relative paths and repository-owned GitHub URLs, plus the current-install
+entrypoint. **External HTTP links are counted but not verified online**;
+review external installation/download links and public site behavior manually
+before promotion. Historic release notes remain historic; do not rewrite them
+to describe a later release.
+
+See [issue #715](https://github.com/routegate/RouteGate/issues/715) for the
+current external VPS acceptance and safe Quick Start publication gate.
+
 ## Contribution Licensing
 
 By submitting a contribution, you certify that you have the right to submit it
