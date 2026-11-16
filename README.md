@@ -70,7 +70,7 @@ Clean Ubuntu 24.04 LTS host
 → working VPN connection after reboot
 ```
 
-The production-like validation environment is operated at `us.routegate.org` using native systemd services, PostgreSQL, nginx, and HTTPS.
+The original v0.1.0 production-like acceptance used a native systemd / PostgreSQL / nginx / HTTPS deployment. This **does not** prove that the unreleased v0.2.0 installer has passed independent public-DNS, Let's Encrypt and real-client acceptance on a fresh VPS; that verification remains tracked in [#715](https://github.com/routegate/RouteGate/issues/715).
 
 Development on `main` now extends the original MVP in several major areas:
 
@@ -100,6 +100,16 @@ Development on `main` now extends the original MVP in several major areas:
 | Client capability-aware delivery | Implemented for Hiddify (recommended), sing-box, v2rayN, v2rayNG, and Generic (best-effort) fallback for other clients |
 | Named online VPN users | Implemented across managed protocol presence collectors and grouped by account/server/node in the Admin UI |
 | Per-device access (Access & Devices) | One VPN account may have multiple devices, each with its own opaque subscription link and independent revoke/rotate lifecycle |
+
+**Security/continuity caveat:** revoking or rotating an opaque **subscription
+URL** is not proof that already-imported VPN connection credentials stop
+working. End-to-end revocation of previously issued runtime credentials
+([#545](https://github.com/routegate/RouteGate/issues/545)), subscription
+continuity ([#509](https://github.com/routegate/RouteGate/issues/509)),
+and observed readiness/recovery
+([#538](https://github.com/routegate/RouteGate/issues/538)) remain release
+review gates. The rows above describe implementation on `main`, **not a
+general-availability claim for the historical published v0.1.0 release**.
 
 Implementation support and production-like validation are deliberately treated as different claims. A detected binary, upstream feature, or client capability is not considered a RouteGate-managed capability until the relevant settings, credentials, render, validation, apply, rollback, health, delivery, redaction, and compatibility boundaries are controlled and tested by RouteGate.
 
