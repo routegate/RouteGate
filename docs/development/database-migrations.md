@@ -36,8 +36,9 @@ These pre-SQL checks protect an already-upgraded database from executing a
 new `000050_*` migration long after `000159_*` was applied. New work must
 use a new forward-only ordinal. In the **schema-161 review branch**, the
 preparation ledger has consumed `000161_*` and the review-only immutable
-confirmation ledger uses `000162_*`. Future migrations must use an unused
-ordinal **163 or higher**; do not rename the existing 160/161/162.
+confirmation ledger uses `000162_*`; this review's one-time dispatch
+fence uses `000163_*`. Future migrations require a unique unused ordinal
+**164 or higher**; do not rename the existing 160/161/162/163.
 
 The existing `000160_traffic_report_checkpoints.up.sql` filename is
 also immutable, as is the unusual shipped `0001430_*` outlier. The
@@ -113,6 +114,63 @@ forward-only migration and independent review. Never add automatic
 re-dispatch on HTTP timeout; a lost acknowledgement could accompany a
 completed shared-process restart. A database confirmation alone is not
 the final #545 release gate.
+
+## Schema 163 — one-time **possible** dispatch claim (NO Agent execution)
+
+`000163_credential_revocation_dispatch_claims.up.sql` records **one
+irreversible potential send per confirmed operation**, with a database-
+assigned claim UUID, parent operation, exact confirmed actor, server,
+Agent identity and credential generation, baseline version, confirmed
+timestamp, candidate config/runtime hashes and its own audit timestamp.
+
+The row's initial and only allowed state is **`outcome_unknown`**,
+*before any network transmission*. A Manager restart or a lost HTTP
+acknowledgment must never interpret it as `send_again` or `not_sent`.
+One claim per operation is enforced by PostgreSQL UNIQUE on
+`operation_id`; UPDATE/DELETE are rejected, and downgrade refuses
+to discard recorded claims. Once a possible dispatch is claimed, a new
+trigger forbids cancelling the parent preparation even if the caller
+still sees `prepared`. Pending accounts remain fenced until
+authenticated evidence and an independently reviewed recovery policy.
+
+The before-insert trigger locks the **preparation record only** and
+revalidates its exact confirmation, actor, Agent ID/generation,
+server/baseline and hash identities, authenticated Agent heartbeat
+generation and recent liveness, and the applied baseline. It deliberately
+does **not** lock the `servers` row: the existing cancellation path
+takes server-row → operation-row locks, so reversing that order could
+create a new deadlock. The parent preparation already fences competing
+Apply/transfer changes through the earlier SQL guards.
+
+`AuthorizedDispatchClaim.Claim` is **internal and unmounted**. It
+requires the trusted Manager super-admin context, exact expected
+candidate SHA-256 and a **separate, explicit execution approval**. This
+context is trusted only if a future HTTP handler has revalidated the
+session through `auth.Middleware`; no such handler exists yet.
+Concurrent calls serialize through PostgreSQL's operation row lock.
+The first persists a conservative `outcome_unknown` record; every
+repeated request, even the same administrator after reboot, returns
+`ErrDispatchClaimAlreadyExists`, never a second send opportunity.
+An ambiguous database COMMIT is treated as `outcome_unknown`, not as
+permission to try again.
+
+**This slice does not issue a job, send an Agent request, change the
+VPN credential, restart sing-box or accept a result.** A persisted
+claim is *not* proof that a task was sent, that a remote user lost
+access, or that other client sessions survived a restart. Genuine
+at-most-once network execution still requires a separate, reviewed
+authenticated transport/Agent journal contract and durable result
+reconciliation. The historic Agent outbox and Manager verification
+ideas in #745/#746 are research inputs, not automatic merge targets.
+
+Disposable PostgreSQL tests cover duplicate/concurrent claims,
+unknown-outcome recovery refusal, stale Agent, mismatched snapshot,
+unconfirmed/cancelled parent, immutable claim/cancellation guards,
+refused downgrade and the real 162→163 upgrade of an already confirmed
+operation **without generating a claim or Agent job**. Manual backup
+restore, real client/session termination, public TLS and independent
+release security acceptance remain required before #545 or v0.2.0
+may be considered complete.
 
 ## RG-140 integration warning
 
