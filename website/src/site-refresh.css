@@ -1,6 +1,32 @@
 /* Public website product-sync pass.
    Loaded after the established site styles to keep the refresh scoped and reversible. */
 
+/* The copy/paste entrypoint must be discoverable before the long product tour. */
+#install { scroll-margin-top: 90px; }
+
+.desktop-nav .nav-install-link,
+.mobile-nav-menu .nav-install-link {
+  color: #8bbdff;
+  font-weight: 750;
+}
+
+.hero-copy > p.hero-install-status {
+  margin: 12px 0 0;
+  max-width: 530px;
+  color: #a7b9cf;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.hero-install-status a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(125,179,255,.38);
+  text-underline-offset: 3px;
+}
+
+.hero-install-status a:hover { color: #d4e7ff; }
+
 .hero-copy > h1 {
   display: block;
   max-width: 650px;
