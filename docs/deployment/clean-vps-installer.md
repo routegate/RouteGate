@@ -156,6 +156,13 @@ The older `v0.1.0` artifacts remain available in
 deployments. They do **not** provide the newer installer menu or bundle
 contract. Do not combine old and new assets.
 
+For a reviewed, version-matched release candidate, the new installer also
+provides a non-root `--verify-bundle` mode. It verifies the archive checksum,
+safe extraction and manifest compatibility under a temporary directory and
+does not install packages or write RouteGate ownership state. It is **not**
+a public installation command while the candidate remains unpublished, and
+a successful verification is **not** proof of a working Hybrid deployment.
+
 Advanced reviewers of the new release may separately verify the
 `install.sh` SHA-256, `INSTALLER_SHA256SUMS`, bundle checksums and
 attestations from the **same pinned published tag**. These checks do not
@@ -169,6 +176,7 @@ replace public HTTPS and real-VPN-client acceptance on a disposable VPS.
 --admin-email EMAIL    Optional first administrator email.
 --server-name NAME     Optional local All-in-One server display name.
 --version VERSION      Exact reviewed release tag; pin it explicitly (avoid the mutable latest selector).
+--verify-bundle        Non-root integrity/compatibility preflight only (candidate installer).
 --bundle-file PATH     Local release bundle for controlled E2E/offline staging.
 --checksum-file PATH   Matching SHA256SUMS file for --bundle-file.
 --bundle-url URL       Explicit HTTPS bundle URL.
@@ -190,9 +198,9 @@ The installer performs these stages in order:
 3. Shows which required APT dependencies will be reused and which will be installed.
 4. Detects unowned RouteGate files, active web/database services, or listeners on TCP 80/443 before mutation.
 5. Verifies that the FQDN resolves to an IPv4 address detected for the VPS.
-6. Creates root-owned installation state and recovery storage.
-7. Installs required platform APT packages including PostgreSQL, nginx, Certbot, curl, jq, OpenSSL, and Agent bootstrap utilities. Protocol-specific packages are deferred to the Agent runtime installation workflow.
-8. Resolves the requested RouteGate release, downloads the native bundle, verifies `SHA256SUMS`, rejects unsafe archive paths/links, and validates the manifest.
+6. Resolves the requested RouteGate release, downloads the native bundle, verifies `SHA256SUMS`, rejects unsafe archive paths/links, and validates the manifest **before APT installation or RouteGate ownership-state writes**. For a resumed installation, the verified tag and bundle SHA-256 must match the original interrupted state.
+7. Writes root-owned installation state with the resolved release tag and verified bundle SHA-256 (or verifies the existing pinned state before resuming).
+8. Installs required platform APT packages including PostgreSQL, nginx, Certbot, curl, jq, OpenSSL, and Agent bootstrap utilities. Protocol-specific packages are deferred to the Agent runtime installation workflow.
 9. Installs Manager, Agent, migrations, frontend assets, nginx configuration, and systemd units.
 10. Creates a dedicated local PostgreSQL role/database with a generated password and loopback-only listening.
 11. Generates a unique bootstrap administrator credential used only to initialize the first SuperAdmin and local platform workflow.
@@ -281,7 +289,19 @@ Interrupted-install secrets are temporarily stored under:
 /var/lib/routegate-installer/
 ```
 
-These files are root-only. If a RouteGate-owned installation is marked `installing`, re-running the same command for the same domain resumes with preserved installer secrets. After successful verification, transient secrets are deleted and state becomes `complete`.
+These files are root-only. When `STATUS=installing`, the installer resumes
+only when the **verified release tag and SHA-256 equal the exact original
+bundle**, in addition to the existing domain and Prometheus ownership checks.
+Installation state records the resolved pinned `VERSION` (not the floating
+`latest` selector) and `BUNDLE_SHA256` before packages or services change.
+A changed release, replaced archive under the same tag, missing legacy
+fingerprint or uncertain selector **blocks automatic recovery**.
+
+Never erase partially installed PostgreSQL data, overwrite the state file or
+bypass the guard to make a retry work. Preserve the root-only state/logs and
+review the original version and artifact identity before manual recovery.
+Same-bundle retries preserve existing installer secrets. After successful
+verification, transient secrets are deleted and state becomes `complete`.
 
 When state is `complete`, running the installer again performs health/idempotency checks and exits without reinstalling the platform or rotating credentials.
 
