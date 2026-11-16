@@ -608,7 +608,9 @@ mark_managed_state() {
   python3 - "$ROUTEGATE_STATE_FILE" <<'PY_STATE'
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 import sys
+import tempfile
 
 path = Path(sys.argv[1])
 lines = path.read_text().splitlines()
@@ -626,9 +628,21 @@ for line in lines:
 if not seen:
     out.append('GRAFANA_MANAGED=1')
 out.append('UPDATED_AT=' + datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
-path.write_text('\n'.join(out) + '\n')
+# Never truncate the live ownership file in place: a SIGKILL or storage error
+# must leave the old STATUS, bundle hash and addon intent readable.
+fd, candidate = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent)
+try:
+    with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write('\n'.join(out) + '\n')
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, path)
+except BaseException:
+    if os.path.exists(candidate):
+        os.unlink(candidate)
+    raise
 PY_STATE
-  chmod 0600 "$ROUTEGATE_STATE_FILE"
 }
 
 verify_final_state() {
