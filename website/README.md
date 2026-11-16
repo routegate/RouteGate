@@ -85,6 +85,26 @@ The static entry point includes canonical, Open Graph, Twitter Card, and
 structured-data metadata. `public/og-image.svg` is the editable source for
 `public/og-image.png`; update both when changing the social preview.
 
+## Installation and public release accuracy
+
+The installation section on `routegate.org` is a **release contract**. It
+must never hardcode a historical `v0.1.0` first-install command or silently
+use `main`, `latest` or unverified CI artifacts. For a new stable release,
+Copy must provide **one** command for an exact tag and verify the published
+installer SHA-256 before invoking it as root. If required published assets
+are missing, Copy must remain disabled.
+
+The public website must not claim `v0.2.0` is available while it remains
+under review. Follow [installation readiness #715](https://github.com/routegate/RouteGate/issues/715)
+and keep the root [README](../README.md) and
+[first-install guide](../docs/guides/first-install.md) synchronized. Site
+source changes do **not** mean GitHub Pages has been deployed.
+
+Before any public promotion, validate a real browser Copy interaction and
+confirm that the pasted command installs the same release on an external
+clean VPS. Run the [documentation link audit](../scripts/check-documentation.mjs)
+when changing site installation copy.
+
 ## Content and brand boundaries
 
 - Public user-facing copy belongs in locale content files.
