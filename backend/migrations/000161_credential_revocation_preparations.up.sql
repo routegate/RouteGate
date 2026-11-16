@@ -33,7 +33,23 @@ CREATE FUNCTION routegate_revocation_ledger_guard() RETURNS trigger LANGUAGE plp
 BEGIN
  -- Serialize preparation with manager apply and global routing mutations.
  -- A plain EXISTS check is not enough under concurrent READ COMMITTED writes.
- IF TG_OP='INSERT' THEN PERFORM pg_advisory_xact_lock(140159); END IF;
+ IF TG_OP='INSERT' THEN
+  PERFORM pg_advisory_xact_lock(140159);
+  -- Match the node-row admission lock held by transfers and apply jobs.
+  -- Without it a prepared ledger could race a concurrent job admission.
+  PERFORM id FROM servers WHERE id=NEW.server_id FOR UPDATE;
+  IF EXISTS(SELECT 1 FROM vpn_account_transfer_nodes WHERE server_id=NEW.server_id) THEN
+   RAISE EXCEPTION USING ERRCODE='P0141',MESSAGE='revocation_node_transfer_reserved';
+  END IF;
+  IF EXISTS(SELECT 1 FROM config_apply_jobs
+      WHERE server_id=NEW.server_id AND status IN ('pending','in_progress'))
+   OR EXISTS(SELECT 1 FROM agent_operation_jobs
+      WHERE server_id=NEW.server_id AND status IN ('pending','in_progress'))
+   OR EXISTS(SELECT 1 FROM agent_platform_update_jobs
+      WHERE server_id=NEW.server_id AND status IN ('pending','in_progress','mutation_dispatched','outcome_unknown')) THEN
+   RAISE EXCEPTION USING ERRCODE='P0141',MESSAGE='revocation_node_mutation_unresolved';
+  END IF;
+ END IF;
  IF TG_OP='DELETE' THEN RAISE EXCEPTION USING ERRCODE='P0141',MESSAGE='revocation_proof_retained'; END IF;
  IF TG_OP='UPDATE' AND ((to_jsonb(OLD)-ARRAY['state','last_action_by','cancelled_at']) IS DISTINCT FROM
  (to_jsonb(NEW)-ARRAY['state','last_action_by','cancelled_at']) OR OLD.state<>'prepared' OR NEW.state<>'cancelled') THEN
