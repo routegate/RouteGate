@@ -57,7 +57,11 @@ func verifyRemovalConfigArgs(args []string, activePath string) error {
 			if inline && value != "true" && value != "false" {
 				return ErrCredentialRemoval
 			}
-		case "-c", "--config", "-C", "--config-directory", "-D", "--directory":
+		case "-D", "--directory":
+			// Working-directory overrides can redirect relative runtime assets
+			// outside the authenticated one-config-file source witness.
+			return ErrCredentialRemoval
+		case "-c", "--config", "-C", "--config-directory":
 			if !inline {
 				i++
 				if i >= len(args) {

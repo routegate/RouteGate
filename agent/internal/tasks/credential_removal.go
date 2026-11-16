@@ -234,7 +234,13 @@ func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask)
 		return fail("restart_failed")
 	}
 	after, err := observer.ObserveGeneration(ctx, e.activePath)
-	if err != nil || !validRemovalGeneration(after) || after.InvocationID == before.InvocationID {
+	// A different InvocationID is insufficient if systemd reports a process
+	// start at or before the previously measured generation. Treat that as
+	// uncertain mutation and retain the recovery fence: never auto-restart.
+	beforeStarted, beforeStartErr := strconv.ParseUint(before.StartedMonotonic, 10, 64)
+	afterStarted, afterStartErr := strconv.ParseUint(after.StartedMonotonic, 10, 64)
+	if err != nil || !validRemovalGeneration(after) || after.InvocationID == before.InvocationID ||
+		beforeStartErr != nil || afterStartErr != nil || afterStarted <= beforeStarted {
 		return fail("restart_not_verified")
 	}
 	if _, err = e.adapter.IsEnabled(ctx); err != nil {
