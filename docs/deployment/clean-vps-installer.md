@@ -2,10 +2,10 @@
 
 ## Status
 
-- Release: RouteGate v0.1.0 MVP
+- Public baseline: historical v0.1.0 MVP; newer v0.2.0 installer candidate is not yet publicly released
 - Supported live installation target: Ubuntu 24.04 LTS on amd64
 - Deployment model: native systemd services on one VPS
-- Validation environment: disposable production-like `us.routegate.org`
+- Historical validation: disposable v0.1.0 production-like host; v0.2.0 public VPS acceptance is pending
 - VPN Core: sing-box, installed after first login through RouteGate
 
 The Clean VPS Installer is the canonical public installation boundary for the RouteGate MVP. The operator supplies a supported Ubuntu host, DNS, and working SSH/sudo access. RouteGate owns the management-platform installation from that point forward.
@@ -114,71 +114,52 @@ mutation surface and prevents a hosting image from implicitly extending the
 project's supply-chain trust boundary.
 
 
-## Install RouteGate
+## Install RouteGate — new-host path
 
-### Interactive installation
+**Do not use the historical `v0.1.0` command examples for current-feature
+installations.** The published `v0.1.0` MVP is not the newer Hybrid/Grafana
+release, and mixing it with the current installer is incompatible.
 
-Choose the release first. Download its installer to a file, inspect the exact
-bytes that will run as root, then execute it:
+The supported new-user starting point is
+[routegate.org — Quick Start](https://routegate.org/#install).
+When a reviewed **current stable release** with complete, verified GitHub
+Release assets is published, its **Copy** button will yield one shell line:
+download a pinned `install.sh`, verify it by SHA-256 **before root/sudo**,
+and open the interactive installer configuration menu. The installer itself
+verifies the matching release archive and checksum before any APT or service
+changes.
 
-```bash
-VERSION=v0.1.0
-curl -fL --proto '=https' --tlsv1.2 \
-  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
-  -o routegate-install.sh
-less routegate-install.sh
-sudo bash routegate-install.sh --version "${VERSION}"
-rm -f routegate-install.sh
-```
+**Until that current stable release is published:** do not run a copied
+`v0.1.0` command from an older website, use `latest`/the moving `main`
+branch, or guess a CI artifact URL. The actual release gate and external
+clean-VPS acceptance are tracked in
+[issue #715](https://github.com/routegate/RouteGate/issues/715).
+See the task-oriented [first-install guide](../guides/first-install.md).
 
-Do not pipe a mutable branch such as `main` directly into `sudo bash`.
+### Interactive numbered configuration (current installer candidate)
 
-For releases produced by the current release workflow, the GitHub Release also
-contains the installer scripts, `INSTALLER_SHA256SUMS`, and
-`installer-scripts.attestation.json`. These artifacts let an operator verify
-the installer separately before privileged execution.
+The new installer presents a **numbered SSH menu** before host mutation:
+main settings (domain and emails), optional RouteGate-managed Prometheus,
+Grafana (which automatically enables Prometheus), an installation plan,
+proceed and cancel. The installer is not a silent `curl | sudo bash` pipe
+and is not considered publicly available while `v0.2.0` remains in review.
 
-The installer asks for:
+The public Manager requires a real DNS name and Let's Encrypt HTTPS.
+After installer success, the first administrator uses the one-time `/setup`
+link. The initial platform install does not silently install a VPN runtime:
+choose and configure the protocol later through Manager → Agent.
 
-- the public RouteGate FQDN;
-- the Let's Encrypt contact email;
-- whether the same email should be used for the first RouteGate administrator.
+### Historical release and expert verification
 
-Pressing Enter accepts the recommended same-email choice.
+The older `v0.1.0` artifacts remain available in
+[historical release notes](../release/v0.1.0.md) for maintaining those
+deployments. They do **not** provide the newer installer menu or bundle
+contract. Do not combine old and new assets.
 
-By default, the installer resolves the latest published RouteGate release and verifies the selected bundle against the release `SHA256SUMS` file.
-
-### Pin v0.1.0 explicitly
-
-```bash
-curl -fL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/routegate/RouteGate/v0.1.0/install.sh \
-  -o routegate-install-v0.1.0.sh
-less routegate-install-v0.1.0.sh
-sudo bash routegate-install-v0.1.0.sh \
-  --domain vpn.example.com \
-  --email owner@example.com \
-  --version v0.1.0
-rm -f routegate-install-v0.1.0.sh
-```
-
-### Unattended confirmation
-
-Download and verify the installer first; `--yes` only skips RouteGate's final
-interactive confirmation and does not weaken the bootstrap checks:
-
-```bash
-curl -fL --proto '=https' --tlsv1.2 \
-  https://raw.githubusercontent.com/routegate/RouteGate/v0.1.0/install.sh \
-  -o routegate-install-v0.1.0.sh
-less routegate-install-v0.1.0.sh
-sudo bash routegate-install-v0.1.0.sh \
-  --domain vpn.example.com \
-  --email owner@example.com \
-  --version v0.1.0 \
-  --yes
-rm -f routegate-install-v0.1.0.sh
-```
+Advanced reviewers of the new release may separately verify the
+`install.sh` SHA-256, `INSTALLER_SHA256SUMS`, bundle checksums and
+attestations from the **same pinned published tag**. These checks do not
+replace public HTTPS and real-VPN-client acceptance on a disposable VPS.
 
 ## Installer options
 
@@ -187,7 +168,7 @@ rm -f routegate-install-v0.1.0.sh
 --email EMAIL          Let's Encrypt contact; prompted when omitted.
 --admin-email EMAIL    Optional first administrator email.
 --server-name NAME     Optional local All-in-One server display name.
---version VERSION      Release tag; defaults to latest.
+--version VERSION      Exact reviewed release tag; pin it explicitly (avoid the mutable latest selector).
 --bundle-file PATH     Local release bundle for controlled E2E/offline staging.
 --checksum-file PATH   Matching SHA256SUMS file for --bundle-file.
 --bundle-url URL       Explicit HTTPS bundle URL.
