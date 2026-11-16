@@ -22,6 +22,23 @@ or delete already applied migrations to reconcile two development branches.
    schema**, not only from an empty database. A green unit test does not
    establish safe production upgrade or VPN credential revocation.
 
+### Disposable PostgreSQL schema-159 → schema-160 upgrade
+
+The candidate's Backend CI includes
+`TestMigrationUpgradeFrom159To160PreservesExistingData`. With
+`ROUTEGATE_TEST_DATABASE_URL` set to the disposable PostgreSQL service, it
+applies the historical 84-file migration catalog through
+`000159_staged_account_transfers` (including the original `0001430`
+outlier), inserts an existing server record, then upgrades the **same
+database** to the 85-file catalog including
+`000160_traffic_report_checkpoints`. It verifies that the legacy row and
+applied migration timestamp survive and that a second run is idempotent.
+
+This is a real staged-schema upgrade test, **not** proof that a previously
+deployed v0.1.0 database or a live customer schema will upgrade correctly.
+A release still requires a reviewed prior-version database fixture and
+backup/restore acceptance before touching a live database.
+
 ## Historical exceptions
 
 Early RouteGate history contains intentional ordinal duplicates (including
