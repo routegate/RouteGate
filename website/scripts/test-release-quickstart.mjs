@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+import { tagRulesCoverRelease } from '../../scripts/check-release-tag-ruleset.mjs'
 import {
   buildInstallCommand,
   isSupportedQuickStartTag,
@@ -27,6 +29,42 @@ const releaseFixture = (tag = 'v1.2.3') => ({
     state: 'uploaded',
     digest: name === 'install.sh' ? goodDigest : undefined,
   })),
+})
+
+
+test('tag publication requires active v* rules preventing both updates and deletions', () => {
+  const sample = (rules, overrides = {}) => ({
+    id: 42,
+    target: 'tag',
+    enforcement: 'active',
+    conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
+    rules: rules.map(type => ({ type })),
+    ...overrides,
+  })
+  for (const tag of ['v0.2.0', 'v0.2.0-rc.3', 'v1.0.0']) {
+    assert.equal(tagRulesCoverRelease([sample(['update', 'deletion'])], tag).protected, true)
+    assert.equal(tagRulesCoverRelease([
+      sample(['update']), sample(['deletion'], { id: 43 }),
+    ], tag).protected, true)
+  }
+  for (const bad of [
+    [],
+    [sample(['update'])],
+    [sample(['deletion'])],
+    [sample(['update', 'deletion'], { enforcement: 'evaluate' })],
+    [sample(['update', 'deletion'], { target: 'branch' })],
+    [sample(['update', 'deletion'], {
+      conditions: { ref_name: { include: ['refs/tags/v0.1.*'], exclude: [] } },
+    })],
+    [sample(['update', 'deletion'], {
+      conditions: { ref_name: { include: ['refs/tags/v*'], exclude: ['refs/tags/v0.2.0'] } },
+    })],
+    [sample(['update', 'deletion'], { rules: [] })],
+  ]) assert.equal(tagRulesCoverRelease(bad, 'v0.2.0').protected, false)
+
+  for (const tag of ['', 'main', 'v0.2.0-rc.foo', 'v0.2.0; touch /tmp/unsafe']) {
+    assert.equal(tagRulesCoverRelease([sample(['update', 'deletion'])], tag).protected, false)
+  }
 })
 
 test('published stable tag is validated and not mutable, injected or prerelease', () => {
