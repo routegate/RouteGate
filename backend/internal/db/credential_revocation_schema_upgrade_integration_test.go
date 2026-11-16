@@ -66,14 +66,14 @@ func TestCredentialRevocationPreparationUpgradesCurrent160WithoutDataLoss(t *tes
 	}
 
 	if err := Migrate(ctx, pool, "../../migrations", logger); err != nil {
-		t.Fatalf("upgrade existing 160 to safe RG-140 161: %v", err)
+		t.Fatalf("upgrade existing 160 through review-only RG-140 schema 165: %v", err)
 	}
 	if err := Migrate(ctx, pool, "../../migrations", logger); err != nil {
 		t.Fatalf("re-run upgraded migration idempotently: %v", err)
 	}
 	version, err = NewSchemaVersionRepository(pool).AppliedSchemaVersion(ctx)
 	if err != nil || version != "000165_credential_revocation_task_identity" {
-		t.Fatalf("latest version = %q (%v), expected 162 confirmation history", version, err)
+		t.Fatalf("latest version = %q (%v), expected 165 reserved task identity history", version, err)
 	}
 
 	var previousCount, newCount, legacyCollision int
