@@ -213,9 +213,11 @@ test('Pages builds a trustworthy same-origin release snapshot without leaking as
   try {
     const input = join(dir, 'source.json')
     const output = join(dir, 'snapshot.json')
-    const run = source => {
+    const run = (source, mode = '') => {
       writeFileSync(input, JSON.stringify(source))
-      return spawnSync(process.execPath, ['scripts/generate-release-snapshot.mjs', input, output], {
+      return spawnSync(process.execPath, [
+        'scripts/generate-release-snapshot.mjs', input, output, ...(mode ? [mode] : []),
+      ], {
         cwd: new URL('..', import.meta.url).pathname,
         encoding: 'utf8',
       })
@@ -236,6 +238,32 @@ test('Pages builds a trustworthy same-origin release snapshot without leaking as
     ) })
     assert.notEqual(wrong.status, 0, 'missing installer digest cannot generate release snapshot')
     assert.equal(existsSync(output), false, 'failed release verification does not publish a snapshot')
+    // Pages must supersede a previously LIVE copy command on revoked,
+    // deleted, malformed, partial or unresolvable release metadata. A
+    // failed build would otherwise leave stale (possibly revoked) Copy live.
+    const valid = run(releaseFixture(), '--disable-on-invalid')
+    assert.equal(valid.status, 0, valid.stderr)
+    assert.ok(publishedStableInstall(JSON.parse(readFileSync(output, 'utf8'))))
+    const removed = run({}, '--disable-on-invalid')
+    assert.equal(removed.status, 0, removed.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), { tag_name: null })
+    assert.equal(publishedStableInstall(JSON.parse(readFileSync(output, 'utf8'))), null)
+    const incomplete = run({ ...releaseFixture(), assets: releaseFixture().assets.filter(asset =>
+      asset.name !== 'install-grafana.sh',
+    ) }, '--disable-on-invalid')
+    assert.equal(incomplete.status, 0, incomplete.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), { tag_name: null })
+    const revokedDigest = run({ ...releaseFixture(), assets: releaseFixture().assets.map(asset =>
+      asset.name === 'install.sh' ? { ...asset, digest: undefined } : asset,
+    ) }, '--disable-on-invalid')
+    assert.equal(revokedDigest.status, 0, revokedDigest.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), { tag_name: null })
+    writeFileSync(input, '{bad-json')
+    const badJson = spawnSync(process.execPath, [
+      'scripts/generate-release-snapshot.mjs', input, output, '--disable-on-invalid',
+    ], { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8' })
+    assert.equal(badJson.status, 0, badJson.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), { tag_name: null })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -267,6 +295,10 @@ test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   const pages = readFileSync(new URL('../../.github/workflows/pages.yml', import.meta.url), 'utf8')
   assert.match(pages, /types: \[published, unpublished, deleted, edited\]/)
   assert.match(pages, /scripts\/generate-release-snapshot\.mjs/)
+  assert.match(pages, /--disable-on-invalid/)
+  assert.match(pages, /if ! gh api/)
+  assert.match(pages, /printf '\{\}\\n'/)
+
   assert.match(pages, /ref: main/)
   assert.match(app, /installerSha256: install\.installerSha256/)
   const styles = readFileSync(new URL('../src/site-refresh.css', import.meta.url), 'utf8')
