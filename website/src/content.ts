@@ -20,7 +20,7 @@ export type SiteContent = {
   source: { eyebrow: string; title: string; text: string; points: string[]; repository: string }
   deployment: {
     eyebrow: string; title: string; text: string; cards: Card[]
-    commandLabel: string; commandTitle: string; commandNote: string
+    commandLabel: string; commandTitle: string; commandNote: string; commandButton: string
   }
   roadmap: { eyebrow: string; title: string; intro: string; columns: RoadmapColumn[] }
   faq: {
@@ -81,14 +81,15 @@ export const content: Record<Locale, SiteContent> = {
       title: 'Разверните RouteGate на чистом Ubuntu VPS',
       text: 'Публичная установка на чистый хост использует Ubuntu 24.04 LTS, PostgreSQL, systemd, nginx и HTTPS. VPN-компоненты устанавливаются позже через управляемый сценарий.',
       cards: [
-        { title: 'Проверяемая установка', text: 'Скачайте install.sh, просмотрите его и только затем запускайте с повышенными правами.' },
+        { title: 'Проверяемая установка', text: 'Новый установщик будет доступен после публикации проверенного стабильного релиза.' },
         { title: 'Платформа сначала', text: 'Установщик поднимает Manager, Agent, PostgreSQL, nginx и защищённую точку входа.' },
         { title: 'VPN-компонент по требованию', text: 'Стабильный v0.1.0 использует управляемый VLESS / Reality через sing-box. Дополнительные протоколы уже развиваются в ветке main, но не входят в этот стабильный релиз.' },
         { title: 'Безопасный первый вход', text: 'Одноразовая ссылка /setup создаёт первого администратора без заводского пароля.' },
       ],
       commandLabel: 'БЫСТРЫЙ СТАРТ',
-      commandTitle: 'Скачать, проверить и установить v0.1.0',
-      commandNote: 'Команда ниже фиксирует стабильный v0.1.0. Возможности ветки main могут опережать стабильный релиз. Не запускайте удалённый скрипт вслепую через curl | sudo bash.',
+      commandTitle: 'Установщик v0.2.0 готовится к выпуску',
+      commandNote: 'Пока нет опубликованного и проверенного стабильного релиза с новым установщиком, команда установки недоступна. Не используйте v0.1.0 для проверки новых возможностей RouteGate. После завершения приёмки здесь появится одна команда с проверкой SHA-256.',
+      commandButton: 'Недоступно',
     },
     roadmap: {
       eyebrow: 'ДОРОЖНАЯ КАРТА',
@@ -185,14 +186,15 @@ export const content: Record<Locale, SiteContent> = {
       title: 'Deploy RouteGate on a clean Ubuntu VPS',
       text: 'The public clean-host path uses Ubuntu 24.04 LTS, PostgreSQL, systemd, nginx, and HTTPS. VPN runtimes are installed later through the managed workflow.',
       cards: [
-        { title: 'Reviewable install', text: 'Download install.sh, inspect it, and only then run it with elevated privileges.' },
+        { title: 'Reviewable install', text: 'The new installer will be available after a reviewed stable release is published.' },
         { title: 'Platform first', text: 'The installer brings up Manager, Agent, PostgreSQL, nginx, and the protected entry point.' },
         { title: 'Runtime on demand', text: 'Stable v0.1.0 uses managed VLESS / Reality through sing-box. Additional protocols are already developed on main, but are not part of this stable release.' },
         { title: 'Secure first access', text: 'A single-use /setup link creates the first administrator without a factory password.' },
       ],
       commandLabel: 'QUICK START',
-      commandTitle: 'Download, review, and install v0.1.0',
-      commandNote: 'The command below pins stable v0.1.0. The main branch may contain capabilities that have not reached a stable release yet. Do not blindly pipe a remote script into sudo bash.',
+      commandTitle: 'RouteGate v0.2.0 installer is being prepared',
+      commandNote: 'The install command is unavailable until a new stable release with the verified installer has been published. Do not use v0.1.0 to test current RouteGate features. Once acceptance is complete, one SHA-256-verified command will appear here.',
+      commandButton: 'Unavailable',
     },
     roadmap: {
       eyebrow: 'ROADMAP',
