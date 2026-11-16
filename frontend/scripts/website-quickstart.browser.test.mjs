@@ -102,6 +102,11 @@ for (const [locale, path] of [['ru', '/ru/'], ['en', '/']]) {
       { tag_name: 'v0.1.0' },
       { ...release(), assets: release().assets.map(item =>
         item.name === 'install.sh' ? { ...item, digest: undefined } : item) },
+      // Do not activate a UI that advertises Grafana/Agent while their
+      // version-matched installation helpers are missing from the release.
+      { ...release(), assets: release().assets.filter(item => item.name !== 'install-grafana.sh') },
+      { ...release(), assets: release().assets.filter(item => item.name !== 'install-agent.sh') },
+      { ...release(), assets: release().assets.filter(item => item.name !== 'installer-scripts.attestation.json') },
       { ...release(), prerelease: true },
     ]) {
       const { context, page, button } = await openSite(path, invalid)
