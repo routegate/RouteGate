@@ -125,6 +125,7 @@ test_atomic_rollback_state_restore() {
 
   # A failed final rename cannot truncate the still-visible state or
   # consume the independent backup required for manual recovery.
+  # shellcheck disable=SC2016
   if bash -c '
     source "$1"
     ROUTEGATE_STATE_FILE="$2"
@@ -141,6 +142,7 @@ test_atomic_rollback_state_restore() {
   assert_equal "Grafana failed rollback removes temp candidate" 0 \
     "$(find "$TEST_TMP" -maxdepth 1 -name 'rollback-state.env.tmp.*' | wc -l | tr -d '[:space:]')"
 
+  # shellcheck disable=SC2016
   if bash -c '
     source "$1"
     ROUTEGATE_STATE_FILE="$2"
