@@ -325,6 +325,7 @@ Both amd64 and arm64 bundles are published to keep the native packaging contract
 ## Security boundaries
 
 - Manager listens only on loopback and is exposed through nginx/HTTPS.
+- nginx applies a single `Referrer-Policy: no-referrer` to subscription and API responses, hiding upstream duplicates. Subscription bearer URLs must not leak their path or origin through referrers; retain HSTS, CSP and other security headers.
 - PostgreSQL is local-only.
 - The installer fails closed before APT network access when active package sources leave the RouteGate-approved repository boundary (Ubuntu archive/security or the two approved Yandex mirror paths above).
 - RouteGate does not silently rewrite a host's APT sources; repository trust remains an explicit operator decision.
