@@ -117,8 +117,8 @@ for (const [locale, path] of [['ru', '/ru/'], ['en', '/']]) {
       try {
         await page.waitForFunction(() => {
           const el = document.querySelector('.install-panel-heading button')
-          const code = document.querySelector('.install-panel pre code')
-          return el?.disabled && code && !code.textContent?.includes('Retrieving')
+          const heading = document.querySelector('.install-panel-heading strong')?.textContent ?? ''
+          return el?.disabled && heading.length > 0 && !/Проверяем|Checking/.test(heading)
         })
         assert.equal(await button.isDisabled(), true)
         const pageText = (await page.locator('.install-panel pre code').innerText()).trim()
