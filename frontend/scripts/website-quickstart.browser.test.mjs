@@ -125,4 +125,46 @@ for (const [locale, path] of [['ru', '/ru/'], ['en', '/']]) {
       }
     }
   })
+  test(locale + ': unavailable Pages snapshot NEVER falls back to GitHub API', async () => {
+    // An API result can be temporarily newer than the Pages revocation signal.
+    // A missing/corrupt/disabled same-origin snapshot is authoritative: leave
+    // Copy disabled even if the GitHub API advertises a complete stable release.
+    for (const [description, status, payload] of [
+      ['404', 404, '{}'],
+      ['malformed JSON', 200, '{not-json'],
+      ['explicitly revoked', 200, JSON.stringify({ tag_name: null })],
+    ]) {
+      const context = await browser.newContext({
+        viewport: { width: locale === 'ru' ? 390 : 1440, height: 900 },
+      })
+      try {
+        const page = await context.newPage()
+        let apiCalls = 0
+        await page.route('**/quickstart-release.json', route => route.fulfill({
+          status, contentType: 'application/json', body: payload,
+        }))
+        await page.route('https://api.github.com/**', route => {
+          apiCalls += 1
+          return route.fulfill({
+            status: 200, contentType: 'application/json', body: JSON.stringify(release()),
+          })
+        })
+        await page.goto(origin + path, { waitUntil: 'domcontentloaded' })
+        const expected = locale === 'ru'
+          ? 'Не удалось проверить стабильный релиз' : 'Cannot verify a stable release'
+        await page.waitForFunction(text => {
+          const heading = document.querySelector('.install-panel-heading strong')
+          return heading?.textContent === text
+        }, expected)
+        const button = page.locator('.install-panel-heading button')
+        assert.equal(await button.isDisabled(), true, description + ': Copy must remain disabled')
+        const displayed = await page.locator('.install-panel pre code').innerText()
+        assert.doesNotMatch(displayed, /releases\/download\/v0\.2\.0\/install\.sh/)
+        assert.equal(apiCalls, 0, description + ': never bypass Pages using the browser GitHub API')
+      } finally {
+        await context.close()
+      }
+    }
+  })
+
 }
