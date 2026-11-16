@@ -58,6 +58,30 @@ jobs:
             go test ./internal/tasks -run '^TestCredentialRemovalManagerPreparedContract$' -count=1 -timeout=120s)
           # Private synthetic Reality credentials never leave the temporary file.
 
+      - name: Verify Manager-prepared two-user Reality revocation using real isolated systemd
+        run: |
+          set -euo pipefail
+          test_dir="$(mktemp -d "${RUNNER_TEMP}/rg140-manager-reality.XXXXXX")"
+          test ! -e /var/lib/sing-box
+          trap 'sudo rm -f /var/lib/sing-box/routegate-presence.log; sudo rmdir /var/lib/sing-box 2>/dev/null || true; rm -rf "$test_dir"' EXIT
+          sudo mkdir -m 0700 /var/lib/sing-box
+          curl --fail --location --retry 3 --retry-delay 2 \
+            https://github.com/SagerNet/sing-box/releases/download/v1.12.8/sing-box-1.12.8-linux-amd64.tar.gz \
+            --output "$test_dir/sing-box.tar.gz"
+          printf '%s  %s\n' b41d9ae438a4367e5fd5c4aa36fe040d0c1bfe5f91f96a072eef31f61d46670c "$test_dir/sing-box.tar.gz" | sha256sum --check --status
+          tar -xzf "$test_dir/sing-box.tar.gz" -C "$test_dir"
+          binary="$test_dir/sing-box-1.12.8-linux-amd64/sing-box"
+          (cd ../agent && go test -c -o "$test_dir/agent.test" ./internal/tasks)
+          # Allocate only on this disposable CI VM, before rendering Manager's version.
+          port="$(python3 -c 'import socket; s=socket.socket(socket.AF_INET6); s.bind(("::",0)); print(s.getsockname()[1]); s.close()')"
+          ROUTEGATE_TEST_REMOVAL_REALITY_PORT="$port" \
+            ROUTEGATE_TEST_REMOVAL_CONTRACT_EXPORT="$test_dir/manager-prepared.json" \
+            go test ./internal/db -run '^TestCredentialRevocationExportAgentContractFixture$' -count=1 -timeout=120s
+          sudo env ROUTEGATE_TEST_REMOVAL_REALITY_CONTRACT_FIXTURE="$test_dir/manager-prepared.json" \
+            ROUTEGATE_TEST_SING_BOX="$binary" ROUTEGATE_TEST_REMOVAL_SYSTEMD=1 \
+            "$test_dir/agent.test" -test.run '^TestCredentialRemovalManagerPreparedRealityTraffic$' -test.timeout=75s -test.v
+          # Never upload the private fixture: it contains disposable Reality credentials.
+
       - name: Run tests
         run: go test ./...
 
