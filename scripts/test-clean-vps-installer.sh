@@ -488,6 +488,70 @@ test_legacy_bundle_rejected_before_platform_install() {
   fi
 }
 
+test_atomic_install_state_writes() {
+  local state="$TEST_TMP/atomic-install-state.env"
+  local old_sha
+  cat >"$state" <<'EOF_STATE'
+STATUS=installing
+DOMAIN=ci.routegate.example
+VERSION=v3.1.4
+BUNDLE_SHA256=legacy-pinned-state
+PROMETHEUS_MANAGED=1
+GRAFANA_REQUESTED=1
+EOF_STATE
+  chmod 0600 "$state"
+  old_sha=$(sha256sum "$state" | awk '{print $1}')
+
+  # Simulate an unsuccessful final rename. It must neither truncate the
+  # original interrupted state nor leave a partially written temp file.
+  if bash -c '
+    source "$1"
+    ROUTEGATE_STATE_FILE="$2"
+    ROUTEGATE_LOG_FILE=""
+    ROUTEGATE_DOMAIN=ci.routegate.example
+    ROUTEGATE_RESOLVED_VERSION=v3.1.4
+    ROUTEGATE_ARCH=amd64
+    ROUTEGATE_BUNDLE_SHA256=$(printf "%064d" 4)
+    ROUTEGATE_INSTALL_PROMETHEUS=1
+    ROUTEGATE_INSTALL_GRAFANA=1
+    mv() { return 1; }
+    write_install_state_status complete
+  ' _ "$ROOT_DIR/install.sh" "$state" >"$TEST_TMP/atomic-write-rejected.log" 2>&1; then
+    fail "failed atomic rename must stop installer before declaring completion"
+  else
+    assert_equal "failed atomic rename leaves previous state untouched" \
+      "$old_sha" "$(sha256sum "$state" | awk '{print $1}')"
+    assert_true "failed state replacement produces an actionable error" \
+      grep -Fq 'original state was preserved' "$TEST_TMP/atomic-write-rejected.log"
+  fi
+  assert_equal "failed state write cleans its temporary file" 0 \
+    "$(find "$TEST_TMP" -maxdepth 1 -name 'atomic-install-state.env.tmp.*' | wc -l | tr -d '[:space:]')"
+
+  # A normal write must replace, not append to, the previous state.
+  if bash -c '
+    source "$1"
+    ROUTEGATE_STATE_FILE="$2"
+    ROUTEGATE_LOG_FILE=""
+    ROUTEGATE_DOMAIN=ci.routegate.example
+    ROUTEGATE_RESOLVED_VERSION=v3.1.4
+    ROUTEGATE_ARCH=amd64
+    ROUTEGATE_BUNDLE_SHA256=$(printf "%064d" 4)
+    ROUTEGATE_INSTALL_PROMETHEUS=1
+    ROUTEGATE_INSTALL_GRAFANA=1
+    write_install_state_status complete
+  ' _ "$ROOT_DIR/install.sh" "$state" >"$TEST_TMP/atomic-write-complete.log" 2>&1; then
+    assert_true "atomic write commits complete installation state" \
+      grep -Fxq 'STATUS=complete' "$state"
+    assert_true "atomic write persists the pinned release checksum" \
+      grep -Fxq "BUNDLE_SHA256=$(printf '%064d' 4)" "$state"
+    assert_equal "atomic state uses root-only file permissions" 600 "$(stat -c '%a' "$state")"
+    assert_equal "atomic state has exactly one ownership status" 1 \
+      "$(grep -c '^STATUS=' "$state")"
+  else
+    fail "valid atomic state write must complete"
+  fi
+}
+
 test_resume_release_pin() {
   local expected_sha changed_sha state_file
   expected_sha=$(printf '%064d' 1)
@@ -988,6 +1052,7 @@ test_checksum_verification
 test_archive_entry_policy
 test_release_bundle_precedes_host_mutation
 test_legacy_bundle_rejected_before_platform_install
+test_atomic_install_state_writes
 test_resume_release_pin
 test_resume_grafana_selection_pin
 test_piped_entrypoint_guard
