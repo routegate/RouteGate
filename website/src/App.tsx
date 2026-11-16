@@ -10,15 +10,6 @@ const licenseUrl = `${githubUrl}/blob/main/LICENSE`
 const sourceCodeUrl = `${githubUrl}/blob/main/agent/internal/diagnostics/diagnostics.go#L22-L35`
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
 
-const installCommand = [
-  'VERSION=v0.1.0',
-  'curl -fL --proto \'=https\' --tlsv1.2 \\',
-  '  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \\',
-  '  -o routegate-install.sh',
-  'less routegate-install.sh',
-  'sudo bash routegate-install.sh --version "${VERSION}"',
-].join('\n')
-
 function readStoredLocale(): Locale | null {
   try {
     const savedLocale = window.localStorage.getItem('routegate-locale')
@@ -34,23 +25,6 @@ function persistLocale(locale: Locale) {
   } catch {
     // Storage can be unavailable in restricted/private browsing contexts.
   }
-}
-
-async function copyText(value: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  textarea.remove()
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -223,6 +197,7 @@ function CodePreview({ t }: { t: SiteContent['source'] }) {
 function AppHeader({ locale, setLocale, t }: { locale: Locale; setLocale: (value: Locale) => void; t: SiteContent }) {
   const navLinks = (
     <>
+      <a className="nav-install-link" href="#install">{t.action.installNav}</a>
       <a href="#product">{t.nav.product}</a>
       <a href="#open-source">{t.nav.openSource}</a>
       <a href={docsUrl} target="_blank" rel="noreferrer">{t.nav.docs}</a>
@@ -240,7 +215,6 @@ function AppHeader({ locale, setLocale, t }: { locale: Locale; setLocale: (value
           <summary>{locale === 'ru' ? 'Меню' : 'Menu'}</summary>
           <div className="mobile-nav-menu">
             {navLinks}
-            <a href="#install">{t.action.start}</a>
           </div>
         </details>
         <div className="header-actions">
@@ -265,7 +239,6 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
     return navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'
   }, [requestedLocale])
   const [locale, setLocale] = useState<Locale>(initialLocale)
-  const [installCopied, setInstallCopied] = useState(false)
   const t = content[locale]
 
   const handleLocaleChange = (nextLocale: Locale) => {
@@ -273,16 +246,6 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
     const nextPath = nextLocale === 'ru' ? '/ru/' : '/'
     if (window.location.pathname !== nextPath) {
       window.history.replaceState(null, '', nextPath)
-    }
-  }
-
-  const handleCopyInstall = async () => {
-    try {
-      await copyText(installCommand)
-      setInstallCopied(true)
-      window.setTimeout(() => setInstallCopied(false), 1800)
-    } catch {
-      setInstallCopied(false)
     }
   }
 
@@ -328,6 +291,7 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
                   {t.action.github}
                 </a>
               </div>
+              <p className="hero-install-status"><a href="#install">{t.action.installStatus}</a></p>
               <div className="hero-meta">
                 <span>Linux</span>
                 <span>{locale === 'ru' ? 'Несколько протоколов' : 'Multi-protocol'}</span>
@@ -336,6 +300,23 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
               </div>
             </div>
             <HeroMapPreview locale={locale} />
+          </div>
+        </section>
+
+        <section className="section deployment-section container" id="install">
+          <div className="section-heading"><div><span>{t.deployment.eyebrow}</span><h2>{t.deployment.title}</h2></div><p>{t.deployment.text}</p></div>
+          <div className="deployment-grid">
+            {t.deployment.cards.map(card => <article key={card.title}><h3>{card.title}</h3><p>{card.text}</p></article>)}
+          </div>
+          <div className="install-panel">
+            <div className="install-panel-heading">
+              <div><span>{t.deployment.commandLabel}</span><strong>{t.deployment.commandTitle}</strong></div>
+              <button type="button" disabled aria-disabled="true">{t.deployment.commandButton}</button>
+            </div>
+            <div className="install-unavailable" role="status">{t.deployment.commandNote}</div>
+            <div className="install-panel-footer">
+              <a href={`${githubUrl}/issues/715`} target="_blank" rel="noreferrer">{t.deployment.commandStatusLink}<span>↗</span></a>
+            </div>
           </div>
         </section>
 
@@ -377,24 +358,6 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
               <a href={githubUrl} target="_blank" rel="noreferrer">{t.action.github}<span>↗</span></a>
             </div>
             <CodePreview t={t.source} />
-          </div>
-        </section>
-
-        <section className="section deployment-section container" id="install">
-          <div className="section-heading"><div><span>{t.deployment.eyebrow}</span><h2>{t.deployment.title}</h2></div><p>{t.deployment.text}</p></div>
-          <div className="deployment-grid">
-            {t.deployment.cards.map(card => <article key={card.title}><h3>{card.title}</h3><p>{card.text}</p></article>)}
-          </div>
-          <div className="install-panel">
-            <div className="install-panel-heading">
-              <div><span>{t.deployment.commandLabel}</span><strong>{t.deployment.commandTitle}</strong></div>
-              <button type="button" onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
-            </div>
-            <pre><code>{installCommand}</code></pre>
-            <div className="install-panel-footer">
-              <span>{t.deployment.commandNote}</span>
-              <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
-            </div>
           </div>
         </section>
 

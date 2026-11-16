@@ -8,7 +8,7 @@ type FAQItem = { question: string; answer: string }
 
 export type SiteContent = {
   nav: { product: string; openSource: string; docs: string; roadmap: string; changelog: string }
-  action: { start: string; github: string; installGuide: string; copy: string; copied: string }
+  action: { start: string; github: string; installGuide: string; copy: string; copied: string; installNav: string; installStatus: string }
   hero: { eyebrow: string; title: string; subtitle: string; description: string; note: string }
   dashboard: {
     overview: string; servers: string; accounts: string; clients: string; traffic: string
@@ -20,7 +20,7 @@ export type SiteContent = {
   source: { eyebrow: string; title: string; text: string; points: string[]; repository: string }
   deployment: {
     eyebrow: string; title: string; text: string; cards: Card[]
-    commandLabel: string; commandTitle: string; commandNote: string
+    commandLabel: string; commandTitle: string; commandNote: string; commandButton: string; commandStatusLink: string
   }
   roadmap: { eyebrow: string; title: string; intro: string; columns: RoadmapColumn[] }
   faq: {
@@ -34,7 +34,7 @@ export type SiteContent = {
 export const content: Record<Locale, SiteContent> = {
   ru: {
     nav: { product: 'Продукт', openSource: 'Открытый код', docs: 'Документация', roadmap: 'Дорожная карта', changelog: 'История изменений' },
-    action: { start: 'Начать работу', github: 'Смотреть на GitHub', installGuide: 'Руководство по установке', copy: 'Копировать', copied: 'Скопировано' },
+    action: { start: 'Установка RouteGate', github: 'Смотреть на GitHub', installGuide: 'Руководство по установке', copy: 'Копировать', copied: 'Скопировано', installNav: 'Установка', installStatus: 'v0.2.0 готовится к выпуску · команда пока недоступна' },
     hero: {
       eyebrow: 'ОТКРЫТЫЙ КОД · AGPLv3-OR-LATER',
       title: 'RouteGate',
@@ -54,7 +54,7 @@ export const content: Record<Locale, SiteContent> = {
       intro: 'RouteGate управляет жизненным циклом инфраструктуры и клиентского доступа, а не только генерирует конфигурации.',
       cards: [
         { title: 'Управляемые VPN-узлы', text: 'Подключайте локальные и удалённые Linux-узлы через RouteGate Agent с явным состоянием и проверками.', icon: 'server' },
-        { title: 'Несколько протоколов', text: 'Стабильный v0.1.0 поддерживает VLESS / Reality. В текущей ветке main уже реализованы WireGuard, Hysteria2, Shadowsocks 2022 и MTProto / FakeTLS.', icon: 'protocol' },
+        { title: 'Несколько протоколов', text: 'Исторический релиз v0.1.0 поддерживает VLESS / Reality. В текущей ветке main уже реализованы WireGuard, Hysteria2, Shadowsocks 2022 и MTProto / FakeTLS.', icon: 'protocol' },
         { title: 'Доступ и устройства', text: 'VPN-аккаунты, отдельные устройства, подписки, QR-коды, отзыв и ротация доступа.', icon: 'devices' },
         { title: 'Маршрутизация и доставка', text: 'Профили Direct, VPN и Block с доставкой под возможности конкретного VPN-клиента.', icon: 'route' },
       ],
@@ -81,21 +81,23 @@ export const content: Record<Locale, SiteContent> = {
       title: 'Разверните RouteGate на чистом Ubuntu VPS',
       text: 'Публичная установка на чистый хост использует Ubuntu 24.04 LTS, PostgreSQL, systemd, nginx и HTTPS. VPN-компоненты устанавливаются позже через управляемый сценарий.',
       cards: [
-        { title: 'Проверяемая установка', text: 'Скачайте install.sh, просмотрите его и только затем запускайте с повышенными правами.' },
+        { title: 'Проверяемая установка', text: 'Новый установщик будет доступен после публикации проверенного стабильного релиза.' },
         { title: 'Платформа сначала', text: 'Установщик поднимает Manager, Agent, PostgreSQL, nginx и защищённую точку входа.' },
-        { title: 'VPN-компонент по требованию', text: 'Стабильный v0.1.0 использует управляемый VLESS / Reality через sing-box. Дополнительные протоколы уже развиваются в ветке main, но не входят в этот стабильный релиз.' },
+        { title: 'VPN-компонент по требованию', text: 'Исторический релиз v0.1.0 использует управляемый VLESS / Reality через sing-box. Дополнительные протоколы уже развиваются в ветке main, но не входят в этот стабильный релиз.' },
         { title: 'Безопасный первый вход', text: 'Одноразовая ссылка /setup создаёт первого администратора без заводского пароля.' },
       ],
       commandLabel: 'БЫСТРЫЙ СТАРТ',
-      commandTitle: 'Скачать, проверить и установить v0.1.0',
-      commandNote: 'Команда ниже фиксирует стабильный v0.1.0. Возможности ветки main могут опережать стабильный релиз. Не запускайте удалённый скрипт вслепую через curl | sudo bash.',
+      commandTitle: 'Установщик v0.2.0 готовится к выпуску',
+      commandNote: 'Пока нет опубликованного и проверенного стабильного релиза с новым установщиком, команда установки недоступна. Не используйте v0.1.0 для проверки новых возможностей RouteGate. После завершения приёмки здесь появится одна команда с проверкой SHA-256.',
+      commandButton: 'Недоступно',
+      commandStatusLink: 'Статус подготовки релиза',
     },
     roadmap: {
       eyebrow: 'ДОРОЖНАЯ КАРТА',
       title: 'Куда развивается RouteGate',
       intro: 'Это продуктовая карта направлений, а не обещание дат. Уже работающие возможности отделены от текущего усиления и следующих задач.',
       columns: [
-        { title: 'Стабильный v0.1.0', items: [
+        { title: 'Исторический релиз v0.1.0', items: [
           'Проверенный путь VLESS / Reality на Ubuntu 24.04 LTS amd64.',
           'Manager, Agent, PostgreSQL, nginx/HTTPS и безопасный одноразовый /setup.',
           'VPN-аккаунты, QR/VLESS-доставка, Config Deploy и основы маршрутизации.',
@@ -138,7 +140,7 @@ export const content: Record<Locale, SiteContent> = {
   },
   en: {
     nav: { product: 'Product', openSource: 'Open Source', docs: 'Docs', roadmap: 'Roadmap', changelog: 'Changelog' },
-    action: { start: 'Get Started', github: 'View on GitHub', installGuide: 'Installation guide', copy: 'Copy', copied: 'Copied' },
+    action: { start: 'Install RouteGate', github: 'View on GitHub', installGuide: 'Installation guide', copy: 'Copy', copied: 'Copied', installNav: 'Install', installStatus: 'v0.2.0 is under review · install command not yet available' },
     hero: {
       eyebrow: 'OPEN SOURCE · AGPLv3-OR-LATER',
       title: 'RouteGate',
@@ -158,7 +160,7 @@ export const content: Record<Locale, SiteContent> = {
       intro: 'RouteGate manages infrastructure and client-access lifecycle rather than only generating configuration files.',
       cards: [
         { title: 'Managed VPN nodes', text: 'Connect local and remote Linux nodes through RouteGate Agent with explicit state and validation.', icon: 'server' },
-        { title: 'Multiple protocols', text: 'Stable v0.1.0 supports VLESS / Reality. The current main branch already implements WireGuard, Hysteria2, Shadowsocks 2022, and MTProto / FakeTLS.', icon: 'protocol' },
+        { title: 'Multiple protocols', text: 'Historical release v0.1.0 supports VLESS / Reality. The current main branch already implements WireGuard, Hysteria2, Shadowsocks 2022, and MTProto / FakeTLS.', icon: 'protocol' },
         { title: 'Access & Devices', text: 'VPN accounts, per-device access, subscriptions, QR codes, revocation, and rotation.', icon: 'devices' },
         { title: 'Routing & delivery', text: 'Direct, VPN, and Block profiles delivered according to each VPN client’s capabilities.', icon: 'route' },
       ],
@@ -185,21 +187,23 @@ export const content: Record<Locale, SiteContent> = {
       title: 'Deploy RouteGate on a clean Ubuntu VPS',
       text: 'The public clean-host path uses Ubuntu 24.04 LTS, PostgreSQL, systemd, nginx, and HTTPS. VPN runtimes are installed later through the managed workflow.',
       cards: [
-        { title: 'Reviewable install', text: 'Download install.sh, inspect it, and only then run it with elevated privileges.' },
+        { title: 'Reviewable install', text: 'The new installer will be available after a reviewed stable release is published.' },
         { title: 'Platform first', text: 'The installer brings up Manager, Agent, PostgreSQL, nginx, and the protected entry point.' },
-        { title: 'Runtime on demand', text: 'Stable v0.1.0 uses managed VLESS / Reality through sing-box. Additional protocols are already developed on main, but are not part of this stable release.' },
+        { title: 'Runtime on demand', text: 'Historical release v0.1.0 uses managed VLESS / Reality through sing-box. Additional protocols are already developed on main, but are not part of this stable release.' },
         { title: 'Secure first access', text: 'A single-use /setup link creates the first administrator without a factory password.' },
       ],
       commandLabel: 'QUICK START',
-      commandTitle: 'Download, review, and install v0.1.0',
-      commandNote: 'The command below pins stable v0.1.0. The main branch may contain capabilities that have not reached a stable release yet. Do not blindly pipe a remote script into sudo bash.',
+      commandTitle: 'RouteGate v0.2.0 installer is being prepared',
+      commandNote: 'The install command is unavailable until a new stable release with the verified installer has been published. Do not use v0.1.0 to test current RouteGate features. Once acceptance is complete, one SHA-256-verified command will appear here.',
+      commandButton: 'Unavailable',
+      commandStatusLink: 'Release readiness status',
     },
     roadmap: {
       eyebrow: 'ROADMAP',
       title: 'Where RouteGate is heading',
       intro: 'This is a product-direction map, not a promise of dates. Shipped capability is separated from current hardening and later work.',
       columns: [
-        { title: 'Stable v0.1.0', items: [
+        { title: 'Historical release v0.1.0', items: [
           'Validated VLESS / Reality path on Ubuntu 24.04 LTS amd64.',
           'Manager, Agent, PostgreSQL, nginx/HTTPS, and secure single-use /setup.',
           'VPN accounts, QR/VLESS delivery, Config Deploy, and routing foundations.',
