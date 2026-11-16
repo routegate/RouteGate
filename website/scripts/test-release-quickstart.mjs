@@ -80,6 +80,19 @@ test('quick start refuses incomplete, draft or unverifiable release assets', () 
   assert.equal(publishedStableTag({ tag_name: 'v0.1.0' }), 'v0.1.0')
 })
 
+test('verified website release contract stays aligned with the GitHub release uploader', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8')
+  for (const name of requiredPublishedAssets('v1.2.3')) {
+    if (name.includes('-linux-') && name.endsWith('.tar.gz')) {
+      assert.ok(workflow.includes('dist/routegate-*.tar.gz'), 'release workflow must upload both architectures')
+    } else {
+      assert.ok(workflow.includes('dist/' + name), 'site must not require an asset absent from release workflow: ' + name)
+    }
+  }
+  const dryRun = readFileSync(new URL('../../scripts/test-release-candidate-dry-run.sh', import.meta.url), 'utf8')
+  assert.ok(dryRun.includes('ARCHITECTURES="amd64 arm64"'), 'release rehearsal must test both public bundle architectures')
+})
+
 test('copied install command is one shell line, exact-tag pinned and checks before sudo', () => {
   assert.equal(stableReleaseApi, 'https://api.github.com/repos/routegate/RouteGate/releases/latest')
   assert.equal(stableReleaseSnapshotUrl, '/quickstart-release.json')
