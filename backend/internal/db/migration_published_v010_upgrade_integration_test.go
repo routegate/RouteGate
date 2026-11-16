@@ -48,7 +48,7 @@ var publishedV010MigrationBlobs = map[string]string{
 
 func testGitBlobIdentity(contents []byte) string {
 	h := sha1.New()
-	_, _ = fmt.Fprintf(h, "blob %d\\x00", len(contents))
+	_, _ = fmt.Fprintf(h, "blob %d\x00", len(contents))
 	_, _ = h.Write(contents)
 	return hex.EncodeToString(h.Sum(nil))
 }
