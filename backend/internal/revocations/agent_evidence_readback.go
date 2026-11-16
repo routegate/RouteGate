@@ -54,7 +54,7 @@ func (v *AgentEvidenceReadback) Check(ctx context.Context, rawAgentToken, operat
 	}
 
 	var bound EvidenceBinding
-	var claimed, agentGeneration int64
+	var claimed int64
 	var currentGeneration int64
 	var agentID, serverID, claimID, accountID, baselineID, oldRuntimeHash, newRuntimeHash, candidateConfigHash string
 	var targetPort int
