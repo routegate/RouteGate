@@ -135,12 +135,16 @@
   font-weight: 700;
 }
 
-.install-panel pre {
-  margin: 0;
+.install-panel-heading button:disabled {
+  opacity: .65;
+  cursor: not-allowed;
+}
+
+.install-unavailable {
   padding: 22px;
-  overflow: auto;
   color: #d4dfeb;
-  font: 12px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size: 13px;
+  line-height: 1.75;
 }
 
 .install-panel-footer {
