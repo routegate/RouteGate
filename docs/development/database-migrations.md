@@ -22,6 +22,31 @@ or delete already applied migrations to reconcile two development branches.
    schema**, not only from an empty database. A green unit test does not
    establish safe production upgrade or VPN credential revocation.
 
+### Published v0.1.0 → current schema integration test
+
+The actual GitHub [RouteGate v0.1.0 release](https://github.com/routegate/RouteGate/releases/tag/v0.1.0)
+was published on **2026-08-07**, with annotated tag commit
+`407b08a9f357682ee3e70fe550a2e342017a33b5`. Its historical
+catalog contains **21 SQL migrations**. All 21 filenames and Git blob
+identities still match the corresponding current files.
+
+`TestPublishedV010SchemaUpgradesOnPostgreSQL` copies these 21 exact
+pinned migration blobs into a temporary fixture, validates each against
+the published tag's Git blob identity, and applies them to a **disposable
+PostgreSQL database**. It seeds a pre-existing server and VPN account,
+then migrates the same database to the current 85-file catalog.
+The test checks both records, the legacy applied timestamp, migration
+count and idempotency on a second upgrade attempt.
+
+This exercises the **exact SQL shipped as v0.1.0** without fetching a
+mutable tag or a release artifact during CI. The SHA-1 values are used
+only to match Git's object identity format, **not** for security-sensitive
+release checksum verification (which uses SHA-256). A successful test
+demonstrates migration compatibility for the seeded fixture, but does
+not prove production backup restoration, every legacy data shape or
+safety for an unreviewed live database. Preserve the separate external
+backup/restore and real-host release gate.
+
 ### Disposable PostgreSQL schema-159 → schema-160 upgrade
 
 The candidate's Backend CI includes
@@ -34,10 +59,11 @@ database** to the 85-file catalog including
 `000160_traffic_report_checkpoints`. It verifies that the legacy row and
 applied migration timestamp survive and that a second run is idempotent.
 
-This is a real staged-schema upgrade test, **not** proof that a previously
-deployed v0.1.0 database or a live customer schema will upgrade correctly.
-A release still requires a reviewed prior-version database fixture and
-backup/restore acceptance before touching a live database.
+This is a real staged-schema upgrade test in addition to the published
+v0.1.0 fixture above; neither is proof that **all live v0.1.0 customer data**
+will migrate safely. A release still requires a verified representative
+backup/restore rehearsal and explicit authorization before any live database
+migration.
 
 ## Historical exceptions
 
