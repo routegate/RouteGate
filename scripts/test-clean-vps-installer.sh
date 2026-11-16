@@ -504,6 +504,7 @@ EOF_STATE
 
   # Simulate an unsuccessful final rename. It must neither truncate the
   # original interrupted state nor leave a partially written temp file.
+  # shellcheck disable=SC2016
   if bash -c '
     source "$1"
     ROUTEGATE_STATE_FILE="$2"
@@ -528,6 +529,7 @@ EOF_STATE
     "$(find "$TEST_TMP" -maxdepth 1 -name 'atomic-install-state.env.tmp.*' | wc -l | tr -d '[:space:]')"
 
   # A normal write must replace, not append to, the previous state.
+  # shellcheck disable=SC2016
   if bash -c '
     source "$1"
     ROUTEGATE_STATE_FILE="$2"
