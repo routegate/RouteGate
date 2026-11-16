@@ -10,15 +10,6 @@ const licenseUrl = `${githubUrl}/blob/main/LICENSE`
 const sourceCodeUrl = `${githubUrl}/blob/main/agent/internal/diagnostics/diagnostics.go#L22-L35`
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
 
-const installCommand = [
-  'VERSION=v0.1.0',
-  'curl -fL --proto \'=https\' --tlsv1.2 \\',
-  '  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \\',
-  '  -o routegate-install.sh',
-  'less routegate-install.sh',
-  'sudo bash routegate-install.sh --version "${VERSION}"',
-].join('\n')
-
 function readStoredLocale(): Locale | null {
   try {
     const savedLocale = window.localStorage.getItem('routegate-locale')
@@ -34,23 +25,6 @@ function persistLocale(locale: Locale) {
   } catch {
     // Storage can be unavailable in restricted/private browsing contexts.
   }
-}
-
-async function copyText(value: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  textarea.remove()
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -265,7 +239,6 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
     return navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'
   }, [requestedLocale])
   const [locale, setLocale] = useState<Locale>(initialLocale)
-  const [installCopied, setInstallCopied] = useState(false)
   const t = content[locale]
 
   const handleLocaleChange = (nextLocale: Locale) => {
@@ -273,16 +246,6 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
     const nextPath = nextLocale === 'ru' ? '/ru/' : '/'
     if (window.location.pathname !== nextPath) {
       window.history.replaceState(null, '', nextPath)
-    }
-  }
-
-  const handleCopyInstall = async () => {
-    try {
-      await copyText(installCommand)
-      setInstallCopied(true)
-      window.setTimeout(() => setInstallCopied(false), 1800)
-    } catch {
-      setInstallCopied(false)
     }
   }
 
@@ -388,11 +351,10 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
           <div className="install-panel">
             <div className="install-panel-heading">
               <div><span>{t.deployment.commandLabel}</span><strong>{t.deployment.commandTitle}</strong></div>
-              <button type="button" onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
+              <button type="button" disabled aria-disabled="true">{t.deployment.commandButton}</button>
             </div>
-            <pre><code>{installCommand}</code></pre>
+            <div className="install-unavailable" role="status">{t.deployment.commandNote}</div>
             <div className="install-panel-footer">
-              <span>{t.deployment.commandNote}</span>
               <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
             </div>
           </div>
