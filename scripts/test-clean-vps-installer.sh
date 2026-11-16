@@ -144,12 +144,228 @@ test_argument_parsing() {
   assert_equal "parses explicit managed Prometheus opt-in" "1" "$output"
 }
 
+test_numbered_interactive_configuration_menu_contract() {
+  assert_true "numeric TUI menu offers main settings" \
+    grep -Fq '1. Main settings (domain, emails, server name)' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu offers Prometheus" \
+    grep -Fq '2. Prometheus' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu offers Grafana in the same setup" \
+    grep -Fq '3. Grafana' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu offers preflight and cancellation" \
+    grep -Fq '5. Continue to preflight and installation' "$ROOT_DIR/install.sh"
+  assert_true "numeric TUI menu has an exit before platform mutations" \
+    grep -Fq '0. Exit without installing' "$ROOT_DIR/install.sh"
+  assert_true "Grafana toggle enables Prometheus in menu" \
+    grep -Fq 'Prometheus enabled as a Grafana dependency.' "$ROOT_DIR/install.sh"
+  assert_true "noninteractive installations retain original input path" \
+    grep -Fq 'if [[ "$ROUTEGATE_ASSUME_YES" == "1" ]] || ! interactive_tty_available; then' "$ROOT_DIR/install.sh"
+  assert_true "menu uses /dev/tty rather than shell stdin" \
+    grep -Fq 'Choose [0-5]: ' "$ROOT_DIR/install.sh"
+}
+
+test_interactive_menu_pseudoterminal_smoke() {
+  command -v script >/dev/null 2>&1 || { fail "interactive SSH menu requires util-linux script in CI"; return; }
+  command -v timeout >/dev/null 2>&1 || { fail "interactive SSH menu smoke needs timeout"; return; }
+  cat >"$TEST_TMP/interactive-menu-smoke.sh" <<EOF_MENU
+#!/usr/bin/env bash
+source "$ROOT_DIR/install.sh"
+ROUTEGATE_STATE_FILE="$TEST_TMP/does-not-exist.env"
+ROUTEGATE_LOG_FILE="$TEST_TMP/menu-smoke.log"
+ROUTEGATE_DOMAIN=""
+ROUTEGATE_EMAIL=""
+ROUTEGATE_ADMIN_EMAIL=""
+ROUTEGATE_SERVER_NAME=""
+ROUTEGATE_INSTALL_PROMETHEUS=""
+ROUTEGATE_INSTALL_GRAFANA=""
+ROUTEGATE_ASSUME_YES=0
+installer_configuration_menu
+printf 'MENU_RESULT=%s|%s|%s|%s\\n' "\$ROUTEGATE_DOMAIN" "\$ROUTEGATE_EMAIL" "\$ROUTEGATE_INSTALL_PROMETHEUS" "\$ROUTEGATE_INSTALL_GRAFANA"
+EOF_MENU
+  local output
+  if ! output=$(printf '1\nvpn.example.org\nowner@example.org\nowner@example.org\n\n3\n5\n' \
+       | timeout 20 script -q -e -c "bash $TEST_TMP/interactive-menu-smoke.sh" /dev/null 2>&1); then
+    fail "real /dev/tty menu completes a scripted numbered selection"
+    return
+  fi
+  assert_true "real /dev/tty numbered menu selects Grafana and required Prometheus" \
+    grep -Fq 'MENU_RESULT=vpn.example.org|owner@example.org|1|1' <<<"$output"
+}
+
+test_completed_grafana_menu_state() {
+  command -v script >/dev/null 2>&1 || { fail "completed menu requires util-linux script"; return; }
+  command -v timeout >/dev/null 2>&1 || { fail "completed menu requires timeout"; return; }
+  local status state helper output
+  for status in installed retry; do
+    state="$TEST_TMP/menu-grafana-$status.env"
+    cat >"$state" <<EOF_STATE
+STATUS=complete
+DOMAIN=vpn.example.org
+VERSION=v1.2.3
+PROMETHEUS_MANAGED=1
+GRAFANA_REQUESTED=1
+EOF_STATE
+    if [[ "$status" == "installed" ]]; then
+      printf 'GRAFANA_MANAGED=1\n' >>"$state"
+    fi
+    helper="$TEST_TMP/menu-grafana-$status.sh"
+    cat >"$helper" <<EOF_MENU
+#!/usr/bin/env bash
+source "$ROOT_DIR/install.sh"
+ROUTEGATE_STATE_FILE="$state"
+ROUTEGATE_LOG_FILE="$TEST_TMP/menu-grafana-$status.log"
+ROUTEGATE_DOMAIN=""
+ROUTEGATE_EMAIL="owner@example.org"
+ROUTEGATE_ADMIN_EMAIL="owner@example.org"
+ROUTEGATE_SERVER_NAME=""
+ROUTEGATE_INSTALL_PROMETHEUS=""
+ROUTEGATE_INSTALL_GRAFANA=""
+ROUTEGATE_ASSUME_YES=0
+installer_configuration_menu
+EOF_MENU
+    if ! output=$(printf '3\n0\n' | timeout 20 script -q -e -c "bash $helper" /dev/null 2>&1); then
+      fail "completed $status menu must render and exit without host mutation"
+      continue
+    fi
+    if [[ "$status" == "installed" ]]; then
+      assert_true "completed Grafana shows INSTALLED rather than OFF" \
+        grep -Fq 'Grafana          [INSTALLED]' <<<"$output"
+      assert_true "completed Grafana cannot be toggled off as if uninstalled" \
+        grep -Fq 'This menu cannot uninstall an owned service.' <<<"$output"
+      assert_false "completed Grafana does not pretend to be OFF" \
+        grep -Fq 'Grafana          [OFF]' <<<"$output"
+    else
+      assert_true "failed post-core Grafana shows RETRY rather than OFF" \
+        grep -Fq 'Grafana          [RETRY]' <<<"$output"
+      assert_true "pending Grafana can be skipped explicitly without uninstall" \
+        grep -Fq 'Grafana          [OFF]' <<<"$output"
+    fi
+  done
+}
+
+test_local_grafana_sidecar_preflight() {
+  local candidate="$TEST_TMP/local-grafana-candidate"
+  local script_path="$candidate/install-grafana.sh"
+  local sums="$candidate/INSTALLER_SHA256SUMS"
+  mkdir -p "$candidate"
+  printf 'candidate bundle fixture\n' >"$candidate/routegate-v0.2.0-linux-amd64.tar.gz"
+  printf '#!/usr/bin/env bash\nset -e\nprintf "grafana stub\\n"\n' >"$script_path"
+  (cd "$candidate" && sha256sum install-grafana.sh >INSTALLER_SHA256SUMS)
+
+  local output
+  if output=$(
+    ROUTEGATE_INSTALL_GRAFANA=1
+    ROUTEGATE_RESOLVED_VERSION=v0.2.0
+    ROUTEGATE_BUNDLE_URL=""
+    ROUTEGATE_BUNDLE_FILE="$candidate/routegate-v0.2.0-linux-amd64.tar.gz"
+    ROUTEGATE_WORK_DIR="$TEST_TMP/local-grafana-verified"
+    mkdir -p "$ROUTEGATE_WORK_DIR"
+    prepare_verified_grafana_installer
+    test -s "$ROUTEGATE_GRAFANA_SCRIPT"
+    sha256sum "$ROUTEGATE_GRAFANA_SCRIPT" | awk '{print $1}'
+  ); then
+    assert_true "local candidate Grafana helper is verified against colocated installer checksums" \
+      grep -Fq "$(sha256sum "$script_path" | awk '{print $1}')" <<<"$output"
+  else
+    fail "valid local candidate Grafana helper must verify"
+  fi
+
+  printf 'tampered\n' >>"$script_path"
+  if (
+    ROUTEGATE_INSTALL_GRAFANA=1
+    ROUTEGATE_RESOLVED_VERSION=v0.2.0
+    ROUTEGATE_BUNDLE_URL=""
+    ROUTEGATE_BUNDLE_FILE="$candidate/routegate-v0.2.0-linux-amd64.tar.gz"
+    ROUTEGATE_WORK_DIR="$TEST_TMP/local-grafana-tampered"
+    mkdir -p "$ROUTEGATE_WORK_DIR"
+    prepare_verified_grafana_installer
+  ) >"$TEST_TMP/grafana-tampered.out" 2>&1; then
+    fail "tampered local Grafana installer must fail preflight"
+  else
+    assert_true "tampered local Grafana installer rejected before system changes" \
+      grep -Fq 'Grafana installer SHA-256 verification failed.' "$TEST_TMP/grafana-tampered.out"
+  fi
+
+  rm -f "$sums"
+  if (
+    ROUTEGATE_INSTALL_GRAFANA=1
+    ROUTEGATE_RESOLVED_VERSION=v0.2.0
+    ROUTEGATE_BUNDLE_URL=""
+    ROUTEGATE_BUNDLE_FILE="$candidate/routegate-v0.2.0-linux-amd64.tar.gz"
+    ROUTEGATE_WORK_DIR="$TEST_TMP/local-grafana-no-checksum"
+    mkdir -p "$ROUTEGATE_WORK_DIR"
+    prepare_verified_grafana_installer
+  ) >"$TEST_TMP/grafana-no-checksum.out" 2>&1; then
+    fail "local Grafana helper without checksum manifest must fail closed"
+  else
+    assert_true "local Grafana with missing checksum manifest is rejected" \
+      grep -Fq 'requires colocated install-grafana.sh and INSTALLER_SHA256SUMS' "$TEST_TMP/grafana-no-checksum.out"
+  fi
+}
+
+test_grafana_selection_and_install_contract() {
+  local output
+  output=$(
+    ROUTEGATE_DOMAIN=""
+    ROUTEGATE_EMAIL=""
+    ROUTEGATE_ADMIN_EMAIL=""
+    ROUTEGATE_SERVER_NAME=""
+    ROUTEGATE_INSTALL_PROMETHEUS=""
+    ROUTEGATE_INSTALL_GRAFANA=""
+    ROUTEGATE_PROMETHEUS_EXPLICIT_NO=0
+    ROUTEGATE_ASSUME_YES=0
+    parse_args --domain vpn.example.org --email owner@example.org --with-grafana --yes
+    prompt_for_inputs >/dev/null
+    printf '%s|%s' "$ROUTEGATE_INSTALL_PROMETHEUS" "$ROUTEGATE_INSTALL_GRAFANA"
+  )
+  assert_equal "Grafana CLI selection automatically includes Prometheus" "1|1" "$output"
+
+  output=$(
+    ROUTEGATE_DOMAIN=""
+    ROUTEGATE_EMAIL=""
+    ROUTEGATE_ADMIN_EMAIL=""
+    ROUTEGATE_SERVER_NAME=""
+    ROUTEGATE_INSTALL_PROMETHEUS=""
+    ROUTEGATE_INSTALL_GRAFANA=""
+    ROUTEGATE_PROMETHEUS_EXPLICIT_NO=0
+    ROUTEGATE_ASSUME_YES=0
+    parse_args --domain vpn.example.org --email owner@example.org --without-grafana --yes
+    prompt_for_inputs
+    printf '%s|%s' "$ROUTEGATE_INSTALL_PROMETHEUS" "$ROUTEGATE_INSTALL_GRAFANA"
+  )
+  assert_equal "Grafana remains optional and disabled by default" "0|0" "$output"
+
+  assert_false "explicit --without-prometheus conflicts with --with-grafana" \
+    bash -c 'source "$1"; ROUTEGATE_DOMAIN=vpn.example.org; ROUTEGATE_EMAIL=owner@example.org; ROUTEGATE_ADMIN_EMAIL=owner@example.org; parse_args --with-grafana --without-prometheus --yes; prompt_for_inputs >/dev/null 2>&1' \
+      _ "$ROOT_DIR/install.sh"
+
+  assert_true "selected Grafana requires a verified pinned installer" \
+    grep -Fq 'prepare_verified_grafana_installer' "$ROOT_DIR/install.sh"
+  assert_true "Grafana script is checked against the release installer checksum set" \
+    grep -Fq 'INSTALLER_SHA256SUMS' "$ROOT_DIR/install.sh"
+  assert_true "Grafana script runs only after core installation is complete" \
+    grep -Fq '[[ "$(state_value STATUS || true)" == "complete" ]]' "$ROOT_DIR/install.sh"
+
+  local main_body prepare_line state_line addon_line
+  main_body=$(sed -n '/^main() {/,/^}/p' "$ROOT_DIR/install.sh")
+  prepare_line=$(grep -n 'prepare_bundle' <<<"$main_body" | head -n1 | cut -d: -f1)
+  state_line=$(grep -n 'initialize_install_state' <<<"$main_body" | head -n1 | cut -d: -f1)
+  addon_line=$(grep -n 'install_selected_grafana' <<<"$main_body" | tail -n1 | cut -d: -f1)
+  assert_true "Grafana release assets are verified before state mutation" test "$prepare_line" -lt "$state_line"
+  assert_true "Grafana installation runs after core state completion" test "$state_line" -lt "$addon_line"
+
+  local complete_line success_line
+  complete_line=$(grep -n '^  write_install_state$' <<<"$main_body" | tail -n1 | cut -d: -f1)
+  success_line=$(grep -n '^  print_success$' <<<"$main_body" | tail -n1 | cut -d: -f1)
+  assert_true "Grafana add-on runs only after core is marked complete" test "$complete_line" -lt "$addon_line"
+  assert_true "final installation success follows selected Grafana" test "$addon_line" -lt "$success_line"
+}
+
 test_artifact_urls() {
   local output
   output=$(artifact_urls v1.2.3 amd64 | paste -sd '|')
   assert_equal \
     "constructs versioned release URLs" \
-    "https://github.com/ikaevus/RouteGate/releases/download/v1.2.3/routegate-v1.2.3-linux-amd64.tar.gz|https://github.com/ikaevus/RouteGate/releases/download/v1.2.3/SHA256SUMS" \
+    "https://github.com/routegate/RouteGate/releases/download/v1.2.3/routegate-v1.2.3-linux-amd64.tar.gz|https://github.com/routegate/RouteGate/releases/download/v1.2.3/SHA256SUMS" \
     "$output"
 }
 
@@ -175,6 +391,8 @@ test_checksum_verification() {
   assert_true \
     "accepts the matching release checksum" \
     verify_bundle_checksum "$bundle" "$checksums" "$bundle_name"
+  assert_equal "verified bundle SHA-256 stored for release resume" \
+    "$(sha256sum "$bundle" | awk '{print $1}')" "$ROUTEGATE_BUNDLE_SHA256"
 
   printf 'tampered\n' >>"$bundle"
   # shellcheck disable=SC2016
@@ -182,6 +400,240 @@ test_checksum_verification() {
     "rejects a tampered release bundle" \
     bash -c 'source "$1"; ROUTEGATE_LOG_FILE="$2"; verify_bundle_checksum "$3" "$4" "$5"' \
       _ "$ROOT_DIR/install.sh" "$ROUTEGATE_LOG_FILE" "$bundle" "$checksums" "$bundle_name"
+}
+
+test_release_bundle_precedes_host_mutation() {
+  local main_body bundle_line state_line dependencies_line files_line
+  main_body=$(sed -n '/^main() {/,/^}/p' "$ROOT_DIR/install.sh")
+  bundle_line=$(grep -n 'prepare_bundle' <<<"$main_body" | head -n1 | cut -d: -f1)
+  state_line=$(grep -n 'initialize_install_state' <<<"$main_body" | head -n1 | cut -d: -f1)
+  dependencies_line=$(grep -n 'install_dependencies' <<<"$main_body" | head -n1 | cut -d: -f1)
+  files_line=$(grep -n 'install_files' <<<"$main_body" | head -n1 | cut -d: -f1)
+
+  assert_true "release bundle is verified before RouteGate ownership state is written" \
+    test "$bundle_line" -lt "$state_line"
+  assert_true "release bundle is verified before apt mutates the host" \
+    test "$bundle_line" -lt "$dependencies_line"
+  assert_true "release bundle is verified before manager binaries are installed" \
+    test "$bundle_line" -lt "$files_line"
+  assert_true "preflight checks Python before installing packages" \
+    grep -Fq 'command -v python3 >/dev/null' "$ROOT_DIR/install.sh"
+}
+
+test_legacy_bundle_rejected_before_platform_install() {
+  local source_dir="$TEST_TMP/legacy-bundle-source"
+  local archive="$TEST_TMP/legacy-bundle.tar.gz"
+  local work_dir="$TEST_TMP/legacy-bundle-work"
+  local error_file="$TEST_TMP/legacy-bundle.err"
+  local name
+  mkdir -p "$source_dir"/{bin,manager/migrations,frontend,systemd,nginx,tools,metadata}
+  for name in \
+    bin/routegate-manager \
+    bin/routegate-agent \
+    frontend/index.html \
+    systemd/routegate-manager.service \
+    systemd/routegate-agent.service \
+    nginx/routegate.conf.example \
+    tools/routegate-recovery; do
+    printf 'fixture\n' >"$source_dir/$name"
+  done
+  printf 'FORMAT_VERSION=1\nVERSION=v0.1.0\nOS=linux\nARCH=amd64\n' \
+    >"$source_dir/metadata/manifest.env"
+  tar -czf "$archive" -C "$source_dir" .
+  mkdir -p "$work_dir"
+
+  if (
+    ROUTEGATE_WORK_DIR="$work_dir"
+    ROUTEGATE_RESOLVED_VERSION=v0.1.0
+    ROUTEGATE_ARCH=amd64
+    extract_bundle "$archive"
+  ) >"$TEST_TMP/legacy-bundle.out" 2>"$error_file"; then
+    fail "legacy bundle without updater contract is rejected"
+    return
+  fi
+
+  assert_true "legacy release is rejected with an actionable version mismatch error" \
+    grep -Fq 'incompatible with this installer' "$error_file"
+  assert_true "legacy release error explicitly requires a version-matched installer" \
+    grep -Fq 'Use a version-matched installer' "$error_file"
+
+  # Exercise the CLI entrypoint as a non-root user, with no DNS name, database,
+  # apt changes, service changes, sudo or RouteGate installation state.
+  local checksum_file="$TEST_TMP/legacy-checksums"
+  (cd "$TEST_TMP" && sha256sum "$(basename "$archive")") >"$checksum_file"
+  if bash "$ROOT_DIR/install.sh" --verify-bundle --version v0.1.0 \
+      --bundle-file "$archive" --checksum-file "$checksum_file" \
+      >"$TEST_TMP/verify-legacy.out" 2>"$TEST_TMP/verify-legacy.err"; then
+    fail "verify-only mode rejects a legacy bundle without mutating the host"
+  else
+    assert_true "verify-only CLI rejects a legacy release before installation" \
+      grep -Fq 'incompatible with this installer' "$TEST_TMP/verify-legacy.err"
+  fi
+
+  local updater
+  for updater in release_manifest.py routegate-update-bootstrap.sh \
+      routegate-update-core.sh routegate-update-role.sh \
+      routegate-update-transaction.sh routegate-update-verified.sh; do
+    printf 'fixture\n' >"$source_dir/tools/$updater"
+  done
+  tar -czf "$archive" -C "$source_dir" .
+  (cd "$TEST_TMP" && sha256sum "$(basename "$archive")") >"$checksum_file"
+  if bash "$ROOT_DIR/install.sh" --verify-bundle --version v0.1.0 \
+      --bundle-file "$archive" --checksum-file "$checksum_file" \
+      >"$TEST_TMP/verify-valid.out" 2>"$TEST_TMP/verify-valid.err"; then
+    assert_true "verify-only CLI reports verified version without installing" \
+      grep -Fq 'No packages, services or RouteGate installation state were changed' "$TEST_TMP/verify-valid.out"
+  else
+    fail "verify-only CLI validates a matching bundle (see $TEST_TMP/verify-valid.err)"
+  fi
+}
+
+test_resume_release_pin() {
+  local expected_sha changed_sha state_file
+  expected_sha=$(printf '%064d' 1)
+  changed_sha=$(printf '%064d' 2)
+  state_file="$TEST_TMP/interrupted-install-state.env"
+
+  cat >"$state_file" <<EOF_STATE
+STATUS=installing
+DOMAIN=ci.routegate.example
+VERSION=v3.1.4
+ARCH=amd64
+BUNDLE_SHA256=$expected_sha
+PROMETHEUS_MANAGED=0
+GRAFANA_REQUESTED=0
+EOF_STATE
+
+  # The production initializer is exercised against isolated ownership state,
+  # with all mutations directed to a test-only directory.
+  local case_name version hash dir output
+  for case_name in matching changed_tag changed_artifact; do
+    version=v3.1.4
+    hash=$expected_sha
+    [[ "$case_name" != changed_tag ]] || version=v3.1.5
+    [[ "$case_name" != changed_artifact ]] || hash=$changed_sha
+    dir="$TEST_TMP/resume-$case_name"
+    output="$TEST_TMP/resume-$case_name.log"
+    if bash -c '
+       source "$1"
+       ROUTEGATE_STATE_FILE="$2"
+       ROUTEGATE_STATE_DIR="$3"
+       ROUTEGATE_LOG_FILE=""
+       ROUTEGATE_RESUME_INSTALL=1
+       ROUTEGATE_RESOLVED_VERSION="$4"
+       ROUTEGATE_BUNDLE_SHA256="$5"
+       ROUTEGATE_INSTALL_GRAFANA=0
+       initialize_install_state
+    ' _ "$ROOT_DIR/install.sh" "$state_file" "$dir" "$version" "$hash" >"$output" 2>&1; then
+      if [[ "$case_name" == matching ]]; then
+        pass "interrupted install resumes only with original tag and SHA-256"
+      else
+        fail "interrupted install must reject $case_name"
+      fi
+    elif [[ "$case_name" == matching ]]; then
+      fail "matching pinned installation state must resume"
+    else
+      assert_true "mismatched $case_name rejected without writing state" \
+        test ! -e "$dir"
+      assert_true "mismatched $case_name explains why recovery was refused" \
+        grep -Eq 'pinned to release|SHA-256 differs' "$output"
+    fi
+  done
+
+  sed -i 's/^BUNDLE_SHA256=.*/BUNDLE_SHA256=/' "$state_file"
+  if bash -c '
+       source "$1"
+       ROUTEGATE_STATE_FILE="$2"
+       ROUTEGATE_STATE_DIR="$3"
+       ROUTEGATE_LOG_FILE=""
+       ROUTEGATE_RESUME_INSTALL=1
+       ROUTEGATE_RESOLVED_VERSION=v3.1.4
+       ROUTEGATE_BUNDLE_SHA256="$4"
+       ROUTEGATE_INSTALL_GRAFANA=0
+       initialize_install_state
+    ' _ "$ROOT_DIR/install.sh" "$state_file" "$TEST_TMP/rejected-legacy-dir" "$expected_sha" \
+       >"$TEST_TMP/rejected-legacy.log" 2>&1; then
+    fail "legacy interrupted state without SHA-256 must not auto-resume"
+  else
+    assert_true "unknown legacy release fingerprint rejected before mutation" \
+      test ! -e "$TEST_TMP/rejected-legacy-dir"
+  fi
+
+  assert_true "new state stores a resolved tag instead of floating latest" \
+    grep -Fq 'write_install_state_status installing "$ROUTEGATE_RESOLVED_VERSION"' "$ROOT_DIR/install.sh"
+  assert_true "installation state serializes the validated bundle fingerprint" \
+    grep -Fq 'BUNDLE_SHA256=${ROUTEGATE_BUNDLE_SHA256}' "$ROOT_DIR/install.sh"
+}
+
+test_resume_grafana_selection_pin() {
+  local hash
+  hash=$(printf '%064d' 3)
+  local saved choice state dir report
+  for saved in 0 1; do
+    state="$TEST_TMP/resume-grafana-$saved.env"
+    cat >"$state" <<EOF_STATE
+STATUS=installing
+DOMAIN=ci.routegate.example
+VERSION=v3.1.4
+ARCH=amd64
+BUNDLE_SHA256=$hash
+PROMETHEUS_MANAGED=1
+GRAFANA_REQUESTED=$saved
+EOF_STATE
+    for choice in 0 1; do
+      dir="$TEST_TMP/resume-grafana-$saved-$choice"
+      report="$TEST_TMP/resume-grafana-$saved-$choice.log"
+      if bash -c '
+        source "$1"
+        ROUTEGATE_STATE_FILE="$2"
+        ROUTEGATE_STATE_DIR="$3"
+        ROUTEGATE_LOG_FILE=""
+        ROUTEGATE_RESUME_INSTALL=1
+        ROUTEGATE_RESOLVED_VERSION=v3.1.4
+        ROUTEGATE_BUNDLE_SHA256="$4"
+        ROUTEGATE_INSTALL_GRAFANA="$5"
+        initialize_install_state
+      ' _ "$ROOT_DIR/install.sh" "$state" "$dir" "$hash" "$choice" >"$report" 2>&1; then
+        if [[ "$saved" == "$choice" ]]; then
+          assert_true "Grafana resume preserves original $saved selection" test -d "$dir"
+        else
+          fail "Grafana selection $saved must not switch to $choice on resume"
+        fi
+      elif [[ "$saved" == "$choice" ]]; then
+        fail "matching Grafana selection $saved must resume"
+      else
+        assert_true "Grafana choice $saved->$choice rejected before state mutation" test ! -e "$dir"
+        assert_true "Grafana mismatch has actionable error" \
+          grep -Fq 'Interrupted installation is pinned to Grafana choice' "$report"
+      fi
+    done
+  done
+
+  state="$TEST_TMP/resume-grafana-missing.env"
+  cat >"$state" <<EOF_STATE
+STATUS=installing
+VERSION=v3.1.4
+BUNDLE_SHA256=$hash
+PROMETHEUS_MANAGED=1
+EOF_STATE
+  dir="$TEST_TMP/resume-grafana-missing"
+  if bash -c '
+    source "$1"
+    ROUTEGATE_STATE_FILE="$2"
+    ROUTEGATE_STATE_DIR="$3"
+    ROUTEGATE_LOG_FILE=""
+    ROUTEGATE_RESUME_INSTALL=1
+    ROUTEGATE_RESOLVED_VERSION=v3.1.4
+    ROUTEGATE_BUNDLE_SHA256="$4"
+    ROUTEGATE_INSTALL_GRAFANA=0
+    initialize_install_state
+  ' _ "$ROOT_DIR/install.sh" "$state" "$dir" "$hash" >"$TEST_TMP/resume-grafana-missing.log" 2>&1; then
+    fail "missing pinned Grafana intent must refuse automatic recovery"
+  else
+    assert_true "missing Grafana intent stops before state mutation" test ! -e "$dir"
+    assert_true "missing Grafana intent has actionable error" \
+      grep -Fq 'no valid pinned Grafana selection' "$TEST_TMP/resume-grafana-missing.log"
+  fi
 }
 
 test_piped_entrypoint_guard() {
@@ -362,6 +814,16 @@ test_all_in_one_role_contract() {
   assert_false \
     "All-in-One platform installer does not set WireGuard forwarding sysctl" \
     grep -Fq '99-routegate-wireguard.conf' "$ROOT_DIR/install.sh"
+  local nginx_template="$ROOT_DIR/deploy/nginx/routegate.conf.example"
+  assert_true \
+    "nginx prevents subscription URL referrer leaks site-wide" \
+    grep -Fq 'add_header Referrer-Policy "no-referrer" always;' "$nginx_template"
+  assert_false \
+    "nginx must not add weaker cross-origin referrer policy to bearer URLs" \
+    grep -Fq 'strict-origin-when-cross-origin' "$nginx_template"
+  assert_equal \
+    "nginx does not return duplicate upstream referrer policy on /sub and /api" \
+    2 "$(grep -Fc 'proxy_hide_header Referrer-Policy;' "$nginx_template")"
   assert_true \
     "Hybrid nginx config exposes the loopback Hysteria2 ACME bridge" \
     grep -Fq 'proxy_pass http://127.0.0.1:9080;' "$ROOT_DIR/deploy/nginx/routegate.conf.example"
@@ -526,9 +988,18 @@ test_apt_repository_trust_preflight
 test_existing_install_precedes_repository_preflight
 test_validation_helpers
 test_argument_parsing
+test_grafana_selection_and_install_contract
+test_local_grafana_sidecar_preflight
+test_numbered_interactive_configuration_menu_contract
+test_interactive_menu_pseudoterminal_smoke
+test_completed_grafana_menu_state
 test_artifact_urls
 test_checksum_verification
 test_archive_entry_policy
+test_release_bundle_precedes_host_mutation
+test_legacy_bundle_rejected_before_platform_install
+test_resume_release_pin
+test_resume_grafana_selection_pin
 test_piped_entrypoint_guard
 test_setup_url_contract
 test_manager_environment_public_url

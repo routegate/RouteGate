@@ -228,6 +228,7 @@ Do **not** use historical `v0.1.0` commands, an unreviewed `main/install.sh`,
 a mutable `latest` selector, or CI artifact ZIPs to test current RouteGate.
 
 **New-user entrypoint:** [routegate.org — Quick Start](https://routegate.org/#install).
+Once the current stable release is published, copy the single Quick Start command from the website and paste it into the SSH terminal.
 The **Copy** action is intended to provide a **single terminal command** once
 a complete, reviewed, published stable release exists. That command must pin
 the exact release, verify the downloadable `install.sh` against its

@@ -5,6 +5,8 @@ on:
     branches:
       - main
   pull_request:
+  # Keep the release publication workflow's reusable CI gate active.
+  workflow_call:
 
 jobs:
   backend:
@@ -49,6 +51,114 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      - name: Verify RG-140 recovery authorization policy and bound challenge under race detector
+        run: go test -race ./internal/auth ./internal/recoveryauth -run '^(TestRuntimeRecovery|TestRecoveryChallenge)' -count=1 -timeout=120s -v
+
+      - name: Verify fenced Manager timeout preservation against PostgreSQL
+        run: go test ./internal/db -run '^TestRuntimeMutationFencingPreservesUncertainJobs$' -count=1 -timeout=120s -v
+
+      - name: Verify historical result readback against PostgreSQL
+        run: go test ./internal/agents ./internal/db -run '^TestRuntimeMutationFencing(VerifyHandler|VerifyStoredResult)$' -count=1 -timeout=120s -v
+
+      - name: Verify recovery holds and serializable node admission against PostgreSQL
+        run: go test ./internal/db -run '^TestRuntimeRecoveryReservation' -count=1 -timeout=120s -v
+
+      - name: Verify single-use recovery challenge ledger and immutable audit against PostgreSQL
+        run: go test ./internal/db -run '^TestRuntimeRecoveryChallenge' -count=1 -timeout=120s -v
+
+      - name: Verify bound-secret recovery consumer and audit rollback against PostgreSQL
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryVerifiedConsumer' -count=1 -timeout=120s -v
+
+      - name: Verify committed recovery challenge issuance and audit before secret disclosure
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryIssuer' -count=1 -timeout=120s -v
+
+      - name: Verify atomic recovery attempt creation and fail-closed audit under race detector
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryAttempt' -count=1 -timeout=120s -v
+
+      - name: Verify one-use recovery observation nonce, identity and audit against PostgreSQL
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryObservationNonce' -count=1 -timeout=120s -v
+
+      - name: Verify Agent/Manager runtime evidence digest v1 contract on Manager
+        run: go test -race ./internal/recoveryobserve -run '^TestRuntimeRecoveryEvidenceManager' -count=1 -timeout=120s -v
+
+      - name: Verify Manager-derived mutation marker independent of Agent claims
+        run: go test -race ./internal/recoveryobserve -run '^TestManagerExpectedMutationMarkerV1' -count=1 -timeout=120s -v
+
+      - name: Verify immutable Manager pre-dispatch checkpoint and atomic PostgreSQL audit
+        run: go test -race ./internal/db -run '^TestRuntimePreDispatchCheckpoint' -count=1 -timeout=180s -v
+
+      - name: Verify dormant Agent enrollment preparation cannot activate or gate legacy operations
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentPreparationV1' -count=1 -timeout=180s -v
+
+      - name: Verify historical Manager enrollment preflight remains unattested
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentPreflightV1' -count=1 -timeout=180s -v
+
+      - name: Rehearse checkpoint-bound config/service claims atomically in disposable PostgreSQL
+        run: go test -race ./internal/db -run '^TestRuntimeCheckpointedClaimRehearsalV1' -count=1 -timeout=180s -v
+
+      - name: Verify operator-authorized Agent preparation is dormant and audit-atomic
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryAuthorizedPreparationV1' -count=1 -timeout=180s -v
+
+      - name: Verify Manager-derived offline enrollment genesis digest and stale identity refusal
+        run: go test -race ./internal/recoveryenroll ./internal/db -run '^TestRuntimeRecoveryEnrollmentGenesisExpectationV1' -count=1 -timeout=180s -v
+
+      - name: Rehearse one-use Manager enrollment nonce, rollback and concurrency in isolated PostgreSQL
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentOneShotRehearsalV1' -count=1 -timeout=180s -v
+
+      - name: Verify offline Manager HMAC enrollment reply wire contract against Agent golden vector
+        run: go test -race ./internal/recoveryenroll -run '^TestEnrollmentProbeReplyMACOfflineV1' -count=1 -timeout=120s -v
+
+      - name: Rehearse signed one-use enrollment reply with PostgreSQL locks and audit
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentSignedConsumeV1' -count=1 -timeout=180s -v
+
+      - name: Rehearse fresh human enrollment grant, one-use challenge and atomic audits
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentOperatorGrantV1' -count=1 -timeout=240s -v
+
+      - name: Verify database-enforced operator attribution for direct enrollment ledger inserts
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentDatabaseEnforcedAuditV1' -count=1 -timeout=150s -v
+
+      - name: Rehearse revoked and expired operator grants at signed enrollment reply resolution
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentReplyRevocationV1' -count=1 -timeout=180s -v
+
+      - name: Verify manual read-only enrollment reconciliation after process loss and ambiguous commits
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentCrashReconciliationV1' -count=1 -timeout=180s -v
+
+      - name: Verify PostgreSQL socket termination before and after one-shot enrollment COMMIT
+        run: go test -race ./internal/db -run '^TestRuntimeRecoveryEnrollmentTransportLossV1' -count=1 -timeout=180s -v
+
+      - name: Verify current Agent bearer-bound evidence claims against PostgreSQL
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryTokenProvenance' -count=1 -timeout=120s -v
+
+      - name: Verify atomic authenticated Agent observation consume, audit rollback and races
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryAuthenticatedConsume' -count=1 -timeout=120s -v
+
+      - name: Verify private observation nonce issuance only after audit commit and one-use concurrency
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^TestRuntimeRecoveryObservationIssuer' -count=1 -timeout=120s -v
+
+      - name: Verify dormant Agent observation HTTP authentication and nonce delivery with PostgreSQL
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^(TestRuntimeRecoveryTransport|TestRecoveryObservationTransportNotRegistered)' -count=1 -timeout=120s -v
+
+      - name: Verify complete signed Agent observation HTTP reply and atomic PostgreSQL consume
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^(TestRuntimeRecoveryReplyTransport|TestRuntimeRecoveryFullReplyMACV1)' -count=1 -timeout=120s -v
+
+      - name: Verify unique Agent observation reply JSON before nonce consumption
+        run: go test -race ./internal/recoveryobserve ./internal/db -run '^(TestRejectAmbiguousObservationJSON|TestRuntimeRecoveryReplyTransportStrictJSONNeverConsumes)' -count=1 -timeout=120s -v
+
+
+      # RG-140 v0.2.0 integration: old #547 tests are now replayed from
+      # current main, not substituted for the current backend/release CI.
+      - name: Test scoped VLESS removal preflight against real sing-box
+        run: |
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/SagerNet/sing-box/releases/download/v1.12.8/sing-box-1.12.8-linux-amd64.tar.gz \
+            --output "$test_dir/sing-box.tar.gz"
+          printf '%s  %s\n' b41d9ae438a4367e5fd5c4aa36fe040d0c1bfe5f91f96a072eef31f61d46670c "$test_dir/sing-box.tar.gz" | sha256sum --check --status
+          tar -xzf "$test_dir/sing-box.tar.gz" -C "$test_dir"
+          ROUTEGATE_TEST_SING_BOX="$test_dir/sing-box-1.12.8-linux-amd64/sing-box" \
+            go test ./internal/configs -run '^TestVLESSRemovalSingBox' -count=1 -timeout=60s -v
+
       - name: Test rollout PostgreSQL connection in read-only mode
         run: python3 -m unittest discover -s ../scripts -p test_traffic_accounting_rollout.py
 
@@ -78,6 +188,61 @@ jobs:
 
       - name: Run tests
         run: go test ./...
+
+      - name: Test opt-in Agent mutation dispatch and strict acknowledgements
+        run: go test -race ./internal/config ./internal/client ./internal/heartbeat ./internal/tasks -run '(FencedDispatch|RuntimeMutation|CompleteTask|CredentialRemoval)' -count=1 -timeout=120s -v
+
+      - name: Check historical readback identity and digest with race detector
+        run: go test -race ./internal/client ./internal/heartbeat -run '^(TestRuntimeMutationResultVerification|TestRuntimeMutationVerifiedResultRetainsFence|TestFencedDurableReplayRefusesHistorical404AndRetainsFence)$' -count=1 -timeout=120s -v
+
+      - name: Verify read-only recovery witness and fail-closed runtime evidence with race detector
+        run: go test -race ./internal/heartbeat ./internal/tasks -run '^(TestFencedDispatchSavesRuntimeRecoveryWitness|TestRuntimeMutationRecovery(TargetHash|Observation|RejectsChangedEvidence))$' -count=1 -timeout=120s -v
+
+      - name: Verify nonce-bound read-only Agent evidence and expiration under race detector
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryChallengedObservation' -count=1 -timeout=120s -v
+
+      - name: Verify Agent/Manager exact-byte evidence digest v1 contract on Agent
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryEvidenceV1' -count=1 -timeout=120s -v
+
+      - name: Verify token-bound read-only Agent proof-of-possession format
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryTokenProof' -count=1 -timeout=120s -v
+
+      - name: Verify dormant outbound Agent recovery client binding and no automatic retries
+        run: go test -race ./internal/client -run '^TestRecoveryObservationTransport' -count=1 -timeout=120s -v
+
+      - name: Verify one-shot signed Agent observation reply and full-response HMAC wire contract
+        run: go test -race ./internal/client ./internal/tasks -run '^(TestRecoveryObservationReplyTransport|TestRuntimeRecoveryFullReplyMACV1)' -count=1 -timeout=120s -v
+
+      - name: Verify fresh Agent-local read-only recovery holds retain exclusive flock and durable fence
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecovery(ReadOnlyHoldV1|CrashBoundariesRemainFenced|CancelledDuringHealthNeverLeaksEvidence)' -count=1 -timeout=120s -v
+      - name: Verify offline recovery journal crash-cut model never grants Agent unlock
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryJournalV1' -count=1 -timeout=120s -v
+
+      - name: Verify unregistered journal disk persistence and interrupted fsync boundaries
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryJournalDiskV1' -count=1 -timeout=120s -v
+
+      - name: Verify read-only Agent journal preflight cannot grant recovery authorization
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryJournalOfflinePreflightV1' -count=1 -timeout=120s -v
+
+      - name: Verify offline Agent enrollment genesis double anchor and eight fsync crash boundaries
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryEnrollmentGenesisOfflineV1' -count=1 -timeout=120s -v
+
+      - name: Verify offline Agent enrollment reply HMAC matches Manager vector and refuses tampering
+        run: go test -race ./internal/tasks -run '^TestRuntimeRecoveryEnrollmentProbeReplyMACOfflineV1' -count=1 -timeout=120s -v
+
+
+      - name: Test scoped Agent removal with systemd and real Reality traffic
+        run: |
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/SagerNet/sing-box/releases/download/v1.12.8/sing-box-1.12.8-linux-amd64.tar.gz \
+            --output "$test_dir/sing-box.tar.gz"
+          printf '%s  %s\n' b41d9ae438a4367e5fd5c4aa36fe040d0c1bfe5f91f96a072eef31f61d46670c "$test_dir/sing-box.tar.gz" | sha256sum --check --status
+          tar -xzf "$test_dir/sing-box.tar.gz" -C "$test_dir"
+          sudo env ROUTEGATE_TEST_SING_BOX="$test_dir/sing-box-1.12.8-linux-amd64/sing-box" \
+            ROUTEGATE_TEST_REMOVAL_SYSTEMD=1 "$(command -v go)" test ./internal/tasks \
+            -run '^TestCredentialRemovalSystemdRealityTraffic$' -count=1 -timeout=75s -v
 
       - name: Build disposable sing-box statistics runtime
         run: go install -tags with_v2ray_api github.com/sagernet/sing-box/cmd/sing-box@v1.12.12
@@ -153,6 +318,10 @@ jobs:
             scripts/test-agent-installer.sh \
             scripts/test-attestation-verifier-runtime.sh \
             scripts/test-clean-vps-installer.sh \
+            scripts/test-release-tag-identity.sh \
+            scripts/check-release-tag-identity.sh \
+            scripts/test-manual-release-source.sh \
+            scripts/check-manual-release-source.sh \
             scripts/test-grafana-installer.sh \
             scripts/test-production-like-preflight.sh \
             scripts/test-production-like-update-manager.sh \
@@ -182,6 +351,8 @@ jobs:
             scripts/routegate-update-transaction.sh \
             scripts/routegate-update-verified.sh \
             scripts/test-attestation-verifier-runtime.sh \
+            scripts/test-manual-release-source.sh \
+            scripts/check-manual-release-source.sh \
             scripts/test-grafana-installer.sh \
             scripts/test-production-like-preflight.sh \
             scripts/test-production-like-update-manager.sh \
@@ -202,6 +373,8 @@ jobs:
           sudo bash scripts/test-manager-only-ops-recovery.sh
           bash scripts/test-agent-installer.sh
           scripts/test-clean-vps-installer.sh
+          bash scripts/test-release-tag-identity.sh
+          bash scripts/test-manual-release-source.sh
           bash scripts/test-grafana-installer.sh
           sudo bash scripts/test-production-like-preflight.sh
           sudo bash scripts/test-production-like-update-manager.sh
@@ -217,8 +390,8 @@ jobs:
           bash scripts/routegate-update-transaction.sh --help >/dev/null
           bash scripts/routegate-update-verified.sh --help >/dev/null
 
-      - name: Run release manifest tests
-        run: python3 -m unittest scripts/test_release_manifest.py
+      - name: Run release manifest and publication safety tests
+        run: python3 -m unittest scripts/test_release_manifest.py scripts/test_release_publication_gate.py
 
       - name: Test UI publication recovery
         run: python3 -m unittest scripts/test_rg140_session_ui.py
@@ -245,6 +418,12 @@ jobs:
           python3 scripts/release_manifest.py verify \
             --manifest "$OUTPUT_DIR/release-manifest.json" \
             --artifacts-dir "$OUTPUT_DIR"
+          # Check the REAL freshly built bundle through the installer CLI before
+          # any privileged host action. Unlike static file listings this exercises
+          # the exact checksum, extraction and manifest compatibility contract.
+          bash "$GITHUB_WORKSPACE/install.sh" --verify-bundle --version "$VERSION" \
+            --bundle-file "$OUTPUT_DIR/routegate-${VERSION}-linux-amd64.tar.gz" \
+            --checksum-file "$OUTPUT_DIR/SHA256SUMS"
           cd "$OUTPUT_DIR"
           sha256sum -c SHA256SUMS
           sha256sum -c INSTALLER_SHA256SUMS
@@ -255,6 +434,12 @@ jobs:
           grep -Fxq './bin/routegate-manager' bundle-files.txt
           grep -Fxq './bin/routegate-agent' bundle-files.txt
           grep -Fxq './frontend/index.html' bundle-files.txt
+          # Validate shipped HTML rather than the source-tree appearance.
+          index_html=$(tar -xOzf routegate-ci-test-linux-amd64.tar.gz ./frontend/index.html)
+          [[ "$index_html" == *'data-theme="dark"'* && "$index_html" == *'color-scheme: dark'* ]] || {
+            echo "::error::CI bundle contains outdated frontend appearance."
+            exit 1
+          }
           grep -Fq './manager/migrations/' bundle-files.txt
           grep -Fxq './tools/routegate-recovery' bundle-files.txt
           grep -Fxq './tools/release_manifest.py' bundle-files.txt
@@ -402,6 +587,12 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Install public website dependencies for real Quick Start browser acceptance
+        run: npm ci --prefix ../website
+
+      - name: Verify website Quick Start copy/paste in Chromium (RU and EN)
+        run: node --test scripts/website-quickstart.browser.test.mjs
+
       - name: Verify Dashboard animation in Chromium
         run: node --test scripts/dashboard-motion.browser.test.mjs
 
@@ -451,5 +642,101 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test published release quick-start safety
+        run: npm test
+
       - name: Build website
         run: npm run build
+
+  hybrid-grafana-native-e2e:
+    name: Disposable Hybrid with real Prometheus and Grafana
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            backend/go.sum
+            agent/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install genuine Hybrid, Prometheus and Grafana on one-use Ubuntu (test TLS)
+        env:
+          ROUTEGATE_E2E_GRAFANA: "1"
+        run: bash scripts/hybrid-disposable-installer-e2e.sh
+
+  hybrid-native-e2e:
+    name: Disposable native Hybrid installer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            backend/go.sum
+            agent/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install real Hybrid stack on disposable Ubuntu host (test TLS)
+        run: bash scripts/hybrid-disposable-installer-e2e.sh
+  tagless-release-candidate:
+    name: Two-architecture tagless release rehearsal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact tested commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            backend/go.sum
+            agent/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Rehearse two-architecture release without tags or publication
+        run: |
+          bash -n scripts/test-release-candidate-dry-run.sh
+          bash scripts/test-release-candidate-dry-run.sh

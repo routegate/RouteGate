@@ -4,7 +4,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-ROUTEGATE_REPOSITORY="${ROUTEGATE_REPOSITORY:-ikaevus/RouteGate}"
+ROUTEGATE_REPOSITORY="${ROUTEGATE_REPOSITORY:-routegate/RouteGate}"
 ROUTEGATE_VERSION="${ROUTEGATE_VERSION:-latest}"
 ROUTEGATE_DOMAIN="${ROUTEGATE_DOMAIN:-}"
 ROUTEGATE_EMAIL="${ROUTEGATE_EMAIL:-}"
@@ -16,6 +16,10 @@ ROUTEGATE_BUNDLE_URL="${ROUTEGATE_BUNDLE_URL:-}"
 ROUTEGATE_CHECKSUM_URL="${ROUTEGATE_CHECKSUM_URL:-}"
 ROUTEGATE_ASSUME_YES="${ROUTEGATE_ASSUME_YES:-0}"
 ROUTEGATE_INSTALL_PROMETHEUS="${ROUTEGATE_INSTALL_PROMETHEUS:-}"
+ROUTEGATE_INSTALL_GRAFANA="${ROUTEGATE_INSTALL_GRAFANA:-}"
+ROUTEGATE_PROMETHEUS_EXPLICIT_NO=0
+ROUTEGATE_GRAFANA_SCRIPT=""
+ROUTEGATE_VERIFY_BUNDLE=0
 
 ROUTEGATE_STATE_DIR="/var/lib/routegate-installer"
 ROUTEGATE_STATE_FILE="/etc/routegate/install-state.env"
@@ -28,6 +32,7 @@ ROUTEGATE_WORK_DIR=""
 ROUTEGATE_ARCH=""
 ROUTEGATE_RESOLVED_VERSION=""
 ROUTEGATE_BUNDLE_NAME=""
+ROUTEGATE_BUNDLE_SHA256=""
 ROUTEGATE_PUBLIC_IPV4=""
 ROUTEGATE_DB_PASSWORD=""
 ROUTEGATE_ADMIN_PASSWORD=""
@@ -71,12 +76,15 @@ Options:
   --admin-email EMAIL       First administrator email. Defaults to --email.
   --server-name NAME        Local All-in-One server name. Defaults to the FQDN.
   --version VERSION         Release tag to install. Defaults to latest.
+  --verify-bundle           Check bundle checksum and compatibility without installing.
   --bundle-file PATH        Use a local release bundle instead of GitHub Releases.
   --checksum-file PATH      SHA256SUMS file for --bundle-file.
   --bundle-url URL          Use an explicit bundle URL.
   --checksum-url URL        SHA256SUMS URL for --bundle-url.
   --with-prometheus         Install RouteGate-managed Prometheus.
   --without-prometheus      Do not install Prometheus (default).
+  --with-grafana            Install Grafana as part of this run, after RouteGate is ready.
+  --without-grafana         Do not install Grafana (default).
   --yes                     Skip the final confirmation prompt.
   --help                    Show this help.
 
@@ -179,12 +187,25 @@ parse_args() {
         ROUTEGATE_CHECKSUM_URL="$2"
         shift 2
         ;;
+      --verify-bundle)
+        ROUTEGATE_VERIFY_BUNDLE=1
+        shift
+        ;;
       --with-prometheus)
         ROUTEGATE_INSTALL_PROMETHEUS=1
         shift
         ;;
       --without-prometheus)
         ROUTEGATE_INSTALL_PROMETHEUS=0
+        ROUTEGATE_PROMETHEUS_EXPLICIT_NO=1
+        shift
+        ;;
+      --with-grafana)
+        ROUTEGATE_INSTALL_GRAFANA=1
+        shift
+        ;;
+      --without-grafana)
+        ROUTEGATE_INSTALL_GRAFANA=0
         shift
         ;;
       --yes|-y)
@@ -282,6 +303,201 @@ prompt_for_prometheus() {
   fi
 }
 
+prompt_for_grafana() {
+  if [[ -z "$ROUTEGATE_INSTALL_GRAFANA" && -f "$ROUTEGATE_STATE_FILE" ]] \
+      && [[ "$(state_value STATUS || true)" == "installing" ]]; then
+    ROUTEGATE_INSTALL_GRAFANA=$(state_value GRAFANA_REQUESTED || true)
+  fi
+  if [[ -z "$ROUTEGATE_INSTALL_GRAFANA" ]]; then
+    if [[ "$ROUTEGATE_ASSUME_YES" == "1" ]] || ! interactive_tty_available; then
+      ROUTEGATE_INSTALL_GRAFANA=0
+    else
+      local answer=""
+      read -r -p "Include Grafana dashboards in this installation? [y/N] " answer </dev/tty
+      [[ "$answer" =~ ^[Yy]$ ]] && ROUTEGATE_INSTALL_GRAFANA=1 || ROUTEGATE_INSTALL_GRAFANA=0
+    fi
+  fi
+  ROUTEGATE_INSTALL_GRAFANA=$(normalize_prometheus_choice "$ROUTEGATE_INSTALL_GRAFANA") \
+    || die "ROUTEGATE_INSTALL_GRAFANA must be true/false or 1/0."
+  if [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" && "$ROUTEGATE_INSTALL_PROMETHEUS" != "1" ]]; then
+    [[ "$ROUTEGATE_PROMETHEUS_EXPLICIT_NO" != "1" ]] \
+      || die "Grafana requires Prometheus; --with-grafana conflicts with --without-prometheus."
+    ROUTEGATE_INSTALL_PROMETHEUS=1
+    log "Grafana selected: automatically enabling RouteGate-managed Prometheus."
+  fi
+}
+
+wizard_prompt_value() {
+  local label=$1 kind=$2 current=$3 value=""
+  while true; do
+    read -r -p "$label [$current]: " value </dev/tty \
+      || die "Terminal input ended while editing installation settings."
+    [[ -n "$value" ]] || value="$current"
+    if [[ "$kind" == "domain" ]]; then
+      value="${value,,}"
+      if validate_domain "$value"; then
+        printf '%s' "$value"
+        return 0
+      fi
+    elif validate_email "$value"; then
+      printf '%s' "$value"
+      return 0
+    fi
+    printf 'Invalid %s. Try again.\n' "$kind" >/dev/tty
+  done
+}
+
+wizard_install_plan() {
+  {
+    printf '\n  Install plan:\n'
+    printf '    RouteGate Manager + Agent + PostgreSQL + nginx/HTTPS : required\n'
+    printf '    Prometheus : %s\n' "$([[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] && echo YES || echo NO)"
+    printf '    Grafana    : %s\n' "$([[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] && echo YES || echo NO)"
+    printf '    VPN runtimes: configured later using the Admin UI\n'
+    printf '    Release: %s (must be pinned to a verified bundle)\n\n' "$ROUTEGATE_VERSION"
+  } >/dev/tty
+}
+
+installer_configuration_menu() {
+  # Read only TTY; do not interfere with non-interactive CI and --yes.
+  interactive_tty_available || die "Installer menu requires an interactive terminal."
+  [[ "$ROUTEGATE_ASSUME_YES" != "1" ]] || die "Installer menu is disabled with --yes."
+  ROUTEGATE_DOMAIN="${ROUTEGATE_DOMAIN,,}"
+  [[ -n "$ROUTEGATE_ADMIN_EMAIL" ]] || ROUTEGATE_ADMIN_EMAIL="$ROUTEGATE_EMAIL"
+  [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
+
+  local status="" saved_prom="" saved_grafana="" managed_grafana=""
+  if [[ -f "$ROUTEGATE_STATE_FILE" ]]; then
+    status=$(state_value STATUS || true)
+    saved_prom=$(state_value PROMETHEUS_MANAGED || true)
+    saved_grafana=$(state_value GRAFANA_REQUESTED || true)
+    managed_grafana=$(state_value GRAFANA_MANAGED || true)
+    if [[ "$status" == "installing" || "$status" == "complete" ]]; then
+      [[ -n "$ROUTEGATE_DOMAIN" ]] || ROUTEGATE_DOMAIN=$(state_value DOMAIN || true)
+      [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
+      [[ -n "$saved_prom" ]] && ROUTEGATE_INSTALL_PROMETHEUS="$saved_prom"
+      if [[ "$status" == "installing" && -n "$saved_grafana" ]]; then
+        ROUTEGATE_INSTALL_GRAFANA="$saved_grafana"
+      elif [[ "$status" == "complete" ]]; then
+        [[ -z "$managed_grafana" || "$managed_grafana" == "0" || "$managed_grafana" == "1" ]] \
+          || die "Existing RouteGate Grafana ownership state is invalid."
+        if [[ "$managed_grafana" == "1" ]]; then
+          # Always verify the already-installed add-on; this menu never uninstalls it.
+          ROUTEGATE_INSTALL_GRAFANA=1
+        elif [[ -z "$ROUTEGATE_INSTALL_GRAFANA" && "$saved_grafana" == "1" ]]; then
+          # Core completed but Grafana did not; present an actionable retry.
+          ROUTEGATE_INSTALL_GRAFANA=1
+        fi
+      fi
+    fi
+  fi
+  [[ -n "$ROUTEGATE_INSTALL_PROMETHEUS" ]] || ROUTEGATE_INSTALL_PROMETHEUS=0
+  [[ -n "$ROUTEGATE_INSTALL_GRAFANA" ]] || ROUTEGATE_INSTALL_GRAFANA=0
+  ROUTEGATE_INSTALL_PROMETHEUS=$(normalize_prometheus_choice "$ROUTEGATE_INSTALL_PROMETHEUS") \
+    || die "Invalid Prometheus selection."
+  if [[ "$status" == "complete" && "$ROUTEGATE_INSTALL_GRAFANA" == "1" && "$ROUTEGATE_INSTALL_PROMETHEUS" != "1" ]]; then
+    die "Existing RouteGate installation has no managed Prometheus; cannot add Grafana in this run."
+  fi
+  prompt_for_grafana
+
+  local choice="" domain_label="" grafana_label=""
+  while true; do
+    domain_label="$ROUTEGATE_DOMAIN"
+    [[ -n "$domain_label" ]] || domain_label="not configured"
+    if [[ "$status" == "complete" && "$managed_grafana" == "1" ]]; then
+      grafana_label="INSTALLED"
+    elif [[ "$status" == "complete" && "$saved_grafana" == "1" && "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+      grafana_label="RETRY"
+    elif [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+      grafana_label="ON"
+    else
+      grafana_label="OFF"
+    fi
+    {
+      printf '\n\033[1;36m+----------------------------------------------------------+\033[0m\n'
+      printf '\033[1;36m|               RouteGate VPN Installer                    |\033[0m\n'
+      printf '\033[1;36m+----------------------------------------------------------+\033[0m\n'
+      printf '  Target: %-42s\n' "$domain_label"
+      printf '  1. Main settings (domain, emails, server name)\n'
+      printf '  2. Prometheus       [%s]\n' "$([[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] && echo ON || echo OFF)"
+      printf '  3. Grafana          [%s]\n' "$grafana_label"
+      printf '  4. View installation plan\n'
+      printf '  5. Continue to preflight and installation\n'
+      printf '  0. Exit without installing\n'
+      if [[ "$status" == "installing" ]]; then
+        printf '  Note: interrupted installation; original components are locked.\n'
+      elif [[ "$status" == "complete" ]]; then
+        printf '  Note: existing core installation; only Grafana add-on may be retried.\n'
+      fi
+      printf '\n'
+    } >/dev/tty
+    read -r -p "Choose [0-5]: " choice </dev/tty \
+      || die "Terminal input ended before installation confirmation."
+    case "$choice" in
+      1)
+        if [[ "$status" == "installing" || "$status" == "complete" ]]; then
+          printf 'Existing domain is pinned: %s. Contact values may still be supplied.\n' "$ROUTEGATE_DOMAIN" >/dev/tty
+          ROUTEGATE_EMAIL=$(wizard_prompt_value "Let's Encrypt contact email" email "$ROUTEGATE_EMAIL")
+          ROUTEGATE_ADMIN_EMAIL=$(wizard_prompt_value "Administrator email" email "$ROUTEGATE_ADMIN_EMAIL")
+          continue
+        fi
+        ROUTEGATE_DOMAIN=$(wizard_prompt_value "RouteGate public domain" domain "$ROUTEGATE_DOMAIN")
+        ROUTEGATE_EMAIL=$(wizard_prompt_value "Let's Encrypt contact email" email "$ROUTEGATE_EMAIL")
+        [[ -n "$ROUTEGATE_ADMIN_EMAIL" ]] || ROUTEGATE_ADMIN_EMAIL="$ROUTEGATE_EMAIL"
+        ROUTEGATE_ADMIN_EMAIL=$(wizard_prompt_value "Administrator email" email "$ROUTEGATE_ADMIN_EMAIL")
+        [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
+        read -r -p "Server display name [$ROUTEGATE_SERVER_NAME]: " choice </dev/tty \
+          || die "Terminal input ended while editing server name."
+        [[ -z "$choice" ]] || ROUTEGATE_SERVER_NAME="$choice"
+        ;;
+      2)
+        if [[ "$status" == "installing" || "$status" == "complete" ]]; then
+          printf 'Prometheus ownership cannot change during resume or after installation.\n' >/dev/tty
+        elif [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
+          if [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+            printf 'Disable Grafana first: it requires Prometheus.\n' >/dev/tty
+          else
+            ROUTEGATE_INSTALL_PROMETHEUS=0
+          fi
+        else
+          ROUTEGATE_INSTALL_PROMETHEUS=1
+          ROUTEGATE_PROMETHEUS_EXPLICIT_NO=0
+        fi
+        ;;
+      3)
+        if [[ "$status" == "installing" ]]; then
+          printf 'Grafana selection is pinned during recovery.\n' >/dev/tty
+        elif [[ "$status" == "complete" && "$managed_grafana" == "1" ]]; then
+          printf 'Grafana is already installed. This menu cannot uninstall an owned service.\n' >/dev/tty
+        elif [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+          ROUTEGATE_INSTALL_GRAFANA=0
+        elif [[ "$ROUTEGATE_PROMETHEUS_EXPLICIT_NO" == "1" ]]; then
+          printf 'Grafana conflicts with explicitly disabled Prometheus.\n' >/dev/tty
+        elif [[ "$status" == "complete" && "$ROUTEGATE_INSTALL_PROMETHEUS" != "1" ]]; then
+          printf 'Cannot add Grafana: existing platform was installed without managed Prometheus.\n' >/dev/tty
+        else
+          ROUTEGATE_INSTALL_GRAFANA=1
+          ROUTEGATE_INSTALL_PROMETHEUS=1
+          printf 'Prometheus enabled as a Grafana dependency.\n' >/dev/tty
+        fi
+        ;;
+      4) wizard_install_plan ;;
+      5)
+        if ! validate_domain "$ROUTEGATE_DOMAIN" || ! validate_email "$ROUTEGATE_EMAIL" \
+            || ! validate_email "$ROUTEGATE_ADMIN_EMAIL"; then
+          printf 'Main settings are incomplete. Choose 1 before continuing.\n' >/dev/tty
+          continue
+        fi
+        [[ -n "$ROUTEGATE_SERVER_NAME" ]] || ROUTEGATE_SERVER_NAME="$ROUTEGATE_DOMAIN"
+        wizard_install_plan
+        return 0
+        ;;
+      0) printf 'RouteGate installation cancelled.\n' >/dev/tty; exit 0 ;;
+      *) printf 'Choose a number from 0 to 5.\n' >/dev/tty ;;
+    esac
+  done
+}
+
 prompt_for_inputs() {
   if [[ -z "$ROUTEGATE_DOMAIN" || -z "$ROUTEGATE_EMAIL" ]]; then
     [[ "$ROUTEGATE_ASSUME_YES" != "1" ]] \
@@ -314,6 +530,7 @@ prompt_for_inputs() {
   fi
 
   prompt_for_prometheus
+  prompt_for_grafana
   ROUTEGATE_SERVER_NAME="${ROUTEGATE_SERVER_NAME:-$ROUTEGATE_DOMAIN}"
 }
 
@@ -361,20 +578,7 @@ initialize_logging() {
   chmod 0600 "$ROUTEGATE_LOG_FILE"
 }
 
-validate_inputs() {
-  [[ -n "$ROUTEGATE_DOMAIN" ]] || die "--domain is required."
-  [[ -n "$ROUTEGATE_EMAIL" ]] || die "--email is required for HTTPS."
-  validate_domain "$ROUTEGATE_DOMAIN" || die "Invalid FQDN: $ROUTEGATE_DOMAIN"
-  validate_email "$ROUTEGATE_EMAIL" || die "Invalid Let's Encrypt email address."
-  validate_email "$ROUTEGATE_ADMIN_EMAIL" || die "Invalid administrator email address."
-  validate_release_version "$ROUTEGATE_VERSION" || die "Invalid release version: $ROUTEGATE_VERSION"
-  [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "0" || "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] \
-    || die "Prometheus installation choice is invalid."
-  [[ -n "$ROUTEGATE_SERVER_NAME" ]] || die "Server name cannot be empty."
-  [[ ${#ROUTEGATE_SERVER_NAME} -le 128 ]] || die "Server name must be 128 characters or fewer."
-  [[ "$ROUTEGATE_SERVER_NAME" != *$'\n'* && "$ROUTEGATE_SERVER_NAME" != *$'\r'* ]] \
-    || die "Server name cannot contain a line break."
-
+validate_bundle_options() {
   if [[ -n "$ROUTEGATE_BUNDLE_FILE" || -n "$ROUTEGATE_CHECKSUM_FILE" ]]; then
     [[ -n "$ROUTEGATE_BUNDLE_FILE" && -n "$ROUTEGATE_CHECKSUM_FILE" ]] \
       || die "--bundle-file and --checksum-file must be supplied together."
@@ -389,6 +593,27 @@ validate_inputs() {
   fi
   [[ -z "$ROUTEGATE_BUNDLE_FILE" || -z "$ROUTEGATE_BUNDLE_URL" ]] \
     || die "Choose either a local bundle or an explicit bundle URL, not both."
+}
+
+validate_inputs() {
+  [[ -n "$ROUTEGATE_DOMAIN" ]] || die "--domain is required."
+  [[ -n "$ROUTEGATE_EMAIL" ]] || die "--email is required for HTTPS."
+  validate_domain "$ROUTEGATE_DOMAIN" || die "Invalid FQDN: $ROUTEGATE_DOMAIN"
+  validate_email "$ROUTEGATE_EMAIL" || die "Invalid Let's Encrypt email address."
+  validate_email "$ROUTEGATE_ADMIN_EMAIL" || die "Invalid administrator email address."
+  validate_release_version "$ROUTEGATE_VERSION" || die "Invalid release version: $ROUTEGATE_VERSION"
+  [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "0" || "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] \
+    || die "Prometheus installation choice is invalid."
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" == "0" || "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] \
+    || die "Grafana installation choice is invalid."
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" != "1" || "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]] \
+    || die "Grafana requires Prometheus."
+  [[ -n "$ROUTEGATE_SERVER_NAME" ]] || die "Server name cannot be empty."
+  [[ ${#ROUTEGATE_SERVER_NAME} -le 128 ]] || die "Server name must be 128 characters or fewer."
+  [[ "$ROUTEGATE_SERVER_NAME" != *$'\n'* && "$ROUTEGATE_SERVER_NAME" != *$'\r'* ]] \
+    || die "Server name cannot contain a line break."
+
+  validate_bundle_options
 }
 
 read_os_release_value() {
@@ -569,6 +794,10 @@ validate_platform() {
   command -v runuser >/dev/null 2>&1 || die "runuser is required."
   command -v ss >/dev/null 2>&1 || die "the ss command is required."
   command -v flock >/dev/null 2>&1 || die "flock is required."
+  # Verify the complete pinned release bundle before installing packages or writing ownership state.
+  command -v python3 >/dev/null 2>&1 || die "python3 is required for release metadata preflight."
+  command -v tar >/dev/null 2>&1 || die "tar is required for release archive preflight."
+  command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required for release integrity preflight."
 
   ROUTEGATE_ARCH="$arch"
 }
@@ -589,7 +818,9 @@ STATUS=${status}
 DOMAIN=${ROUTEGATE_DOMAIN}
 VERSION=${version}
 ARCH=${ROUTEGATE_ARCH}
+BUNDLE_SHA256=${ROUTEGATE_BUNDLE_SHA256}
 PROMETHEUS_MANAGED=${ROUTEGATE_INSTALL_PROMETHEUS}
+GRAFANA_REQUESTED=${ROUTEGATE_INSTALL_GRAFANA}
 UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF_STATE
   chmod 0600 "$ROUTEGATE_STATE_FILE"
@@ -636,7 +867,18 @@ verify_existing_install() {
       || die "Existing installation is unhealthy: Prometheus readiness check failed."
   fi
 
-  log "RouteGate is already installed and healthy. No changes were made."
+  log "RouteGate is already installed and healthy. No core platform changes were made."
+  if [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]]; then
+    local pinned_version
+    pinned_version=$(state_value VERSION || true)
+    validate_release_version "$pinned_version" || die "Installed RouteGate release version is invalid."
+    [[ "$pinned_version" != "latest" ]] || die "Installed release version is not pinned."
+    [[ "$ROUTEGATE_VERSION" == "latest" || "$ROUTEGATE_VERSION" == "$pinned_version" ]] \
+      || die "Grafana retry must use installed RouteGate version $pinned_version."
+    ROUTEGATE_RESOLVED_VERSION="$pinned_version"
+    prepare_verified_grafana_installer
+    install_selected_grafana
+  fi
   log "Open https://${ROUTEGATE_DOMAIN}/"
   exit 0
 }
@@ -876,9 +1118,47 @@ detect_conflicts() {
   done
 }
 
+validate_resume_release_identity() {
+  local previous_version=$1
+  local previous_checksum=$2
+  local current_version=$3
+  local current_checksum=$4
+
+  # A legacy 'latest' selector is not an immutable version and cannot prove
+  # the same release is being resumed. Manual recovery is required instead.
+  [[ "$previous_version" != "latest" && -n "$previous_version" ]] ||
+    die "Interrupted installation has no pinned release version. Review ownership state and logs before manual recovery."
+  [[ "$previous_checksum" =~ ^[a-f0-9]{64}$ ]] ||
+    die "Interrupted installation has no valid pinned release SHA-256. Automatic resume is unsafe; review state and logs before recovery."
+  [[ "$current_checksum" =~ ^[a-f0-9]{64}$ ]] ||
+    die "The new release bundle was not integrity-verified; refusing to resume."
+  [[ "$previous_version" == "$current_version" ]] ||
+    die "Interrupted installation is pinned to release ${previous_version}; requested release ${current_version} differs. Use the original version and exact bundle or perform reviewed manual recovery."
+  [[ "$previous_checksum" == "$current_checksum" ]] ||
+    die "Interrupted installation release SHA-256 differs from the verified archive. Refusing to replace partially installed components; restore the original exact bundle."
+}
+
+validate_resume_grafana_intent() {
+  local persisted_choice
+  persisted_choice=$(state_value GRAFANA_REQUESTED || true)
+  # Fail closed for incomplete or older ownership state. Changing the
+  # requested add-ons during an interrupted install is not a safe retry.
+  [[ "$persisted_choice" == "0" || "$persisted_choice" == "1" ]] ||
+    die "Interrupted installation has no valid pinned Grafana selection. Review ownership state before recovery."
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" == "$persisted_choice" ]] ||
+    die "Interrupted installation is pinned to Grafana choice $persisted_choice; requested choice $ROUTEGATE_INSTALL_GRAFANA differs. Retry with the originally selected options."
+}
+
 initialize_install_state() {
-  if [[ "$ROUTEGATE_RESUME_INSTALL" == "0" ]]; then
-    write_install_state_status installing "$ROUTEGATE_VERSION"
+  if [[ "$ROUTEGATE_RESUME_INSTALL" == "1" ]]; then
+    # This assertion runs AFTER checksum/manifest verification but BEFORE apt
+    # and every platform file/service mutation.
+    validate_resume_grafana_intent
+    validate_resume_release_identity       "$(state_value VERSION || true)" "$(state_value BUNDLE_SHA256 || true)"       "$ROUTEGATE_RESOLVED_VERSION" "$ROUTEGATE_BUNDLE_SHA256"
+  else
+    [[ "$ROUTEGATE_BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] ||
+      die "Release bundle SHA-256 is unavailable; refusing to create installation ownership state."
+    write_install_state_status installing "$ROUTEGATE_RESOLVED_VERSION"
   fi
   install -d -m 0700 "$ROUTEGATE_STATE_DIR"
 }
@@ -959,6 +1239,7 @@ confirm_installation() {
   log "  Domain: ${ROUTEGATE_DOMAIN}"
   log "  Administrator: ${ROUTEGATE_ADMIN_EMAIL}"
   log "  Platform: Ubuntu 24.04 LTS / ${ROUTEGATE_ARCH}"
+  log "  Release: ${ROUTEGATE_VERSION} (repository: ${ROUTEGATE_REPOSITORY})"
   log "  TLS: Let's Encrypt"
   if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
     log "  Prometheus: install and manage locally (loopback only)"
@@ -1043,8 +1324,10 @@ resolve_release_version() {
 
   ROUTEGATE_RESOLVED_VERSION=$(curl -fsSL --max-time 30 \
     "https://api.github.com/repos/${ROUTEGATE_REPOSITORY}/releases/latest" \
-    | jq -er '.tag_name') \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])') \
     || die "No published RouteGate release could be resolved."
+  validate_release_version "$ROUTEGATE_RESOLVED_VERSION" \
+    || die "GitHub returned an invalid release version."
 }
 
 artifact_urls() {
@@ -1054,6 +1337,22 @@ artifact_urls() {
   printf '%s\n' \
     "https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${version}/${bundle_name}" \
     "https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${version}/SHA256SUMS"
+}
+
+verify_release_bundle_only() {
+  # Non-mutating operator preflight: no root, service changes or install-state.
+  # Downloads/extraction happen only under a private temporary directory.
+  ROUTEGATE_LOG_FILE=""
+  validate_release_version "$ROUTEGATE_VERSION" || die "Invalid release version: $ROUTEGATE_VERSION"
+  validate_bundle_options
+  local command
+  for command in curl python3 tar sha256sum awk sed dpkg; do
+    command -v "$command" >/dev/null 2>&1 || die "Bundle verification requires $command."
+  done
+  ROUTEGATE_ARCH=$(dpkg --print-architecture 2>/dev/null || true)
+  [[ "$ROUTEGATE_ARCH" == "amd64" ]] || die "Bundle verification currently supports Ubuntu amd64 packages only."
+  prepare_bundle
+  log "Bundle verified: ${ROUTEGATE_RESOLVED_VERSION} (linux/${ROUTEGATE_ARCH}). No packages, services or RouteGate installation state were changed."
 }
 
 prepare_bundle() {
@@ -1091,6 +1390,7 @@ prepare_bundle() {
 
   verify_bundle_checksum "$bundle_path" "$checksum_path" "$ROUTEGATE_BUNDLE_NAME"
   extract_bundle "$bundle_path"
+  prepare_verified_grafana_installer
 }
 
 verify_bundle_checksum() {
@@ -1104,6 +1404,7 @@ verify_bundle_checksum() {
     || die "No valid SHA-256 entry for ${bundle_name} was found."
   actual=$(sha256sum "$bundle_path" | awk '{print $1}')
   [[ "$actual" == "$expected" ]] || die "Release bundle checksum verification failed."
+  ROUTEGATE_BUNDLE_SHA256="$actual"
   log "Release bundle checksum verified."
 }
 
@@ -1131,7 +1432,7 @@ extract_bundle() {
     nginx/routegate.conf.example \
     tools/routegate-recovery \
     metadata/manifest.env; do
-    [[ -e "$extract_dir/$required" ]] || die "Release bundle is missing ${required}."
+    [[ -e "$extract_dir/$required" ]] || die "Release ${ROUTEGATE_RESOLVED_VERSION:-unknown} is incompatible with this installer: missing ${required}. Download install.sh from the SAME pinned release tag and pass --version with that tag; do not mix main and old release bundles."
   done
 
   local updater_file
@@ -1143,7 +1444,7 @@ extract_bundle() {
     routegate-update-transaction.sh \
     routegate-update-verified.sh; do
     [[ -f "$extract_dir/tools/$updater_file" && ! -L "$extract_dir/tools/$updater_file" ]] \
-      || die "Release bundle is missing updater component tools/${updater_file}."
+      || die "Release ${ROUTEGATE_RESOLVED_VERSION:-unknown} is incompatible with this installer: missing tools/${updater_file}. Use a version-matched installer and release bundle, not main plus an older stable release."
   done
 
   local manifest_format manifest_version manifest_os manifest_arch
@@ -1167,6 +1468,67 @@ extract_bundle() {
   elif [[ "$ROUTEGATE_RESOLVED_VERSION" != "$manifest_version" ]]; then
     die "Release bundle version (${manifest_version}) does not match the requested version (${ROUTEGATE_RESOLVED_VERSION})."
   fi
+}
+
+prepare_verified_grafana_installer() {
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] || return 0
+  [[ -n "$ROUTEGATE_RESOLVED_VERSION" && "$ROUTEGATE_RESOLVED_VERSION" != "latest" ]] \
+    || die "Grafana installer requires a resolved pinned RouteGate release."
+  validate_release_version "$ROUTEGATE_RESOLVED_VERSION" \
+    || die "Grafana installer release version is invalid."
+  [[ -z "$ROUTEGATE_BUNDLE_URL" ]] \
+    || die "Custom bundle URLs cannot supply a verified Grafana sidecar; use a published release or a complete local candidate directory."
+  [[ -n "$ROUTEGATE_WORK_DIR" ]] || ROUTEGATE_WORK_DIR=$(mktemp -d /tmp/routegate-installer.XXXXXX)
+
+  local checksums="$ROUTEGATE_WORK_DIR/INSTALLER_SHA256SUMS"
+  ROUTEGATE_GRAFANA_SCRIPT="$ROUTEGATE_WORK_DIR/install-grafana.sh"
+  if [[ -n "$ROUTEGATE_BUNDLE_FILE" ]]; then
+    # Disposable candidate E2E only: require the exact release builder's
+    # installer + checksums next to the candidate bundle. Never use a
+    # script from the current moving source tree as an implicit fallback.
+    local local_dir
+    local_dir=$(dirname -- "$ROUTEGATE_BUNDLE_FILE")
+    [[ -f "$local_dir/INSTALLER_SHA256SUMS" && -f "$local_dir/install-grafana.sh" ]] \
+      || die "Local candidate with Grafana requires colocated install-grafana.sh and INSTALLER_SHA256SUMS."
+    cp -- "$local_dir/INSTALLER_SHA256SUMS" "$checksums"
+    cp -- "$local_dir/install-grafana.sh" "$ROUTEGATE_GRAFANA_SCRIPT"
+  else
+    local url_base="https://github.com/${ROUTEGATE_REPOSITORY}/releases/download/${ROUTEGATE_RESOLVED_VERSION}"
+    curl -fL --proto '=https' --tlsv1.2 --retry 3 --max-time 90 \
+      -o "$checksums" "$url_base/INSTALLER_SHA256SUMS" \
+      || die "Could not download pinned Grafana installer checksums."
+    curl -fL --proto '=https' --tlsv1.2 --retry 3 --max-time 90 \
+      -o "$ROUTEGATE_GRAFANA_SCRIPT" "$url_base/install-grafana.sh" \
+      || die "Could not download pinned Grafana installer."
+  fi
+  local expected actual
+  expected=$(awk '$2 == "install-grafana.sh" || $2 == "*install-grafana.sh" {print $1; exit}' "$checksums")
+  [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] \
+    || die "Missing valid Grafana installer checksum in pinned release."
+  actual=$(sha256sum "$ROUTEGATE_GRAFANA_SCRIPT" | awk '{print $1}')
+  [[ "$actual" == "$expected" ]] \
+    || die "Grafana installer SHA-256 verification failed."
+  [[ -s "$ROUTEGATE_GRAFANA_SCRIPT" && ! -L "$ROUTEGATE_GRAFANA_SCRIPT" ]] \
+    || die "Grafana installer is missing or unsafe."
+  bash -n "$ROUTEGATE_GRAFANA_SCRIPT" \
+    || die "Verified Grafana installer failed shell syntax validation."
+  log "Grafana installer from pinned ${ROUTEGATE_RESOLVED_VERSION} verified before execution."
+}
+
+install_selected_grafana() {
+  [[ "$ROUTEGATE_INSTALL_GRAFANA" == "1" ]] || return 0
+  [[ "$(state_value STATUS || true)" == "complete" ]] \
+    || die "Grafana installation requires a completed RouteGate platform."
+  [[ "$(state_value PROMETHEUS_MANAGED || true)" == "1" ]] \
+    || die "Grafana installation requires RouteGate-managed Prometheus."
+  [[ -s "$ROUTEGATE_GRAFANA_SCRIPT" ]] \
+    || die "Verified Grafana installer was not staged."
+  set_install_stage grafana
+  log "Core RouteGate is complete; installing selected Grafana dashboard component."
+  if ! bash "$ROUTEGATE_GRAFANA_SCRIPT"; then
+    die "Core RouteGate remains complete, but Grafana failed. Review the add-on output and retry with the SAME pinned release and --with-grafana."
+  fi
+  log "Grafana installation completed: https://${ROUTEGATE_DOMAIN}/grafana/"
 }
 
 install_files() {
@@ -1767,12 +2129,21 @@ main() {
   trap cleanup EXIT
 
   parse_args "$@"
+  if [[ "$ROUTEGATE_VERIFY_BUNDLE" == "1" ]]; then
+    set_install_stage bundle_verification
+    verify_release_bundle_only
+    return 0
+  fi
   set_install_stage host_preflight
   require_root
   initialize_logging
   acquire_install_lock
   set_install_stage input_preflight
-  prompt_for_inputs
+  if [[ "$ROUTEGATE_ASSUME_YES" == "1" ]] || ! interactive_tty_available; then
+    prompt_for_inputs
+  else
+    installer_configuration_menu
+  fi
   validate_inputs
   validate_platform
   verify_completed_install_before_repository_preflight
@@ -1784,11 +2155,12 @@ main() {
   set_install_stage dns_preflight
   validate_dns
   confirm_installation
+  # Download, checksum and validate the full bundle BEFORE apt/services/RouteGate ownership mutations.
+  set_install_stage bundle
+  prepare_bundle
   initialize_install_state
   set_install_stage dependencies
   install_dependencies
-  set_install_stage bundle
-  prepare_bundle
   set_install_stage platform_files
   install_files
   load_or_create_secrets
@@ -1813,7 +2185,10 @@ main() {
   set_install_stage updater
   bootstrap_trusted_updater
   set_install_stage complete
+  # Core ownership remains complete even if an optional Grafana add-on fails.
+  # Do not print whole-install success before the selected add-on succeeds.
   write_install_state
+  install_selected_grafana
   print_success
 }
 
