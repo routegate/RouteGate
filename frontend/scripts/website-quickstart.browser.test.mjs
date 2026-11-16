@@ -76,6 +76,11 @@ for (const [locale, path] of [['ru', '/ru/'], ['en', '/']]) {
         const el = document.querySelector('.install-panel-heading button')
         return el && !el.disabled
       })
+      const heroCta = page.locator('.hero-actions a[href="#install"]')
+      assert.equal(await heroCta.isVisible(), true, 'Quick Start link must be visible in the first screen')
+      await heroCta.click()
+      assert.equal(new URL(page.url()).hash, '#install', 'hero install link must navigate to the install section')
+      assert.equal(await button.isVisible(), true, 'copy button must be present at the install destination')
       const displayed = (await page.locator('.install-panel pre code').innerText()).trim()
       assert.equal(displayed.includes('\n'), false, 'one paste must be one shell line')
       assert.match(displayed, /releases\/download\/v0\.2\.0\/install\.sh/)
