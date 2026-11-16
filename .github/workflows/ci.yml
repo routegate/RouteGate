@@ -587,6 +587,12 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Install public website dependencies for real Quick Start browser acceptance
+        run: npm ci --prefix ../website
+
+      - name: Verify website Quick Start copy/paste in Chromium (RU and EN)
+        run: node --test scripts/website-quickstart.browser.test.mjs
+
       - name: Verify Dashboard animation in Chromium
         run: node --test scripts/dashboard-motion.browser.test.mjs
 
