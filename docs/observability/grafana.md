@@ -47,33 +47,38 @@ host:
 RouteGate deliberately refuses to take ownership of an existing Grafana package,
 configuration, data directory, or service.
 
-## Install
+## Install and release compatibility
 
-Run on the RouteGate host from the same immutable RouteGate release as the
-installed platform. Download the script first, inspect it, and only then execute
-it with privileges:
+**The historical RouteGate `v0.1.0` tag does not contain
+`install-grafana.sh`.** Do not try to download a Grafana installer from that
+tag. It returns 404. Likewise, do not combine the newer Grafana helper with a
+`v0.1.0` platform bundle or execute a moving `main` script as root.
 
-```bash
-VERSION=v0.1.0
-curl -fL --proto '=https' --tlsv1.2 \
-  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install-grafana.sh" \
-  -o routegate-install-grafana.sh
-less routegate-install-grafana.sh
-sudo bash routegate-install-grafana.sh
-rm -f routegate-install-grafana.sh
-```
+For a **new** RouteGate installation, the planned supported route is the
+verified, **one-command** [Quick Start](https://routegate.org/#install)
+followed by the installer's **numbered configuration menu**. Choose Grafana
+**during setup**; that selection also enables the required managed
+Prometheus. The helper and checksum must come from the **same reviewed,
+published release** as the platform bundle. Grafana will run only after
+Manager/Agent/HTTPS and Prometheus are healthy.
 
-New releases also publish this installer as a checksummed, provenance-attested
-release asset. Do not pipe a mutable branch directly into `sudo bash`.
+This user-facing flow is **not available** until a current release containing
+the verified Grafana helper is published. Do not substitute old release URLs,
+unreviewed CI artifacts or historical setup snippets while
+[release/install parity #715](https://github.com/routegate/RouteGate/issues/715)
+remains open.
 
-The installer uses the official Grafana stable APT repository and installs the
-open-source `grafana` package. It verifies the expected Grafana repository signing
-key fingerprint before package installation.
+For an **existing** platform with RouteGate-managed Prometheus, a separately
+reviewed matching-release Grafana installer may be used only after its
+SHA-256 and release ownership checks pass. A complete installation without
+managed Prometheus cannot silently acquire it through an unsupported helper.
+RouteGate must not replace an existing unowned Grafana service.
 
-The installation is rollback-oriented: RouteGate backs up its installer ownership
-state and nginx site before the first managed mutation. If validation fails, the
-previous RouteGate nginx/state files are restored and a Grafana package introduced
-by the failed operation is removed.
+The helper's current implementation uses the official Grafana stable APT
+repository and verifies its signing key fingerprint. It backs up RouteGate
+ownership state and nginx configuration before mutation and restores
+RouteGate files if setup validation fails. These are candidate implementation
+properties, **not** proof that the public `v0.1.0` release supports Grafana.
 
 ## What RouteGate configures
 
