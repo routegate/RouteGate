@@ -35,8 +35,9 @@ range, even if it does not directly collide with a checked-in file.
 These pre-SQL checks protect an already-upgraded database from executing a
 new `000050_*` migration long after `000159_*` was applied. New work must
 use a new forward-only ordinal. In the **schema-161 review branch**, the
-preparation ledger has consumed `000161_*`, so any next migration must use
-an unused ordinal **162 or higher**; never edit or replace the old 160.
+preparation ledger has consumed `000161_*` and the review-only immutable
+confirmation ledger uses `000162_*`. Future migrations must use an unused
+ordinal **163 or higher**; do not rename the existing 160/161/162.
 
 The existing `000160_traffic_report_checkpoints.up.sql` filename is
 also immutable, as is the unusual shipped `0001430_*` outlier. The
@@ -73,6 +74,45 @@ pinned-config apply and verified session semantics, and full tests under
 #545. Existing real databases must not be upgraded without release
 approval, a representative backup/restore rehearsal and independent
 review of the SQL triggers.
+
+## Schema 162 — immutable confirmation before any dispatch
+
+`000162_credential_revocation_confirmations.up.sql` introduces a
+**non-dispatching, immutable** one-row-per-operation confirmation bound to
+the original schema-161 preparation. Its PostgreSQL trigger locks the
+preparation row and rejects missing/cancelled preparations, wrong operator
+identity, changed Agent ID/generation, different baseline version and
+candidate configuration/runtime SHA-256 digest, and attempts to update or
+delete confirmation history.
+
+The internal, unmounted `AuthorizedConfirmation.Confirm` also requires
+a valid authenticated super-admin context, the **exact** expected
+candidate hash, and a new acknowledgement of potential disruption to
+other users. An identical retry returns the original durable confirmation
+instead of creating another. **The request context is trusted only if a
+future HTTP handler first validates its live session via `auth.Middleware`.**
+
+A cancellation of a **never-dispatched** preparation remains possible
+after confirmation, but the confirmation history is retained and its
+parent no longer qualifies for execution. A later dispatcher **must**
+recheck the parent state, current config, Agent identity and generation,
+credentials and actual native runtime before doing anything. It must
+also reauthorize the operator and obtain separate explicit consent to
+execute; confirmation is never an Agent task or proof of VPN revocation.
+
+The real PostgreSQL checks cover unconfirmed persisted schema-161 rows
+surviving 161→162 upgrades, repeat migration, confirmation idempotence,
+mismatched snapshots and principals, immutable proof, a cancelled parent,
+and downgrade refusal when historical confirmation exists. The new
+migration neither dispatches an Agent task nor alters account,
+subscription, applied configuration or active client sessions.
+
+The future **at-most-once dispatch fence, durable outcome-unknown
+reconciliation and authenticated Agent report** require a separate
+forward-only migration and independent review. Never add automatic
+re-dispatch on HTTP timeout; a lost acknowledgement could accompany a
+completed shared-process restart. A database confirmation alone is not
+the final #545 release gate.
 
 ## RG-140 integration warning
 
