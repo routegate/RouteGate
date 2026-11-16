@@ -72,7 +72,7 @@ func TestCredentialRevocationPreparationUpgradesCurrent160WithoutDataLoss(t *tes
 		t.Fatalf("re-run upgraded migration idempotently: %v", err)
 	}
 	version, err = NewSchemaVersionRepository(pool).AppliedSchemaVersion(ctx)
-	if err != nil || version != "000162_credential_revocation_confirmations" {
+	if err != nil || version != "000163_credential_revocation_dispatch_claims" {
 		t.Fatalf("latest version = %q (%v), expected 162 confirmation history", version, err)
 	}
 
@@ -94,6 +94,8 @@ func TestCredentialRevocationPreparationUpgradesCurrent160WithoutDataLoss(t *tes
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM vpn_credential_revocation_confirmations").Scan(&confirmations); err != nil || confirmations != 0 {
 		t.Fatalf("schema upgrade created confirmation: count=%d err=%v", confirmations, err)
 	}
+	var claims int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM vpn_credential_revocation_dispatch_claims").Scan(&claims); err != nil || claims != 0 { t.Fatalf("schema upgrade claimed a task: %d %v",claims,err) }
 	var savedName string
 	var sequence int64
 	var payloadHex string
