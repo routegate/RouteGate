@@ -99,7 +99,7 @@ func TestCredentialRemovalManagerPreparedRealityTraffic(t *testing.T) {
 			<-r.Context().Done()
 			return
 		}
-		_, _ = io.WriteString(w, "origin-manager-candidate")
+		_, _ = io.WriteString(w, "isolated-removal-origin")
 	}))
 	defer origin.Close()
 	dir := t.TempDir()
