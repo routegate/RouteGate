@@ -10,6 +10,7 @@ import { after, before, test } from 'node:test'
 import { createServer } from 'vite'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { requiredPublishedAssets } from '../../website/src/release.ts'
 
 const websiteRoot = fileURLToPath(new URL('../../website/', import.meta.url))
 const origin = 'http://127.0.0.1:15176'
@@ -18,10 +19,7 @@ const release = (tag = 'v0.2.0') => ({
   tag_name: tag,
   draft: false,
   prerelease: false,
-  assets: [
-    'install.sh', 'SHA256SUMS', 'INSTALLER_SHA256SUMS',
-    'release-manifest.json', 'routegate-' + tag + '-linux-amd64.tar.gz',
-  ].map(name => ({
+  assets: requiredPublishedAssets(tag).map(name => ({
     name,
     size: 1024,
     state: 'uploaded',
