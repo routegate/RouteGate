@@ -37,7 +37,9 @@ func TestLegacyMigrationIdentityIsPreservedVerbatim(t *testing.T) {
 	files := []string{
 		"000003_auth_foundation.up.sql",
 		"000003_config_apply_jobs.up.sql",
-		"000150b_client_profile_repair.up.sql",
+		"000150_delivery_device_scope.up.sql",
+		"000150a_vpn_subscription_token_pkey_repair.up.sql",
+		"000150b_client_profile_schema_invariant_repair.up.sql",
 		"000159_staged_account_transfers.up.sql",
 		"000160_traffic_report_checkpoints.up.sql",
 	}
@@ -45,7 +47,6 @@ func TestLegacyMigrationIdentityIsPreservedVerbatim(t *testing.T) {
 		t.Fatalf("grandfathered migration history was rejected: %v", err)
 	}
 }
-
 
 func TestUnknownLegacyMigrationAliasPreventsAllDatabaseWork(t *testing.T) {
 	cases := []struct {
@@ -67,6 +68,13 @@ func TestUnknownLegacyMigrationAliasPreventsAllDatabaseWork(t *testing.T) {
 				"000150a_vpn_subscription_token_pkey_repair.up.sql",
 				"000150b_client_profile_schema_invariant_repair.up.sql",
 				"000150c_unreviewed_repair.up.sql",
+			},
+		},
+		{
+			name: "noncanonical padding alias at legacy 003",
+			files: []string{
+				"000003_auth_foundation.up.sql",
+				"003_unreviewed_alias.up.sql",
 			},
 		},
 		{
