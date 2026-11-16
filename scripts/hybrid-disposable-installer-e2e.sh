@@ -278,6 +278,38 @@ sudo grep -Fq 'data-theme="dark"' /var/www/routegate/index.html || die "Stale fr
 curl -fsS --max-time 10 "https://$DOMAIN/api/admin/health" >/dev/null || die "HTTPS health failed"
 curl -fsS --max-time 10 "https://$DOMAIN/" >/dev/null || die "HTTPS frontend failed"
 
+# Verify effective nginx/HTTPS response headers, not just the source template.
+# /bootstrap/ has its own add_header directive and would otherwise suppress
+# inherited HSTS, CSP and Referrer-Policy on Ubuntu's nginx versions.
+bootstrap_code=$(curl -sS --max-time 10 -D "$WORK/bootstrap-headers" \
+  -o /dev/null -w '%{http_code}' "https://$DOMAIN/bootstrap/routegate-ci-missing-asset")
+[[ "$bootstrap_code" == "404" ]] || die "Missing bootstrap artifact did not return HTTP 404"
+python3 - "$WORK/bootstrap-headers" <<'PY_BOOTSTRAP_HEADERS'
+from pathlib import Path
+import sys
+
+raw = Path(sys.argv[1]).read_text().splitlines()
+headers = {}
+for line in raw:
+    if ":" not in line or line.startswith(("HTTP/", "http/")):
+        continue
+    name, value = line.split(":", 1)
+    headers.setdefault(name.lower().strip(), []).append(value.strip())
+expected = {
+    "strict-transport-security": "max-age=31536000",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "SAMEORIGIN",
+    "referrer-policy": "no-referrer",
+    "content-security-policy": "base-uri 'self'; frame-ancestors 'self'; object-src 'none'",
+    "cache-control": "no-store",
+}
+for key, value in expected.items():
+    if headers.get(key) != [value]:
+        raise SystemExit(f"bootstrap HTTPS 404 has missing, duplicate or invalid {key} header")
+PY_BOOTSTRAP_HEADERS
+log "Bootstrap HTTPS 404 preserves one exact HSTS/CSP/no-referrer header set and no-store."
+
+
 if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
   log "Checking real Grafana package, Prometheus, HTTPS proxy and dashboard provisioning."
   sudo grep -Fxq 'PROMETHEUS_MANAGED=1' /etc/routegate/install-state.env ||
@@ -350,9 +382,8 @@ if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
     die "Idempotent retry broke Grafana HTTPS"
   unset CORE_STATE_SHA FIRST_LOGIN_SHA GRAFANA_ACCESS_SHA
   log "PASS: completed RouteGate/Grafana re-run was idempotent; ownership and credentials unchanged."
-  log "PASS: real Hybrid + Prometheus + Grafana installed in same run; HTTPS, datasource, dashboard, restart healthy."
-  log "OUT OF SCOPE: public Let's Encrypt, real external VPN client, physical reboot."
-  exit 0
+  log "PASS: real Hybrid + Prometheus + Grafana installation and idempotent retry are healthy."
+  log "Continuing the SAME monitoring-enabled Hybrid through /setup, VLESS/Reality apply and RG-140 device subscriptions."
 fi
 
 # Completed installs deliberately remove transient secrets.env. Retrieve the
@@ -455,6 +486,24 @@ sudo systemctl is-active --quiet nginx || die "nginx stopped after VPN apply"
 sudo systemctl is-active --quiet sing-box || die "VPN runtime stopped after apply"
 curl -fsS --max-time 5 "https://$DOMAIN/api/admin/health" >/dev/null ||
   die "Manager HTTPS failed after Reality traffic test"
+
+if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
+  # The same live Manager, Agent, PostgreSQL, nginx, and sing-box were used for
+  # Grafana AND for /setup, first apply, two independent device bearers, an
+  # intentionally failed apply, restart and scoped subscription revocation.
+  # In particular, adding the VPN runtime may not replace/delete monitoring.
+  for svc in prometheus grafana-server; do
+    sudo systemctl is-active --quiet "$svc" ||
+      die "Monitoring service $svc stopped during VPN client/apply lifecycle"
+  done
+  curl -fsS --max-time 10 "https://$DOMAIN/grafana/api/health" >/dev/null ||
+    die "Grafana HTTPS gateway failed after VLESS/Reality and subscription operations"
+  curl -fsS --max-time 10 "http://127.0.0.1:9090/-/ready" >/dev/null ||
+    die "Prometheus stopped scraping after Agent VPN runtime operations"
+  sudo grep -Fxq 'GRAFANA_MANAGED=1' /etc/routegate/install-state.env ||
+    die "VPN operations lost Grafana ownership"
+  log "PASS: SINGLE Hybrid installation with real Grafana + Prometheus + /setup + VLESS/Reality traffic + RG-140 subscription lifecycle."
+fi
 rm -f "$WORK/admin.token" "$WORK/server.id" "$WORK/hybrid-client.json"
 log "PASS: native install -> /setup -> Reality config/apply -> real test client traffic -> fail-safe apply."
 log "OUT OF SCOPE: public Let's Encrypt, remote third-party client, full reboot."
