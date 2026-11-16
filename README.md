@@ -201,46 +201,47 @@ See [Updates, Releases, and Versioning](docs/architecture/versioning-and-updates
 
 ## Install RouteGate
 
-The current public clean-host installation contract is **Ubuntu 24.04 LTS on amd64** with native systemd services, local PostgreSQL, nginx, and Let's Encrypt TLS. Remote VPN Node onboarding supports amd64 and arm64.
+**Release status:** the published `v0.1.0` is a historical MVP, not the
+current-feature installer. The updated one-command installer for `v0.2.0`
+remains under review in [issue #715](https://github.com/routegate/RouteGate/issues/715).
+Do **not** use historical `v0.1.0` commands, an unreviewed `main/install.sh`,
+a mutable `latest` selector, or CI artifact ZIPs to test current RouteGate.
 
-Before installation:
+**New-user entrypoint:** [routegate.org — Quick Start](https://routegate.org/#install).
+The **Copy** action is intended to provide a **single terminal command** once
+a complete, reviewed, published stable release exists. That command must pin
+the exact release, verify the downloadable `install.sh` against its
+published SHA-256 **before sudo**, then open the interactive installation
+wizard. If the website still shows `v0.1.0`, **do not run that command**; it
+does not install the current feature set. Public website correction and the
+release-aware command are tracked by [#715](https://github.com/routegate/RouteGate/issues/715).
 
-- create a DNS `A` record for the RouteGate hostname pointing to the host;
-- make TCP ports 80 and 443 reachable;
-- connect as `root` or a user with working `sudo`.
+The first-server target for the current installer candidate is **a clean
+Ubuntu 24.04 LTS amd64 VPS**, with:
 
-Choose the RouteGate release you intend to install, download the installer to a
-local file, review it, and only then run it with privileges. For example:
+- a public DNS `A` record pointing the selected manager hostname to the VPS;
+- TCP ports 80/443 accessible for nginx and Let's Encrypt;
+- `root` or functional `sudo` access through an interactive SSH terminal;
+- no unmanaged PostgreSQL/nginx/RouteGate conflicts.
 
-```bash
-VERSION=v0.1.0
-curl -fL --proto '=https' --tlsv1.2 \
-  "https://raw.githubusercontent.com/routegate/RouteGate/${VERSION}/install.sh" \
-  -o routegate-install.sh
-less routegate-install.sh
-sudo bash routegate-install.sh --version "${VERSION}"
-rm -f routegate-install.sh
-```
+When the new stable release is published and Quick Start enables the command,
+the installer will guide Manager, local Agent, PostgreSQL, HTTPS and optional
+Prometheus/Grafana selection. The first administrator then uses the single-use
+`/setup` link; VPN protocol runtimes are installed later through RouteGate.
+The installer also checks the pinned release bundle and its `SHA256SUMS`
+before installing packages. In the Hybrid layout, nginx/HTTPS owns TCP
+`443`, while VLESS/Reality is typically on TCP `8443`.
 
-Published releases built with the current release workflow also attach
-`install.sh`, `install-agent.sh`, `install-grafana.sh`,
-`INSTALLER_SHA256SUMS`, and an offline GitHub Artifact Attestation bundle.
-That release-asset path is the preferred high-assurance bootstrap for new
-releases.
+**Installation guides:** [First install](docs/guides/first-install.md) and
+[Clean VPS deployment reference](docs/deployment/clean-vps-installer.md).
+See [GitHub Releases](https://github.com/routegate/RouteGate/releases) for
+the actual published asset set; historical
+[v0.1.0 release notes](docs/release/v0.1.0.md) remain available for
+operators maintaining an older deployment.
 
-Before any APT network operation, the installer also checks the host's active package sources and fails closed unless they are inside RouteGate's approved repository boundary. Approved provider mirrors are explicit; unrelated third-party sources are not silently trusted or rewritten.
-
-The installer downloads a published RouteGate release bundle and verifies it against `SHA256SUMS`. To install v0.1.0 explicitly, use `--version v0.1.0` as documented in the [Clean VPS Installer guide](docs/deployment/clean-vps-installer.md).
-
-After installation, open the single-use `/setup` link printed by the installer, choose the administrator password, and continue through the guided Dashboard workflow.
-
-For a task-oriented walkthrough, see [Install RouteGate on a new VPS](docs/guides/first-install.md).
-
-On versions that include remote-node onboarding, additional VPN Nodes are attached from Manager: create a VPN Node, choose **Connect server**, and run the generated Agent bootstrap command on the target Ubuntu host. The bootstrap connects Agent first; RouteGate installs the selected protocol runtime later as a separate managed action.
-
-See [Add a remote VPN Node](docs/guides/add-vpn-node.md) for the user-facing onboarding sequence and retry guidance.
-
-In the canonical Hybrid layout, nginx/HTTPS owns TCP `443`; the recommended VLESS / Reality listener uses TCP `8443` to avoid the HTTPS listener conflict.
+Additional VPN Nodes, on versions that include remote-node onboarding,
+are attached through Manager → **Connect server** and the Agent bootstrap.
+See [Add a remote VPN Node](docs/guides/add-vpn-node.md).
 
 ## Product principles
 
