@@ -27,9 +27,20 @@ or delete already applied migrations to reconcile two development branches.
 Early RouteGate history contains intentional ordinal duplicates (including
 `000003`, `000101`–`000103`, `000130`–`000131`,
 `000140`–`000141`, and `000150`) and letter-suffixed filenames.
-The migrator preserves the **exact, already checked-in** legacy aliases
-below ordinal 160; it rejects any newly introduced alias colliding with
-those numbers. It also rejects all duplicate ordinals at or above 160.
+The migrator preserves the **exact, already checked-in** legacy
+filenames below ordinal 160, including all 83 original names (singleton
+filenames and intentional aliases). It rejects **both** a new alias for a
+used ordinal and a new file claiming an unused number in that historical
+range, even if it does not directly collide with a checked-in file.
+These pre-SQL checks protect an already-upgraded database from executing a
+new `000050_*` migration long after `000159_*` was applied. New work must
+use a new forward-only ordinal, starting with `000161_*`, and a unique
+descriptive name.
+
+The existing `000160_traffic_report_checkpoints.up.sql` filename is
+also immutable, as is the unusual shipped `0001430_*` outlier. The
+migrator rejects conflicting numeric ordinals at or above 160. It must
+not reinterpret the old outlier as a new migration number to reuse.
 
 One earlier migration is named
 `0001430_platform_update_terminal_timestamp_proof.up.sql`. Preserve this

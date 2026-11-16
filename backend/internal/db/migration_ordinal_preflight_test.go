@@ -103,6 +103,50 @@ func TestUnknownLegacyMigrationAliasPreventsAllDatabaseWork(t *testing.T) {
 	}
 }
 
+// A novel *non-colliding* filename is just as dangerous if its number falls
+// within already shipped migrations: it would apply out of order on upgrade.
+func TestUnshippedHistoricalMigrationNameFailsBeforeSQL(t *testing.T) {
+	tests := []struct {
+		name string
+		file string
+	}{
+		{"unused gap in history", "000050_unreviewed_migration.up.sql"},
+		{"different unused gap", "000005_unreviewed_migration.up.sql"},
+		{"replaced historical singleton", "000020_rewritten_traffic_limits.up.sql"},
+		{"replaced shipped 160", "000160_credential_revocation_preparations.up.sql"},
+		{"replaced shipped 1430 outlier", "0001430_unreviewed_timestamp_change.up.sql"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, tt.file), []byte("SELECT 1;"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// Nil pool proves that rejecting an unshipped legacy identity is
+			// independent of and precedes CREATE TABLE schema_migrations.
+			err := Migrate(context.Background(), nil, dir, nil)
+			if err == nil || !strings.Contains(err.Error(), "historical migration identity") ||
+				!strings.Contains(err.Error(), tt.file) {
+				t.Fatalf("unshipped migration %q reached SQL or was accepted: %v", tt.file, err)
+			}
+		})
+	}
+}
+
+func TestKnownHistoricalSingletonIsValidOnItsOwn(t *testing.T) {
+	for _, name := range []string{
+		"000001_init.up.sql",
+		"000020_traffic_stats_limits.up.sql",
+		"000159_staged_account_transfers.up.sql",
+		"000160_traffic_report_checkpoints.up.sql",
+		"0001430_platform_update_terminal_timestamp_proof.up.sql",
+	} {
+		if err := validateMigrationOrdinals([]string{name}); err != nil {
+			t.Errorf("shipped singleton %q incorrectly rejected: %v", name, err)
+		}
+	}
+}
+
 func TestHistoricalHighOrdinalExceptionRemainsValid(t *testing.T) {
 	// This unusual older filename already exists on main. Do not renumber it:
 	// migration identities are full filenames recorded in schema_migrations.
