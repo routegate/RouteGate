@@ -120,7 +120,8 @@ project's supply-chain trust boundary.
 > stable release. It does **not** include the newer dark-only UI or the extensive
 > `main` features. Always fetch `install.sh` from the **same immutable release
 > tag** as the bundle requested via `--version`. Do **not** combine a current
-> `main/install.sh` with `--version v0.1.0` or `latest`: current main requires
+> `main/install.sh` with the historical `v0.1.0` bundle or a mutable
+> `latest` selector: newer installers require
 > updated bundle components absent from the old stable archive. The next
 > current-version release and full clean-host Hybrid validation are tracked in
 > [issue #715](https://github.com/routegate/RouteGate/issues/715).
@@ -152,7 +153,7 @@ bash routegate-install.sh --verify-bundle --version "${VERSION}"
 ```
 
 **Note:** `v0.1.0` contains an older bundle contract, so a modern
-`main/install.sh --verify-bundle --version v0.1.0` should report an
+a current installer with a historical `v0.1.0` bundle should report an
 incompatibility rather than modifying the VPS. A matching old tag installer
 may not itself support `--verify-bundle`; this flag is for newer candidate
 installers going forward. Passing this check is **not** full Hybrid E2E
