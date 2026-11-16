@@ -278,6 +278,38 @@ sudo grep -Fq 'data-theme="dark"' /var/www/routegate/index.html || die "Stale fr
 curl -fsS --max-time 10 "https://$DOMAIN/api/admin/health" >/dev/null || die "HTTPS health failed"
 curl -fsS --max-time 10 "https://$DOMAIN/" >/dev/null || die "HTTPS frontend failed"
 
+# Verify effective nginx/HTTPS response headers, not just the source template.
+# /bootstrap/ has its own add_header directive and would otherwise suppress
+# inherited HSTS, CSP and Referrer-Policy on Ubuntu's nginx versions.
+bootstrap_code=$(curl -sS --max-time 10 -D "$WORK/bootstrap-headers" \
+  -o /dev/null -w '%{http_code}' "https://$DOMAIN/bootstrap/routegate-ci-missing-asset")
+[[ "$bootstrap_code" == "404" ]] || die "Missing bootstrap artifact did not return HTTP 404"
+python3 - "$WORK/bootstrap-headers" <<'PY_BOOTSTRAP_HEADERS'
+from pathlib import Path
+import sys
+
+raw = Path(sys.argv[1]).read_text().splitlines()
+headers = {}
+for line in raw:
+    if ":" not in line or line.startswith(("HTTP/", "http/")):
+        continue
+    name, value = line.split(":", 1)
+    headers.setdefault(name.lower().strip(), []).append(value.strip())
+expected = {
+    "strict-transport-security": "max-age=31536000",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "SAMEORIGIN",
+    "referrer-policy": "no-referrer",
+    "content-security-policy": "base-uri 'self'; frame-ancestors 'self'; object-src 'none'",
+    "cache-control": "no-store",
+}
+for key, value in expected.items():
+    if headers.get(key) != [value]:
+        raise SystemExit(f"bootstrap HTTPS 404 has missing, duplicate or invalid {key} header")
+PY_BOOTSTRAP_HEADERS
+log "Bootstrap HTTPS 404 preserves one exact HSTS/CSP/no-referrer header set and no-store."
+
+
 if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
   log "Checking real Grafana package, Prometheus, HTTPS proxy and dashboard provisioning."
   sudo grep -Fxq 'PROMETHEUS_MANAGED=1' /etc/routegate/install-state.env ||
