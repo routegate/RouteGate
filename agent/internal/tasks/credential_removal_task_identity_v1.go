@@ -79,6 +79,10 @@ func ParseCredentialRemovalTaskIdentityV1(data []byte) (CredentialRemovalTaskIde
 func MatchCredentialRemovalTaskLocalIdentity(
  v CredentialRemovalTaskIdentityV1,serverID,agentID string,generation int64,
 ) bool {
+ data,err:=json.Marshal(v)
+ if err!=nil{return false}
+ verified,err:=ParseCredentialRemovalTaskIdentityV1(data)
+ if err!=nil || verified!=v{return false}
  return rg140IdentityUUID.MatchString(serverID) &&
   rg140IdentityUUID.MatchString(agentID) && generation>0 &&
   v.ServerID==serverID && v.AgentID==agentID &&
