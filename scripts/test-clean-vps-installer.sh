@@ -390,6 +390,25 @@ test_all_in_one_role_contract() {
   assert_true \
     "nginx bootstrap route fails closed on missing artifacts" \
     grep -Fq 'try_files $uri =404;' "$ROOT_DIR/deploy/nginx/routegate.conf.example"
+  # nginx's add_header inheritance stops at any location-level add_header.
+  # /bootstrap/ needs Cache-Control, so enforce the full security header set
+  # inside that specific location instead of trusting server-level defaults.
+  local bootstrap_headers
+  bootstrap_headers=$(sed -n '/location \^~ \/bootstrap\/ {/,/^    }/p' "$nginx_template")
+  assert_true "bootstrap location is present for header audit" \
+    test -n "$bootstrap_headers"
+  assert_true "bootstrap keeps HTTPS HSTS on success and errors" \
+    grep -Fq 'add_header Strict-Transport-Security "max-age=31536000" always;' <<<"$bootstrap_headers"
+  assert_true "bootstrap keeps X-Content-Type-Options" \
+    grep -Fq 'add_header X-Content-Type-Options "nosniff" always;' <<<"$bootstrap_headers"
+  assert_true "bootstrap keeps X-Frame-Options" \
+    grep -Fq 'add_header X-Frame-Options "SAMEORIGIN" always;' <<<"$bootstrap_headers"
+  assert_true "bootstrap keeps no-referrer despite local Cache-Control" \
+    grep -Fq 'add_header Referrer-Policy "no-referrer" always;' <<<"$bootstrap_headers"
+  assert_true "bootstrap keeps the application CSP" \
+    grep -Fq "add_header Content-Security-Policy \"base-uri 'self'; frame-ancestors 'self'; object-src 'none'\" always;" <<<"$bootstrap_headers"
+  assert_true "bootstrap no-store also applies on missing artifact 404" \
+    grep -Fq 'add_header Cache-Control "no-store" always;' <<<"$bootstrap_headers"
   assert_true \
     "production-like updates reconcile the bootstrap artifact route" \
     grep -Fq 'reconcile_bootstrap_artifact_route' "$ROOT_DIR/scripts/deploy-production-like-bundle.sh"
