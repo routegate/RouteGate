@@ -6,7 +6,7 @@ Status: **manual review required**. This gate applies to public stable tags as w
 
 Successful build/tests do not prove that a fresh VPS installer, admin setup, nginx/Let's Encrypt, local Agent, PostgreSQL and the VPN runtime actually work together. During the November 2026 RU/NL recovery, a fresh Hybrid install failed and the publicly suggested v0.1.0 bundle omitted much of the current UI. This must not recur.
 
-## Checklist before a reviewer publishes a draft
+## Checklist before publishing the stable v0.2.0 release
 
 Record evidence, including exact artifact version and source commit, in the release notes or the tracking issue:
 
@@ -27,8 +27,31 @@ Record evidence, including exact artifact version and source commit, in the rele
 1. A tag matching `vX.Y.Z` or `vX.Y.Z-rc.N` must point to a commit in the canonical `main` history. The workflow refuses tags from unrelated/unreviewed branches. Every candidate must include `scripts/hybrid-disposable-installer-e2e.sh`, `scripts/hybrid-vpn-e2e.py`, `scripts/test-release-candidate-dry-run.sh`, and both CI jobs `hybrid-native-e2e` and `tagless-release-candidate`; missing coverage **blocks** release creation.
 2. The release workflow invokes the repository's reusable `RouteGate CI` **on the exact tag commit**. Only if every CI job, including disposable native Hybrid installation and real isolated VLESS/Reality traffic, succeeds will the release workflow build, checksum, attest and create a **GitHub Release draft**.
 3. Review the draft and all evidence. A green CI badge alone is **insufficient**; recording a real external Hybrid E2E is mandatory for the supported current release. The release reviewer explicitly decides whether RG-140 blocks promotion.
-4. Publish the draft **manually** using the GitHub Releases interface only after the checks above. For release candidates, retain the prerelease designation. Publishing is intentionally a separate operator action, not part of CI.
+4. When independent real-VPS testing is still pending, do **not** publish a stable release. A separately approved **public prerelease** (e.g. `v0.2.0-rc.N`) may be used for external RU acceptance **after** exact-commit CI, source/tag protection, signed/attested bundles and release asset verification succeed. Keep it flagged as a prerelease and do not surface it in the normal website Quick Start or `/releases/latest`.
+5. Test the **exact published prerelease assets** using one verified, pinned, copy/paste installer invocation on the disposable RU VPS. Run genuine public DNS/Let's Encrypt, setup/login, Agent, protocol/client and reboot smoke. Redact and record the evidence. This does not count as testing the future stable archive byte-for-byte.
+6. If the prerelease passes and the remaining security gates are cleared, prepare a **separate stable tag** from reviewed canonical `main`, verify its exact SHA, rebuilt bundles, release manifest/attestations and installer checksum again, and obtain explicit operator approval before publishing stable. Never promote an untested candidate by merely dropping a `-rc` suffix without verification.
+7. After stable publication, check that the Pages snapshot selects that verified stable release, then **actually open the public site and click Copy**, paste into a clean VPS SSH terminal, and confirm the same pinned tag reaches the installer wizard. If it fails, leave the public Quick Start disabled and address the regression. Publishing is intentionally a separate operator action, not part of CI.
 5. Never replace release assets or re-point an existing published tag. If anything changes, cut a **new** version and regenerate artifacts/attestations. The workflow refuses to upload into an existing draft or release.
+
+## External acceptance sequencing and the one-command contract
+
+There is a genuine chicken-and-egg constraint: GitHub draft release assets are
+not public anonymous downloads, while the stable release must not be published
+before independent external acceptance. The correct bridge is **explicitly
+approved, published prerelease assets**, never an unreviewed `main` installer,
+`latest` selector, anonymous CI ZIP service, or premature stable publication.
+A prerelease can have a pinned SHA-256-verified one-line terminal command for
+an operator's disposable RU acceptance, but it must **not** appear on the
+normal `routegate.org` Copy button. GitHub's `/releases/latest` excludes both
+drafts and prereleases, so the website remains fail-closed until the stable
+release is actually approved and published.
+
+The final website Copy button is accepted only if a real browser verifies RU
+and EN visibility, an exact one-line clipboard value, SHA-256 before privileged
+execution and a disabled state for legacy/missing-digest/prerelease metadata.
+The real RU user-path install remains a separate acceptance gate; a mocked
+Chromium test cannot substitute for public DNS, Let's Encrypt or VPN traffic.
+
 ## Manual release-artifact rehearsal
 
 `workflow_dispatch` is **not** a way to publish a release. It may build and
