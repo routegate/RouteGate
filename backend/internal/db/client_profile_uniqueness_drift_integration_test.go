@@ -166,7 +166,7 @@ func TestClientProfileSchemaInvariantRepairRepairsAlreadyAppliedHistoricalDrift(
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000164_credential_revocation_dispatch_lock_order" {
-		t.Fatalf("applied schema version = %q, want 000164_credential_revocation_dispatch_lock_order", version)
+	if version != "000165_credential_revocation_task_identity" {
+		t.Fatalf("applied schema version = %q, want 000165_credential_revocation_task_identity", version)
 	}
 }
