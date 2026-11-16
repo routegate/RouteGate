@@ -13,7 +13,7 @@
 </p>
 
 <h2 align="center">
-  🚀 <a href="https://routegate.org/#install">Quick Start · Установка RouteGate</a>
+  🚀 <a href="https://routegate.org/#install">Quick Start · Install RouteGate</a>
 </h2>
 
 <p align="center">
