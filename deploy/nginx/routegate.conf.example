@@ -26,7 +26,15 @@ server {
         root /var/www/routegate;
         try_files $uri =404;
         default_type application/octet-stream;
-        add_header Cache-Control "no-store";
+        # A location-level add_header overrides all server-level inherited
+        # add_header directives on Ubuntu's supported nginx versions.
+        # Preserve the same response hardening when setting no-store.
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Content-Security-Policy "base-uri 'self'; frame-ancestors 'self'; object-src 'none'" always;
+        add_header Cache-Control "no-store" always;
     }
 
     # Subscription URLs contain bearer credentials in the path. Proxy them
