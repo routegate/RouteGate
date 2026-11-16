@@ -11,10 +11,10 @@ import (
 )
 
 // This is an upgrade of a database that already contains a *confirmed*
-// but never dispatched schema-162 operation. Schema 163 must NOT create
+// but never dispatched schema-162 operation. Schemas 163–164 must NOT create
 // a claim on behalf of any past user, change the historic confirmation,
 // alter the existing account or dispatch any Agent job.
-func TestCredentialRevocationUpgrade162To163DoesNotClaimExistingConfirmation(t *testing.T) {
+func TestCredentialRevocationUpgrade162ToLatestDoesNotClaimExistingConfirmation(t *testing.T) {
 	dsn:=os.Getenv("ROUTEGATE_TEST_DATABASE_URL")
 	if dsn==""{t.Skip("ROUTEGATE_TEST_DATABASE_URL is not set")}
 	ctx,cancel:=context.WithTimeout(context.Background(),100*time.Second)
@@ -68,10 +68,10 @@ func TestCredentialRevocationUpgrade162To163DoesNotClaimExistingConfirmation(t *
     (SELECT count(*) FROM vpn_credential_revocation_dispatch_claims),
     (SELECT count(*) FROM agent_operation_jobs WHERE server_id=$1::uuid),
     (SELECT count(*) FROM schema_migrations WHERE version IN
-      ('000161_credential_revocation_preparations','000162_credential_revocation_confirmations','000163_credential_revocation_dispatch_claims'))
+      ('000161_credential_revocation_preparations','000162_credential_revocation_confirmations','000163_credential_revocation_dispatch_claims','000164_credential_revocation_dispatch_lock_order'))
   `,server).Scan(&confirmations,&claims,&jobs,&versions);err!=nil{t.Fatal(err)}
   if state!="prepared"||!recorded.Equal(confirmationAt)||display!="Original VPN account"||
-    confirmations!=1||claims!=0||jobs!=0||versions!=3{
+    confirmations!=1||claims!=0||jobs!=0||versions!=4{
    t.Fatalf("upgrade changed existing data: state=%s time=%s display=%s confirmations=%d claims=%d jobs=%d versions=%d",
     state,recorded,display,confirmations,claims,jobs,versions)
   }
