@@ -59,7 +59,7 @@ jobs:
           if ! gh api -H "Accept: application/vnd.github+json" \
             repos/routegate/RouteGate/releases/latest \
             > "$RUNNER_TEMP/routegate-stable-release.json"; then
-            printf '{}\\n' > "$RUNNER_TEMP/routegate-stable-release.json"
+            printf '{}\n' > "$RUNNER_TEMP/routegate-stable-release.json"
           fi
           node scripts/generate-release-snapshot.mjs \
             "$RUNNER_TEMP/routegate-stable-release.json" \
