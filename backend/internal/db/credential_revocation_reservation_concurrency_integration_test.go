@@ -101,6 +101,65 @@ func TestCredentialRevocationGlobalReservationSerializesPreparationAndRouting(t 
         return id, err
     }
 
+    // Pending work at this node must be rejected at the DB boundary,
+    // not merely at a future Manager handler that has not been wired yet.
+    var applyJobID string
+    if err := pool.QueryRow(ctx, `
+        INSERT INTO config_apply_jobs (server_id, agent_id, config_version_id, action, status)
+        VALUES ($1::uuid, $2::uuid, $3::uuid, 'apply', 'pending')
+        RETURNING id::text
+    `, nodeID, agentID, baselineID).Scan(&applyJobID); err != nil {
+        t.Fatalf("create pending existing apply: %v", err)
+    }
+    if _, err := insertPreparation(ctx); err == nil ||
+        !strings.Contains(err.Error(), "revocation_node_mutation_unresolved") {
+        t.Fatalf("preparation was not refused while config Apply pending: %v", err)
+    }
+    if _, err := pool.Exec(ctx, "DELETE FROM config_apply_jobs WHERE id=$1::uuid", applyJobID); err != nil {
+        t.Fatalf("remove disposable pending job: %v", err)
+    }
+
+    var targetID, transferID string
+    if err := pool.QueryRow(ctx, `
+        INSERT INTO servers (name, status) VALUES ('rg140-reservation-transfer-target', 'active')
+        RETURNING id::text
+    `).Scan(&targetID); err != nil {
+        t.Fatal(err)
+    }
+    if err := pool.QueryRow(ctx, `
+        INSERT INTO vpn_account_transfers (
+            vpn_account_id, source_server_id, target_server_id, source_version_id,
+            state, requested_by, last_action_by
+        ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
+            'preparing', 'ci-reviewer', 'ci-reviewer')
+        RETURNING id::text
+    `, accountID, nodeID, targetID, baselineID).Scan(&transferID); err != nil {
+        t.Fatalf("create pending staged transfer: %v", err)
+    }
+    if _, err := pool.Exec(ctx, `
+        INSERT INTO vpn_account_transfer_nodes (server_id, transfer_id)
+        VALUES ($1::uuid, $2::uuid)
+    `, nodeID, transferID); err != nil {
+        t.Fatalf("reserve source node for staged transfer: %v", err)
+    }
+    if _, err := insertPreparation(ctx); err == nil ||
+        !strings.Contains(err.Error(), "revocation_node_transfer_reserved") {
+        t.Fatalf("preparation was not refused during an active transfer: %v", err)
+    }
+    if _, err := pool.Exec(ctx, "DELETE FROM vpn_account_transfer_nodes WHERE transfer_id=$1::uuid", transferID); err != nil {
+        t.Fatalf("release disposable transfer reservation: %v", err)
+    }
+    if _, err := pool.Exec(ctx, "DELETE FROM vpn_account_transfers WHERE id=$1::uuid", transferID); err != nil {
+        t.Fatalf("remove disposable staged transfer fixture: %v", err)
+    }
+    var unapprovedPreparations int
+    if err := pool.QueryRow(ctx, "SELECT count(*) FROM vpn_credential_revocations").Scan(&unapprovedPreparations); err != nil {
+        t.Fatal(err)
+    }
+    if unapprovedPreparations != 0 {
+        t.Fatalf("failed admission wrote %d preparation rows", unapprovedPreparations)
+    }
+
     // Simulate a concurrent Manager apply holding the shared global lock.
     tx, err := pool.Begin(ctx)
     if err != nil {
