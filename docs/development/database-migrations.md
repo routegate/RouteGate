@@ -34,8 +34,9 @@ used ordinal and a new file claiming an unused number in that historical
 range, even if it does not directly collide with a checked-in file.
 These pre-SQL checks protect an already-upgraded database from executing a
 new `000050_*` migration long after `000159_*` was applied. New work must
-use a new forward-only ordinal, starting with `000161_*`, and a unique
-descriptive name.
+use a new forward-only ordinal. In the **schema-161 review branch**, the
+preparation ledger has consumed `000161_*`, so any next migration must use
+an unused ordinal **162 or higher**; never edit or replace the old 160.
 
 The existing `000160_traffic_report_checkpoints.up.sql` filename is
 also immutable, as is the unusual shipped `0001430_*` outlier. The
@@ -47,6 +48,31 @@ One earlier migration is named
 existing filename too. Numerical magnitude alone does not reliably
 describe execution order across all historical files: the migrator
 sorts filenames lexicographically.
+
+## Dormant RG-140 schema 161 review
+
+This branch carries `000161_credential_revocation_preparations.up.sql`
+(and its matching down script) from reviewed Draft #740 onto the sealed
+migration history Draft #798, **without** carrying #739's obsolete ordinal
+guard. The table records scoped preparation and its audit history.
+It deliberately has **no public endpoint, Agent command producer, runtime
+apply, credential removal or permission to declare VPN access revoked**.
+
+The PostgreSQL tests run (a) existing schema 160 with an Agent, account
+and traffic checkpoint upgraded to 161, (b) idempotent re-run and preserved
+old migration identity, and (c) concurrent transaction admission to the
+dormant preparation/global routing guards. Preparation also acquires the
+same per-node server row lock as ordinary apply and transfer admission, then
+rejects active node-transfer reservations and unresolved configuration, Agent
+service, or platform-update jobs. The standard healthy-core account
+modification still works when no preparation exists.
+
+**Do not infer completeness from this schema migration.** A future
+authorized operation needs durable Manager/Agent evidence, a scoped
+pinned-config apply and verified session semantics, and full tests under
+#545. Existing real databases must not be upgraded without release
+approval, a representative backup/restore rehearsal and independent
+review of the SQL triggers.
 
 ## RG-140 integration warning
 
