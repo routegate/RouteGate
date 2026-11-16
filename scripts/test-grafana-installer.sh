@@ -114,6 +114,48 @@ EOF_STATE
   assert_equal "stores one state timestamp" "1" "$(grep -c '^UPDATED_AT=' "$state")"
 }
 
+test_atomic_rollback_state_restore() {
+  local state="$TEST_TMP/rollback-state.env"
+  local backup="$TEST_TMP/rollback-backup.env"
+  local before_hash
+  printf 'STATUS=complete\nGRAFANA_MANAGED=1\n' >"$state"
+  printf 'STATUS=complete\nGRAFANA_REQUESTED=1\n' >"$backup"
+  chmod 0600 "$state" "$backup"
+  before_hash=$(sha256sum "$state" | awk '{print $1}')
+
+  # A failed final rename cannot truncate the still-visible state or
+  # consume the independent backup required for manual recovery.
+  if bash -c '
+    source "$1"
+    ROUTEGATE_STATE_FILE="$2"
+    mv() { return 1; }
+    restore_ownership_state_from_backup "$3"
+  ' _ "$ROOT_DIR/install-grafana.sh" "$state" "$backup" \
+      >"$TEST_TMP/rollback-rename-failure.log" 2>&1; then
+    fail "Grafana rollback must refuse failed state rename"
+  else
+    assert_equal "Grafana failed rollback preserves current state" \
+      "$before_hash" "$(sha256sum "$state" | awk '{print $1}')"
+    assert_true "Grafana failed rollback preserves backup" test -s "$backup"
+  fi
+  assert_equal "Grafana failed rollback removes temp candidate" 0 \
+    "$(find "$TEST_TMP" -maxdepth 1 -name 'rollback-state.env.tmp.*' | wc -l | tr -d '[:space:]')"
+
+  if bash -c '
+    source "$1"
+    ROUTEGATE_STATE_FILE="$2"
+    restore_ownership_state_from_backup "$3"
+  ' _ "$ROOT_DIR/install-grafana.sh" "$state" "$backup" \
+      >"$TEST_TMP/rollback-restore-success.log" 2>&1; then
+    assert_equal "successful Grafana rollback restores exact previous content" \
+      "$(sha256sum "$backup" | awk '{print $1}')" \
+      "$(sha256sum "$state" | awk '{print $1}')"
+    assert_equal "successful Grafana rollback keeps state root-only" 600 "$(stat -c '%a' "$state")"
+  else
+    fail "Grafana rollback must restore ownership atomically"
+  fi
+}
+
 test_nginx_proxy_generation() {
   local site="$TEST_TMP/nginx-routegate.conf"
   cat >"$site" <<'EOF_NGINX'
@@ -244,6 +286,7 @@ test_entrypoint_guard() {
 printf 'TAP version 13\n'
 test_routegate_identity
 test_state_update
+test_atomic_rollback_state_restore
 test_nginx_proxy_generation
 test_dashboard_contract
 test_security_contract
