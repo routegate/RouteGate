@@ -61,8 +61,11 @@ apply, credential removal or permission to declare VPN access revoked**.
 The PostgreSQL tests run (a) existing schema 160 with an Agent, account
 and traffic checkpoint upgraded to 161, (b) idempotent re-run and preserved
 old migration identity, and (c) concurrent transaction admission to the
-dormant preparation/global routing guards. The standard healthy-core
-account modification still works when no preparation exists.
+dormant preparation/global routing guards. Preparation also acquires the
+same per-node server row lock as ordinary apply and transfer admission, then
+rejects active node-transfer reservations and unresolved configuration, Agent
+service, or platform-update jobs. The standard healthy-core account
+modification still works when no preparation exists.
 
 **Do not infer completeness from this schema migration.** A future
 authorized operation needs durable Manager/Agent evidence, a scoped
