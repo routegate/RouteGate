@@ -83,9 +83,7 @@ func TestCredentialRevocationGlobalReservationSerializesPreparationAndRouting(t 
         t.Fatal(err)
     }
 
-    insertPreparation := func(queryCtx context.Context) (string, error) {
-        var id string
-        err := pool.QueryRow(queryCtx, `
+    const preparationSQL = `
             INSERT INTO vpn_credential_revocations (
                 vpn_account_id, server_id, agent_id, agent_credential_generation,
                 baseline_version_id, baseline_hash, baseline_runtime_hash,
@@ -95,10 +93,31 @@ func TestCredentialRevocationGlobalReservationSerializesPreparationAndRouting(t 
                 $1::uuid, $2::uuid, $3::uuid, 1, $4::uuid,
                 $5, $6, $7, $8, '{}'::jsonb, 'active', 'ci-reviewer', 'ci-reviewer'
             ) RETURNING id::text
-        `, accountID, nodeID, agentID, baselineID,
-            strings.Repeat("a", 64), strings.Repeat("b", 64),
-            strings.Repeat("c", 64), strings.Repeat("d", 64)).Scan(&id)
+        `
+    preparationArgs := []any{accountID, nodeID, agentID, baselineID,
+        strings.Repeat("a", 64), strings.Repeat("b", 64),
+        strings.Repeat("c", 64), strings.Repeat("d", 64)}
+    insertPreparation := func(queryCtx context.Context) (string, error) {
+        var id string
+        err := pool.QueryRow(queryCtx, preparationSQL, preparationArgs...).Scan(&id)
         return id, err
+    }
+    // A client-side context deadline can race the database commit. An explicit
+    // PostgreSQL lock_timeout inside its *own* transaction guarantees the
+    // blocked SQL statement is rejected by PostgreSQL before releasing the
+    // other transaction's lock. Do not confuse client cancellation with
+    // transactional safety.
+    runWithServerLockTimeout := func(statement string, args ...any) error {
+        attempted, err := pool.Begin(ctx)
+        if err != nil {
+            return err
+        }
+        defer attempted.Rollback(ctx)
+        if _, err := attempted.Exec(ctx, "SET LOCAL lock_timeout = '350ms'"); err != nil {
+            return err
+        }
+        _, err = attempted.Exec(ctx, statement, args...)
+        return err
     }
 
     // Pending work at this node must be rejected at the DB boundary,
@@ -169,17 +188,14 @@ func TestCredentialRevocationGlobalReservationSerializesPreparationAndRouting(t 
     if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(140159)"); err != nil {
         t.Fatal(err)
     }
-    shortCtx, shortCancel := context.WithTimeout(ctx, 350*time.Millisecond)
-    _, err = insertPreparation(shortCtx)
-    shortCancel()
-    if err == nil {
-        t.Fatal("preparation raced ahead of a concurrent Manager apply reservation")
+    err = runWithServerLockTimeout(preparationSQL, preparationArgs...)
+    if err == nil || !strings.Contains(err.Error(), "SQLSTATE 55P03") {
+        t.Fatalf("preparation did not receive PostgreSQL lock_timeout against Manager apply: %v", err)
     }
     if err := tx.Commit(ctx); err != nil {
         t.Fatal(err)
     }
-    // A context deadline can race the final response. Check PostgreSQL
-    // state rather than trusting only the client's timeout error.
+    // Server-side lock_timeout must leave no partially committed operation.
     var silentlyCommitted int
     if err := pool.QueryRow(ctx, "SELECT count(*) FROM vpn_credential_revocations WHERE state='prepared'").Scan(&silentlyCommitted); err != nil {
         t.Fatal(err)
@@ -224,13 +240,11 @@ func TestCredentialRevocationGlobalReservationSerializesPreparationAndRouting(t 
     if _, err := routingTx.Exec(ctx, "SELECT pg_advisory_xact_lock(140159)"); err != nil {
         t.Fatal(err)
     }
-    routingCtx, routingCancel := context.WithTimeout(ctx, 350*time.Millisecond)
-    _, err = pool.Exec(routingCtx, `
+    err = runWithServerLockTimeout(`
         INSERT INTO routing_profiles (name) VALUES ('rg140-global-route-blocked-at-lock')
     `)
-    routingCancel()
-    if err == nil {
-        t.Fatal("global routing mutation bypassed an in-flight preparation lock")
+    if err == nil || !strings.Contains(err.Error(), "SQLSTATE 55P03") {
+        t.Fatalf("routing mutation did not receive PostgreSQL lock_timeout against preparation: %v", err)
     }
     if err := routingTx.Commit(ctx); err != nil {
         t.Fatal(err)
