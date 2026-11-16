@@ -12,7 +12,17 @@
   Operate VPN nodes, accounts, protocols, routing, verified platform updates, secure client configuration delivery, and operational state from one control plane.
 </p>
 
+<h2 align="center">
+  🚀 <a href="https://routegate.org/#install">Quick Start · Install RouteGate</a>
+</h2>
+
 <p align="center">
+  <strong>Release status:</strong> v0.2.0 installer is under review; the one-copy command is not published yet.
+  The old v0.1.0 install command is not recommended for new installations.
+</p>
+
+<p align="center">
+  <a href="https://routegate.org/#install">Quick Start</a> ·
   <a href="https://routegate.org">Website</a> ·
   <a href="docs/">Documentation</a> ·
   <a href="https://routegate.org/#roadmap">Roadmap</a> ·

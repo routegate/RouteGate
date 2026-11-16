@@ -1,9 +1,31 @@
 // The public quick-start is derived exclusively from a published GitHub
 // stable release, never a moving main branch, prerelease, or hardcoded MVP.
-export const stableReleaseApi = 'https://api.github.com/repos/routegate/RouteGate/releases/latest'
 // Same-origin, build-verified snapshot avoids requiring GitHub API access in visitors' browsers.
 export const stableReleaseSnapshotUrl = '/quickstart-release.json'
 const stableTagPattern = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/
+
+/**
+ * The whole release contract for the current Hybrid installer. The website
+ * must not enable Copy for a partial release: optional Grafana is offered in
+ * the wizard and remote Agent onboarding relies on its matching installer.
+ * All of these assets are produced by .github/workflows/release.yml.
+ * Presence does not substitute for CI provenance/attestation verification.
+ */
+export function requiredPublishedAssets(tag: string): string[] {
+  return [
+    'install.sh',
+    'install-agent.sh',
+    'install-grafana.sh',
+    'SHA256SUMS',
+    'INSTALLER_SHA256SUMS',
+    'release-manifest.json',
+    `routegate-${tag}-linux-amd64.tar.gz`,
+    `routegate-${tag}-linux-arm64.tar.gz`,
+    'release-manifest.attestation.json',
+    'release-bundles.attestation.json',
+    'installer-scripts.attestation.json',
+  ]
+}
 
 export function publishedStableTag(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object' || !('tag_name' in payload)) return null
@@ -24,13 +46,7 @@ export function publishedStableTag(payload: unknown): string | null {
   // validate its metadata and required uploaded assets before displaying
   // a privileged install command. A version string alone is not enough.
   if (release.draft !== false || release.prerelease !== false || !Array.isArray(release.assets)) return null
-  const required = new Set([
-    'install.sh',
-    'SHA256SUMS',
-    'INSTALLER_SHA256SUMS',
-    'release-manifest.json',
-    `routegate-${tag}-linux-amd64.tar.gz`,
-  ])
+  const required = new Set(requiredPublishedAssets(tag))
   for (const asset of release.assets) {
     if (!asset || typeof asset !== 'object') continue
     const item = asset as { name?: unknown; size?: unknown; state?: unknown }

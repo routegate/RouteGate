@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { content, type CardIcon, type Locale, type SiteContent } from './content'
-import { buildInstallCommand, publishedStableInstall, publishedStableTag, stableReleaseApi, stableReleaseSnapshotUrl } from './release'
+import { buildInstallCommand, publishedStableInstall, publishedStableTag, stableReleaseSnapshotUrl } from './release'
 
 const githubUrl = 'https://github.com/routegate/RouteGate'
 const docsUrl = `${githubUrl}/tree/main/docs`
@@ -217,6 +217,7 @@ function CodePreview({ t }: { t: SiteContent['source'] }) {
 function AppHeader({ locale, setLocale, t }: { locale: Locale; setLocale: (value: Locale) => void; t: SiteContent }) {
   const navLinks = (
     <>
+      <a className="nav-install-link" href="#install">{t.action.installNav}</a>
       <a href="#product">{t.nav.product}</a>
       <a href="#open-source">{t.nav.openSource}</a>
       <a href={docsUrl} target="_blank" rel="noreferrer">{t.nav.docs}</a>
@@ -234,7 +235,6 @@ function AppHeader({ locale, setLocale, t }: { locale: Locale; setLocale: (value
           <summary>{locale === 'ru' ? 'Меню' : 'Menu'}</summary>
           <div className="mobile-nav-menu">
             {navLinks}
-            <a href="#install">{t.action.start}</a>
           </div>
         </details>
         <div className="header-actions">
@@ -273,30 +273,19 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
 
     const loadPublishedStable = async () => {
       try {
-        // A same-origin snapshot is produced at Pages build time from the
-        // latest verified published GitHub release. Visitors need not reach
-        // api.github.com merely to copy a terminal command.
-        let payload: unknown
-        try {
-          const snapshot = await fetch(stableReleaseSnapshotUrl, {
-            signal: controller.signal,
-            cache: 'no-store',
-            headers: { Accept: 'application/json' },
-          })
-          if (!snapshot.ok || !snapshot.headers.get('content-type')?.includes('json')) {
-            throw new Error('No published stable release snapshot')
-          }
-          payload = await snapshot.json()
-        } catch {
-          // Local/preview builds need not contain a published snapshot.
-          // The API fallback remains fail-closed for incomplete assets.
-          const response = await fetch(stableReleaseApi, {
-            signal: controller.signal,
-            headers: { Accept: 'application/vnd.github+json' },
-          })
-          if (!response.ok) throw new Error('GitHub release lookup failed')
-          payload = await response.json()
+        // Pages publishes the authoritative release snapshot at build time.
+        // A missing, stale-looking or invalid snapshot MUST disable Copy.
+        // Never ask a browser to bypass a disabled Pages snapshot by querying
+        // GitHub's API independently: revocation depends on fail-closed state.
+        const snapshot = await fetch(stableReleaseSnapshotUrl, {
+          signal: controller.signal,
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        })
+        if (!snapshot.ok || !snapshot.headers.get('content-type')?.includes('json')) {
+          throw new Error('No verified published stable release snapshot')
         }
+        const payload: unknown = await snapshot.json()
         const tag = publishedStableTag(payload)
         if (!tag) throw new Error('No valid published stable release')
         if (tag === 'v0.1.0') {
@@ -383,6 +372,9 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
                   {t.action.github}
                 </a>
               </div>
+              {stableRelease.status !== 'ready' && (
+                <p className="hero-install-status"><a href="#install">{t.action.installStatus}</a></p>
+              )}
               <div className="hero-meta">
                 <span>Linux</span>
                 <span>{locale === 'ru' ? 'Несколько протоколов' : 'Multi-protocol'}</span>
@@ -391,6 +383,43 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
               </div>
             </div>
             <HeroMapPreview locale={locale} />
+          </div>
+        </section>
+
+        <section className="section deployment-section container" id="install">
+          <div className="section-heading"><div><span>{t.deployment.eyebrow}</span><h2>{t.deployment.title}</h2></div><p>{t.deployment.text}</p></div>
+          <div className="deployment-grid">
+            {t.deployment.cards.map(card => <article key={card.title}><h3>{card.title}</h3><p>{card.text}</p></article>)}
+          </div>
+          <div className="install-panel">
+            <div className="install-panel-heading">
+              <div><span>{t.deployment.commandLabel}</span><strong>{
+                stableRelease.status === 'ready' && stableRelease.tag
+                  ? t.deployment.commandTitle.replace('{version}', stableRelease.tag)
+                  : stableRelease.status === 'legacy'
+                    ? t.deployment.legacyReleaseTitle
+                    : stableRelease.status === 'loading'
+                      ? t.deployment.releaseLoadingTitle
+                      : t.deployment.releaseUnavailableTitle
+              }</strong></div>
+              <button type="button" disabled={!installCommand} onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
+            </div>
+            <pre aria-live="polite"><code>{installCommand ?? (
+              stableRelease.status === 'loading'
+                ? t.deployment.releaseLoading
+                : stableRelease.status === 'legacy'
+                  ? t.deployment.legacyReleaseDisabled
+                  : t.deployment.releaseUnavailable
+            )}</code></pre>
+            <div className="install-panel-footer">
+              <span>{stableRelease.status === 'legacy'
+                ? t.deployment.legacyReleaseNote
+                : stableRelease.status === 'ready'
+                  ? t.deployment.commandNote
+                  : t.deployment.releaseUnavailableNote}</span>
+              <a href={releasesUrl} target="_blank" rel="noreferrer">{t.deployment.releaseListLabel}<span>↗</span></a>
+              <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
+            </div>
           </div>
         </section>
 
@@ -432,43 +461,6 @@ export function App({ initialLocale: requestedLocale }: { initialLocale?: Locale
               <a href={githubUrl} target="_blank" rel="noreferrer">{t.action.github}<span>↗</span></a>
             </div>
             <CodePreview t={t.source} />
-          </div>
-        </section>
-
-        <section className="section deployment-section container" id="install">
-          <div className="section-heading"><div><span>{t.deployment.eyebrow}</span><h2>{t.deployment.title}</h2></div><p>{t.deployment.text}</p></div>
-          <div className="deployment-grid">
-            {t.deployment.cards.map(card => <article key={card.title}><h3>{card.title}</h3><p>{card.text}</p></article>)}
-          </div>
-          <div className="install-panel">
-            <div className="install-panel-heading">
-              <div><span>{t.deployment.commandLabel}</span><strong>{
-                stableRelease.status === 'ready' && stableRelease.tag
-                  ? t.deployment.commandTitle.replace('{version}', stableRelease.tag)
-                  : stableRelease.status === 'legacy'
-                    ? t.deployment.legacyReleaseTitle
-                    : stableRelease.status === 'loading'
-                      ? t.deployment.releaseLoadingTitle
-                      : t.deployment.releaseUnavailableTitle
-              }</strong></div>
-              <button type="button" disabled={!installCommand} onClick={handleCopyInstall}>{installCopied ? t.action.copied : t.action.copy}</button>
-            </div>
-            <pre aria-live="polite"><code>{installCommand ?? (
-              stableRelease.status === 'loading'
-                ? t.deployment.releaseLoading
-                : stableRelease.status === 'legacy'
-                  ? t.deployment.legacyReleaseDisabled
-                  : t.deployment.releaseUnavailable
-            )}</code></pre>
-            <div className="install-panel-footer">
-              <span>{stableRelease.status === 'legacy'
-                ? t.deployment.legacyReleaseNote
-                : stableRelease.status === 'ready'
-                  ? t.deployment.commandNote
-                  : t.deployment.releaseUnavailableNote}</span>
-              <a href={releasesUrl} target="_blank" rel="noreferrer">{t.deployment.releaseListLabel}<span>↗</span></a>
-              <a href={installGuideUrl} target="_blank" rel="noreferrer">{t.action.installGuide}<span>↗</span></a>
-            </div>
           </div>
         </section>
 

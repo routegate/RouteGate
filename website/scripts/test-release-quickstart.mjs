@@ -5,23 +5,19 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+import { tagRulesCoverRelease } from '../../scripts/check-release-tag-ruleset.mjs'
 import {
   buildInstallCommand,
   isSupportedQuickStartTag,
   publishedStableInstall,
   publishedStableTag,
-  stableReleaseApi,
+  requiredPublishedAssets,
   stableReleaseSnapshotUrl,
 } from '../src/release.ts'
 
 const goodDigest = 'sha256:' + 'a'.repeat(64)
-const requiredAssets = tag => [
-  'install.sh',
-  'SHA256SUMS',
-  'INSTALLER_SHA256SUMS',
-  'release-manifest.json',
-  'routegate-' + tag + '-linux-amd64.tar.gz',
-]
+const requiredAssets = requiredPublishedAssets
 
 const releaseFixture = (tag = 'v1.2.3') => ({
   tag_name: tag,
@@ -33,6 +29,42 @@ const releaseFixture = (tag = 'v1.2.3') => ({
     state: 'uploaded',
     digest: name === 'install.sh' ? goodDigest : undefined,
   })),
+})
+
+
+test('tag publication requires active v* rules preventing both updates and deletions', () => {
+  const sample = (rules, overrides = {}) => ({
+    id: 42,
+    target: 'tag',
+    enforcement: 'active',
+    conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
+    rules: rules.map(type => ({ type })),
+    ...overrides,
+  })
+  for (const tag of ['v0.2.0', 'v0.2.0-rc.3', 'v1.0.0']) {
+    assert.equal(tagRulesCoverRelease([sample(['update', 'deletion'])], tag).protected, true)
+    assert.equal(tagRulesCoverRelease([
+      sample(['update']), sample(['deletion'], { id: 43 }),
+    ], tag).protected, true)
+  }
+  for (const bad of [
+    [],
+    [sample(['update'])],
+    [sample(['deletion'])],
+    [sample(['update', 'deletion'], { enforcement: 'evaluate' })],
+    [sample(['update', 'deletion'], { target: 'branch' })],
+    [sample(['update', 'deletion'], {
+      conditions: { ref_name: { include: ['refs/tags/v0.1.*'], exclude: [] } },
+    })],
+    [sample(['update', 'deletion'], {
+      conditions: { ref_name: { include: ['refs/tags/v*'], exclude: ['refs/tags/v0.2.0'] } },
+    })],
+    [sample(['update', 'deletion'], { rules: [] })],
+  ]) assert.equal(tagRulesCoverRelease(bad, 'v0.2.0').protected, false)
+
+  for (const tag of ['', 'main', 'v0.2.0-rc.foo', 'v0.2.0; touch /tmp/unsafe']) {
+    assert.equal(tagRulesCoverRelease([sample(['update', 'deletion'])], tag).protected, false)
+  }
 })
 
 test('published stable tag is validated and not mutable, injected or prerelease', () => {
@@ -48,6 +80,10 @@ test('published stable tag is validated and not mutable, injected or prerelease'
 
 test('quick start refuses incomplete, draft or unverifiable release assets', () => {
   const valid = releaseFixture()
+  assert.equal(requiredAssets('v1.2.3').length, 11, 'canonical release bundle contract must cover Grafana, Agent and attestations')
+  for (const critical of ['install-agent.sh', 'install-grafana.sh', 'release-manifest.attestation.json', 'release-bundles.attestation.json', 'installer-scripts.attestation.json', 'routegate-v1.2.3-linux-arm64.tar.gz']) {
+    assert.ok(requiredAssets('v1.2.3').includes(critical), 'missing required release asset ' + critical)
+  }
   assert.equal(publishedStableTag(valid), 'v1.2.3')
   assert.deepEqual(publishedStableInstall(valid), {
     tag: 'v1.2.3',
@@ -81,8 +117,20 @@ test('quick start refuses incomplete, draft or unverifiable release assets', () 
   assert.equal(publishedStableTag({ tag_name: 'v0.1.0' }), 'v0.1.0')
 })
 
+test('verified website release contract stays aligned with the GitHub release uploader', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8')
+  for (const name of requiredPublishedAssets('v1.2.3')) {
+    if (name.includes('-linux-') && name.endsWith('.tar.gz')) {
+      assert.ok(workflow.includes('dist/routegate-*.tar.gz'), 'release workflow must upload both architectures')
+    } else {
+      assert.ok(workflow.includes('dist/' + name), 'site must not require an asset absent from release workflow: ' + name)
+    }
+  }
+  const dryRun = readFileSync(new URL('../../scripts/test-release-candidate-dry-run.sh', import.meta.url), 'utf8')
+  assert.ok(dryRun.includes('ARCHITECTURES="amd64 arm64"'), 'release rehearsal must test both public bundle architectures')
+})
+
 test('copied install command is one shell line, exact-tag pinned and checks before sudo', () => {
-  assert.equal(stableReleaseApi, 'https://api.github.com/repos/routegate/RouteGate/releases/latest')
   assert.equal(stableReleaseSnapshotUrl, '/quickstart-release.json')
   const command = buildInstallCommand('v1.2.3', 'a'.repeat(64))
   assert.ok(command.startsWith('( f=$(mktemp) && trap '))
@@ -201,9 +249,11 @@ test('Pages builds a trustworthy same-origin release snapshot without leaking as
   try {
     const input = join(dir, 'source.json')
     const output = join(dir, 'snapshot.json')
-    const run = source => {
+    const run = (source, mode = '') => {
       writeFileSync(input, JSON.stringify(source))
-      return spawnSync(process.execPath, ['scripts/generate-release-snapshot.mjs', input, output], {
+      return spawnSync(process.execPath, [
+        'scripts/generate-release-snapshot.mjs', input, output, ...(mode ? [mode] : []),
+      ], {
         cwd: new URL('..', import.meta.url).pathname,
         encoding: 'utf8',
       })
@@ -224,6 +274,32 @@ test('Pages builds a trustworthy same-origin release snapshot without leaking as
     ) })
     assert.notEqual(wrong.status, 0, 'missing installer digest cannot generate release snapshot')
     assert.equal(existsSync(output), false, 'failed release verification does not publish a snapshot')
+    // Pages must supersede a previously LIVE copy command on revoked,
+    // deleted, malformed, partial or unresolvable release metadata. A
+    // failed build would otherwise leave stale (possibly revoked) Copy live.
+    const valid = run(releaseFixture(), '--disable-on-invalid')
+    assert.equal(valid.status, 0, valid.stderr)
+    assert.ok(publishedStableInstall(JSON.parse(readFileSync(output, 'utf8'))))
+    const removed = run({}, '--disable-on-invalid')
+    assert.equal(removed.status, 0, removed.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), { tag_name: null })
+    assert.equal(publishedStableInstall(JSON.parse(readFileSync(output, 'utf8'))), null)
+    const incomplete = run({ ...releaseFixture(), assets: releaseFixture().assets.filter(asset =>
+      asset.name !== 'install-grafana.sh',
+    ) }, '--disable-on-invalid')
+    assert.equal(incomplete.status, 0, incomplete.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), { tag_name: null })
+    const revokedDigest = run({ ...releaseFixture(), assets: releaseFixture().assets.map(asset =>
+      asset.name === 'install.sh' ? { ...asset, digest: undefined } : asset,
+    ) }, '--disable-on-invalid')
+    assert.equal(revokedDigest.status, 0, revokedDigest.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), { tag_name: null })
+    writeFileSync(input, '{bad-json')
+    const badJson = spawnSync(process.execPath, [
+      'scripts/generate-release-snapshot.mjs', input, output, '--disable-on-invalid',
+    ], { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8' })
+    assert.equal(badJson.status, 0, badJson.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), { tag_name: null })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -235,6 +311,14 @@ test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8')
   assert.ok(!readme.includes('VERSION=v0.1.0'))
   assert.ok(readme.includes('copy the single Quick Start command'))
+  const deploymentGuide = readFileSync(new URL('../../docs/deployment/clean-vps-installer.md', import.meta.url), 'utf8')
+  assert.ok(deploymentGuide.includes('https://routegate.org/#install'), 'new-host documentation must point to public Quick Start')
+  assert.ok(deploymentGuide.includes('The copied command downloads'), 'document the pinned installer command')
+  assert.ok(!deploymentGuide.includes('VERSION=v0.1.0'), 'legacy installer guidance must not suggest v0.1.0 for new installs')
+  assert.ok(!deploymentGuide.includes('sudo bash routegate-install-v0.1.0.sh'))
+  assert.ok(!deploymentGuide.includes('By default, the installer resolves the latest published RouteGate release'))
+  assert.ok(!deploymentGuide.includes('- Release: RouteGate v0.1.0 MVP'), 'current guide must not advertise archived MVP as the target release')
+  assert.ok(!deploymentGuide.includes('disposable production-like `us.routegate.org`'), 'test TLS is not proof of live external acceptance')
   const prerender = readFileSync(new URL('./prerender.mjs', import.meta.url), 'utf8')
   assert.ok(!prerender.includes('Stable v0.1.0 supports'))
   assert.ok(!prerender.includes('Стабильный v0.1.0'))
@@ -244,12 +328,35 @@ test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   assert.match(app, /publishedStableTag\(payload\)/)
   assert.match(app, /publishedStableInstall\(payload\)/)
   assert.match(app, /fetch\(stableReleaseSnapshotUrl/)
+  assert.ok(!app.includes('stableReleaseApi'), 'browser must not bypass revoked Pages snapshot')
+  assert.ok(!app.includes('api.github.com'), 'browser must never fetch latest directly from API')
   const pages = readFileSync(new URL('../../.github/workflows/pages.yml', import.meta.url), 'utf8')
   assert.match(pages, /types: \[published, unpublished, deleted, edited\]/)
   assert.match(pages, /scripts\/generate-release-snapshot\.mjs/)
+  assert.match(pages, /--disable-on-invalid/)
+  assert.match(pages, /if ! gh api/)
+  assert.match(pages, /printf '\{\}\\n'/)
+
   assert.match(pages, /ref: main/)
   assert.match(app, /installerSha256: install\.installerSha256/)
   const styles = readFileSync(new URL('../src/site-refresh.css', import.meta.url), 'utf8')
   assert.match(styles, /white-space: pre-wrap/)
   assert.match(styles, /overflow-wrap: anywhere/)
+})
+
+test('Quick Start stays discoverable above the product tour, in README and site', () => {
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const content = readFileSync(new URL('../src/content.ts', import.meta.url), 'utf8')
+  const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8')
+  const section = app.indexOf('className="section deployment-section container" id="install"')
+  const product = app.indexOf('className="section product-section container" id="product"')
+  assert.ok(section >= 0 && product > section, 'install section must immediately follow hero')
+  assert.match(app, /className="nav-install-link" href="#install"/)
+  assert.match(app, /className="hero-install-status"/)
+  assert.match(app, /stableRelease\.status !== 'ready'/)
+  assert.match(content, /start: 'Установка RouteGate'/)
+  assert.match(content, /start: 'Install RouteGate'/)
+  assert.match(content, /installStatus: 'v0\.2\.0 готовится к выпуску/)
+  assert.match(content, /installStatus: 'v0\.2\.0 is under review/)
+  assert.ok(readme.indexOf('https://routegate.org/#install') < readme.indexOf('## What is RouteGate?'))
 })

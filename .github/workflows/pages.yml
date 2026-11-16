@@ -53,12 +53,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api -H "Accept: application/vnd.github+json" \
+          # A GitHub 404 after revocation/deletion, or temporary API failure,
+          # must deploy an inert snapshot instead of leaving yesterday's
+          # active installer command live because the Pages build failed.
+          if ! gh api -H "Accept: application/vnd.github+json" \
             repos/routegate/RouteGate/releases/latest \
-            > "$RUNNER_TEMP/routegate-stable-release.json"
+            > "$RUNNER_TEMP/routegate-stable-release.json"; then
+            printf '{}\n' > "$RUNNER_TEMP/routegate-stable-release.json"
+          fi
           node scripts/generate-release-snapshot.mjs \
             "$RUNNER_TEMP/routegate-stable-release.json" \
-            dist/quickstart-release.json
+            dist/quickstart-release.json --disable-on-invalid
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0

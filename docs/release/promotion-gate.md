@@ -6,12 +6,12 @@ Status: **manual review required**. This gate applies to public stable tags as w
 
 Successful build/tests do not prove that a fresh VPS installer, admin setup, nginx/Let's Encrypt, local Agent, PostgreSQL and the VPN runtime actually work together. During the November 2026 RU/NL recovery, a fresh Hybrid install failed and the publicly suggested v0.1.0 bundle omitted much of the current UI. This must not recur.
 
-## Checklist before a reviewer publishes a draft
+## Checklist before publishing the stable v0.2.0 release
 
 Record evidence, including exact artifact version and source commit, in the release notes or the tracking issue:
 
 - [ ] Same-commit CI includes a **tagless, two-architecture release rehearsal** for genuine linux/amd64 and linux/arm64 archives: checksums, embedded commit/version, native binary ELF architecture, frontend parity and corruption rejection. This does not run ARM64 binaries or prove actual tag attestation/publication.
-- [ ] GitHub ruleset/permissions prevent force-moving or deleting release tags `v*`. The release workflow re-reads the **live origin tag** at both source validation and immediately before draft creation, rejecting changed/deleted tags (including annotated tags). This extra check narrows the race but **does not replace protected tags**; an administrator must verify the ruleset before publication.
+- [ ] GitHub ruleset/permissions prevent force-moving or deleting release tags `v*`. The release workflow **now blocks tagged release builds** unless `scripts/check-release-tag-ruleset.mjs` confirms an active GitHub tag ruleset covering `refs/tags/v*` (or all tags) with both `update` and `deletion` restrictions. It also re-reads the **live origin tag** before building and creating a draft. Neither the code check nor the live-tag check replaces administrator review of **bypass actors** in GitHub settings; do not publish with unrestricted bypasses.
 - [ ] Tag points to the expected reviewed commit, and CI for that exact commit is green. The release workflow's attested bundle, installer scripts, release manifest and both checksum sets verify. Do not publish if the version/commit/bundle mismatch.
 - [ ] Installer from the **same release tag** is used with matching bundle, never mixed with `main` or `latest`. A deliberately stale bundle fails **before** packages, services and RouteGate installation state are changed.
 - [ ] On disposable, fresh Ubuntu 24.04 amd64, a dedicated DNS name resolves to the test VPS, TCP 80/443 are reachable, and the exact candidate is installed as **Hybrid/All-in-One**, not as a remote-only node. Record redacted stage-by-stage logs.
@@ -21,14 +21,66 @@ Record evidence, including exact artifact version and source commit, in the rele
 - [ ] RG-140 open work is reviewed separately: [#509](https://github.com/routegate/RouteGate/issues/509) subscription continuity, [#538](https://github.com/routegate/RouteGate/issues/538) readiness/FI 503 recovery, [#545](https://github.com/routegate/RouteGate/issues/545) verified credential revocation, plus transfer/apply safety regressions. **Do not imply verified revocation of cached VPN credentials by merely invalidating a subscription URL.** Block release on unresolved security-critical scenarios; document any other known limitations explicitly.
 - [ ] Update and recovery paths are exercised against a disposable installation: backup/restore, failed update rollback, safe repeat install and troubleshooting instructions. No secret/token should appear in public CI logs or issue attachments.
 - [ ] Public website, README and installer docs point to the **same verified tag** and accurately explain supported protocols. Update them only with the reviewed release promotion.
+- [ ] Public Quick Start remains **disabled** unless the GitHub Release has the exact complete bundle: `install.sh`, `install-agent.sh`, `install-grafana.sh`, both installer/bundle checksum sets, `release-manifest.json`, genuine linux/amd64 and linux/arm64 archives, and the three attestation bundles. The site's uploaded-asset checks are a safety prerequisite, **not** proof that provenance checks or real-VPS acceptance passed.
+
+## Configure the required protected release tags
+
+**Owner action — still pending.** GitHub's repository rulesets API returned `[]`
+at the time this gate was added. A tag such as `v0.2.0-rc.3` must not be
+published until protection is configured and independently confirmed.
+
+In `routegate/RouteGate` open **Settings → Rules → Rulesets → New ruleset → New tag ruleset**.
+Set the target tag pattern to `v*`, enforcement to **Active**, and enable
+**Restrict updates** and **Restrict deletions**. Do not enable "Restrict
+creations" without separately defining which release identity may create a
+new tag. Review all bypass actors carefully: a blanket administrator bypass
+can still permit history changes even with active rules.
+
+The tagged release workflow invokes the read-only
+`node scripts/check-release-tag-ruleset.mjs "$GITHUB_REF_NAME"` preflight
+after verifying the tag's SHA and canonical `main` ancestry, **before**
+running release CI/build/attestation or creating a draft. This check calls the
+authenticated GitHub rulesets API, reads rule details and fails when a required
+rule is absent, incomplete or unenforced. It uses a conservative pattern match
+so unusual rulesets require explicit review rather than an assumed green gate.
+The helper has offline negative tests as part of website CI.
+
+The repository settings are not changed by this script. The actual
+protection must be configured by someone with administration permissions, and
+the resulting ruleset (including bypass actors) reviewed before release.
+Official guidance:
+[GitHub tag rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository).
 
 ## Publishing and immutability
 
 1. A tag matching `vX.Y.Z` or `vX.Y.Z-rc.N` must point to a commit in the canonical `main` history. The workflow refuses tags from unrelated/unreviewed branches. Every candidate must include `scripts/hybrid-disposable-installer-e2e.sh`, `scripts/hybrid-vpn-e2e.py`, `scripts/test-release-candidate-dry-run.sh`, and both CI jobs `hybrid-native-e2e` and `tagless-release-candidate`; missing coverage **blocks** release creation.
 2. The release workflow invokes the repository's reusable `RouteGate CI` **on the exact tag commit**. Only if every CI job, including disposable native Hybrid installation and real isolated VLESS/Reality traffic, succeeds will the release workflow build, checksum, attest and create a **GitHub Release draft**.
 3. Review the draft and all evidence. A green CI badge alone is **insufficient**; recording a real external Hybrid E2E is mandatory for the supported current release. The release reviewer explicitly decides whether RG-140 blocks promotion.
-4. Publish the draft **manually** using the GitHub Releases interface only after the checks above. For release candidates, retain the prerelease designation. Publishing is intentionally a separate operator action, not part of CI.
-5. Never replace release assets or re-point an existing published tag. If anything changes, cut a **new** version and regenerate artifacts/attestations. The workflow refuses to upload into an existing draft or release.
+4. When independent real-VPS testing is still pending, do **not** publish a stable release. A separately approved **public prerelease** (e.g. `v0.2.0-rc.N`) may be used for external RU acceptance **after** exact-commit CI, source/tag protection, signed/attested bundles and release asset verification succeed. Keep it flagged as a prerelease and do not surface it in the normal website Quick Start or `/releases/latest`.
+5. Test the **exact published prerelease assets** using one verified, pinned, copy/paste installer invocation on the disposable RU VPS. Run genuine public DNS/Let's Encrypt, setup/login, Agent, protocol/client and reboot smoke. Redact and record the evidence. This does not count as testing the future stable archive byte-for-byte.
+6. If the prerelease passes and the remaining security gates are cleared, prepare a **separate stable tag** from reviewed canonical `main`, verify its exact SHA, rebuilt bundles, release manifest/attestations and installer checksum again, and obtain explicit operator approval before publishing stable. Never promote an untested candidate by merely dropping a `-rc` suffix without verification.
+7. After stable publication, check that the Pages snapshot selects that verified stable release, then **actually open the public site and click Copy**, paste into a clean VPS SSH terminal, and confirm the same pinned tag reaches the installer wizard. If it fails, leave the public Quick Start disabled and address the regression. Publishing is intentionally a separate operator action, not part of CI.
+8. Never replace release assets or re-point an existing published tag. If anything changes, cut a **new** version and regenerate artifacts/attestations. The workflow refuses to upload into an existing draft or release.
+
+## External acceptance sequencing and the one-command contract
+
+There is a genuine chicken-and-egg constraint: GitHub draft release assets are
+not public anonymous downloads, while the stable release must not be published
+before independent external acceptance. The correct bridge is **explicitly
+approved, published prerelease assets**, never an unreviewed `main` installer,
+`latest` selector, anonymous CI ZIP service, or premature stable publication.
+A prerelease can have a pinned SHA-256-verified one-line terminal command for
+an operator's disposable RU acceptance, but it must **not** appear on the
+normal `routegate.org` Copy button. GitHub's `/releases/latest` excludes both
+drafts and prereleases, so the website remains fail-closed until the stable
+release is actually approved and published.
+
+The final website Copy button is accepted only if a real browser verifies RU
+and EN visibility, an exact one-line clipboard value, SHA-256 before privileged
+execution and a disabled state for legacy/missing-digest/prerelease metadata.
+The real RU user-path install remains a separate acceptance gate; a mocked
+Chromium test cannot substitute for public DNS, Let's Encrypt or VPN traffic.
+
 ## Manual release-artifact rehearsal
 
 `workflow_dispatch` is **not** a way to publish a release. It may build and
