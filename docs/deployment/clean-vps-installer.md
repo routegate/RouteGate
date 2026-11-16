@@ -163,6 +163,13 @@ does not install packages or write RouteGate ownership state. It is **not**
 a public installation command while the candidate remains unpublished, and
 a successful verification is **not** proof of a working Hybrid deployment.
 
+CI also exercises a disposable Ubuntu 24.04 native Hybrid install with a
+runner-local `.invalid` hostname and a temporary test certificate authority.
+It tests actual service startup, Agent registration, one-use setup, VLESS
+Reality traffic, interruption/retry, checksum failure and service restart.
+**It does not prove** public DNS, Let's Encrypt issuance, an external VPN
+client connection or a true host reboot. Those remain #715 acceptance gates.
+
 Advanced reviewers of the new release may separately verify the
 `install.sh` SHA-256, `INSTALLER_SHA256SUMS`, bundle checksums and
 attestations from the **same pinned published tag**. These checks do not
