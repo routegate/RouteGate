@@ -1,7 +1,7 @@
 // Pages-only snapshot generator. This file never runs in visitors' browsers.
 // Its input is the authenticated GitHub Releases API response fetched by CI.
 import { readFileSync, writeFileSync } from 'node:fs'
-import { publishedStableInstall, publishedStableTag } from '../src/release.ts'
+import { publishedStableInstall, publishedStableTag, requiredPublishedAssets } from '../src/release.ts'
 
 const [inputPath, outputPath] = process.argv.slice(2)
 if (!inputPath || !outputPath) {
@@ -24,10 +24,7 @@ const install = publishedStableInstall(payload)
 if (!install || !Array.isArray(payload.assets)) {
   throw new Error('Published stable release is missing a complete asset set or install.sh SHA-256')
 }
-const required = [
-  'install.sh', 'SHA256SUMS', 'INSTALLER_SHA256SUMS',
-  'release-manifest.json', 'routegate-' + tag + '-linux-amd64.tar.gz',
-]
+const required = requiredPublishedAssets(tag)
 const assets = required.map(name => {
   const asset = payload.assets.find(value => value?.name === name)
   if (!asset || asset.state !== 'uploaded' || !Number.isFinite(asset.size) || asset.size <= 0) {
