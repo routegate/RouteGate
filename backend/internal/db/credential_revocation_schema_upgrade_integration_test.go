@@ -72,8 +72,8 @@ func TestCredentialRevocationPreparationUpgradesCurrent160WithoutDataLoss(t *tes
 		t.Fatalf("re-run upgraded migration idempotently: %v", err)
 	}
 	version, err = NewSchemaVersionRepository(pool).AppliedSchemaVersion(ctx)
-	if err != nil || version != "000161_credential_revocation_preparations" {
-		t.Fatalf("latest version = %q (%v), expected 161 ledger", version, err)
+	if err != nil || version != "000162_credential_revocation_confirmations" {
+		t.Fatalf("latest version = %q (%v), expected 162 confirmation history", version, err)
 	}
 
 	var previousCount, newCount, legacyCollision int
@@ -88,6 +88,11 @@ func TestCredentialRevocationPreparationUpgradesCurrent160WithoutDataLoss(t *tes
 	}
 	if previousCount != 1 || newCount != 1 || legacyCollision != 0 {
 		t.Fatalf("historical migration was changed or duplicated: previous=%d next=%d conflict=%d", previousCount, newCount, legacyCollision)
+	}
+	// Upgrades from the 160 catalog must not invent confirmation or dispatch.
+	var confirmations int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM vpn_credential_revocation_confirmations").Scan(&confirmations); err != nil || confirmations != 0 {
+		t.Fatalf("schema upgrade created confirmation: count=%d err=%v", confirmations, err)
 	}
 	var savedName string
 	var sequence int64
