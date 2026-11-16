@@ -134,3 +134,21 @@ boundary. Any additional approved schema uses **168+** in #812's canonical
 line; never import legacy migration numbers or expose unreviewed
 `MountHeldRemoval` routes in production. Keep operator confirmation and
 lost-acknowledgement behavior fail-closed.
+
+## Modern cross-module compatibility gate (no dispatch)
+
+An opt-in CI test exports **real PostgreSQL-backed Manager** `Service.Prepare`
+candidate bytes from an isolated applied baseline into a mode-0600 ephemeral file,
+then invokes **the actual Agent** `verifyRemovalRuntimeDelta` and
+`CredentialRemovalExecutor.Execute` with a fake local service controller.
+It checks exact post-removal runtime hash, rejection before mutation on tampered
+input and read-only replay. No production Agent task is claimed, no human
+execution approval is fabricated by Manager, and **no real sing-box restart or
+network session termination is claimed by this gate**.
+
+This is explicitly a contract seam below the previously validated historical
+[#703](https://github.com/routegate/RouteGate/pull/703) full two-user systemd
+Reality E2E; that network test and production-mounted authorization/result
+lifecycle must still be adapted under reviewed schema 168+ without importing
+legacy SQL. The ephemeral fixture contains test Reality private material and
+must never be checked into Git or uploaded as a CI artifact.
