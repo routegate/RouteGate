@@ -63,8 +63,9 @@ func TestRevocationLockOrderUpgrade163To164PreservesUnknownClaim(t *testing.T) {
 
 	var before string
 	if err = pool.QueryRow(ctx, `SELECT row_to_json(c)::text FROM vpn_credential_revocation_dispatch_claims c WHERE claim_id=$1::uuid`,claimID).Scan(&before); err != nil { t.Fatal(err) }
+	through164 := copyMigrationsBefore(t, "../../migrations", "000165_credential_revocation_task_identity.up.sql")
 	for attempt:=0;attempt<2;attempt++ {
-		if err = Migrate(ctx,pool,"../../migrations",log); err != nil { t.Fatalf("164 migration/replay: %v",err) }
+		if err = Migrate(ctx,pool,through164,log); err != nil { t.Fatalf("164 migration/replay: %v",err) }
 		version, err = NewSchemaVersionRepository(pool).AppliedSchemaVersion(ctx)
 		if err != nil || version != "000164_credential_revocation_dispatch_lock_order" { t.Fatalf("latest schema=%s: %v",version,err) }
 		var after, state, name string
@@ -87,4 +88,10 @@ func TestRevocationLockOrderUpgrade163To164PreservesUnknownClaim(t *testing.T) {
 	_, err = pool.Exec(ctx,string(down))
 	var pgErr *pgconn.PgError
 	if !errors.As(err,&pgErr) || pgErr.Code!="P0141" { t.Fatalf("unsafe downgrade not blocked: %v",err) }
+	// Next schema must not synthesize reserved task IDs for historical claims.
+	if err = Migrate(ctx,pool,"../../migrations",log); err != nil { t.Fatal(err) }
+	var reservations int
+	if err = pool.QueryRow(ctx,"SELECT count(*) FROM vpn_credential_revocation_task_reservations").Scan(&reservations); err != nil || reservations != 0 {
+		t.Fatalf("schema-165 upgrade fabricated task reservation: %d %v",reservations,err)
+	}
 }

@@ -46,12 +46,19 @@ schema-163 `claim_id` maps to an authenticated Agent task and immutable
 credential-removal intent. A 200 response from the old verification endpoint
 MUST NOT be used to mark a new RG-140 claim resolved.
 
-Separately reviewed future work must supply a unique durable claim-to-task
-mapping, Agent credential-generation and operation/configuration digests,
-authenticated result origin, fail-closed duplicate/unknown reply handling,
-no-redelivery fencing and real client/session tests. A success envelope alone
-does not prove revocation of cached VLESS credentials or closure of live
-connections.
+Stacked Draft [#810](https://github.com/routegate/RouteGate/pull/810)
+now reserves a unique, immutable **future task ID** for an existing claim
+(schema 165). The database copies Agent identity/generation and configuration
+hashes from the claim, but **does not create an Agent job, send anything,
+authenticate an Agent receipt or make the reserved ID dispatchable**.
+Even a successful schema-165 reservation is not proof of execution.
+
+Further review must still bind this reserved ID to an authenticated Agent
+envelope and verified task receipt, prevent redelivery after lost replies,
+match the exact operation/configuration digests, and prove real client/session
+effects. A 200 from the legacy #746 endpoint alone cannot prove that a
+schema-165 reservation succeeded remotely or that cached VLESS credentials
+were revoked.
 
 The readback service intentionally provides **no** `CanRetry`, `Send`,
 `ConfirmSuccess`, `Resolve` or `Unlock` API. No operator-facing route is

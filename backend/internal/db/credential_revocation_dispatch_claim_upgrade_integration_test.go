@@ -68,10 +68,10 @@ func TestCredentialRevocationUpgrade162ToLatestDoesNotClaimExistingConfirmation(
     (SELECT count(*) FROM vpn_credential_revocation_dispatch_claims),
     (SELECT count(*) FROM agent_operation_jobs WHERE server_id=$1::uuid),
     (SELECT count(*) FROM schema_migrations WHERE version IN
-      ('000161_credential_revocation_preparations','000162_credential_revocation_confirmations','000163_credential_revocation_dispatch_claims','000164_credential_revocation_dispatch_lock_order'))
+      ('000161_credential_revocation_preparations','000162_credential_revocation_confirmations','000163_credential_revocation_dispatch_claims','000164_credential_revocation_dispatch_lock_order','000165_credential_revocation_task_identity'))
   `,server).Scan(&confirmations,&claims,&jobs,&versions);err!=nil{t.Fatal(err)}
   if state!="prepared"||!recorded.Equal(confirmationAt)||display!="Original VPN account"||
-    confirmations!=1||claims!=0||jobs!=0||versions!=4{
+    confirmations!=1||claims!=0||jobs!=0||versions!=5{
    t.Fatalf("upgrade changed existing data: state=%s time=%s display=%s confirmations=%d claims=%d jobs=%d versions=%d",
     state,recorded,display,confirmations,claims,jobs,versions)
   }
