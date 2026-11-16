@@ -306,6 +306,14 @@ func TestCredentialRevocationSeesJobCommittedWhileAdmissionWaits(t *testing.T) {
 func TestCredentialRevocationDowngradePreservesHistory(t *testing.T) {
 	ctx, pool, in, _, done := removalPreparationFixture(t)
 	defer done()
+	// Schema 165 has a foreign key to schema-163 claims. Drop the *empty*
+	// identity table first; the guarded down migration will refuse to erase
+	// any reserved identity. The test has never prepared or dispatched one.
+	identityDown, err := os.ReadFile("../../migrations/000165_credential_revocation_task_identity.down.sql")
+	if err != nil { t.Fatal(err) }
+	if _, err = pool.Exec(ctx, string(identityDown)); err != nil {
+		t.Fatalf("drop empty 165 before earlier downgrade: %v", err)
+	}
 	// Remove the empty dependent schema 163 before the 162→161 downgrade.
 	dispatchDown, err := os.ReadFile("../../migrations/000163_credential_revocation_dispatch_claims.down.sql")
 	if err != nil { t.Fatal(err) }
