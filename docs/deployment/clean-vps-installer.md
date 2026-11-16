@@ -158,6 +158,17 @@ these two sidecars alongside the bundle for disposable CI; arbitrary
 custom bundle URLs cannot enable Grafana. Verified published installations
 use exact-tag release assets.
 
+When adding or retrying Grafana on a **completed** RouteGate host,
+the installer rechecks the active APT repository trust boundary **before**
+running a new Grafana package installation. An unapproved third-party APT
+source blocks the add-on until the operator resolves it. Healthy
+core-only reruns and verification of **already managed** Grafana remain
+non-mutating and do not require the original clean-host APT sources; no
+package operation is started on those idempotency paths. A failed prior
+Grafana add-on may leave package/repository artifacts that require
+reviewed recovery; the installer never silently takes over a foreign
+Grafana package or repository.
+
 If the core platform is interrupted, both its release tag/SHA-256
 and its saved `GRAFANA_REQUESTED=0|1` choice are immutable for retry.
 If selected Grafana fails **after core completion**, core remains
