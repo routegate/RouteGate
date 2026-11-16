@@ -12,34 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func prepareClaimForIdentityTests(t *testing.T) (
-	*revocations.AuthorizedTaskIdentityReservation,
-	revocations.ReserveTaskIdentityInput,
-	string, string,
-	func(),
-) {
-	t.Helper()
-	ctx,pool,in,_,done:=removalPreparationFixture(t)
-	user:=dispatchReviewUser()
-	authCtx:=auth.ContextWithUser(ctx,user)
-	in.Actor=""
-	prepared,err:=revocations.NewAuthorizedPreparation(revocations.NewService(pool)).Prepare(authCtx,in,true)
-	if err!=nil { done();t.Fatal(err) }
-	var hash string
-	if err=pool.QueryRow(ctx,`SELECT candidate_hash FROM vpn_credential_revocations WHERE id=$1::uuid`,prepared.ID).Scan(&hash);err!=nil { done();t.Fatal(err) }
-	if _,err=revocations.NewAuthorizedConfirmation(pool).Confirm(authCtx,revocations.ConfirmInput{
-		OperationID:prepared.ID,ExpectedCandidateHash:hash,SharedProcessRestartAcknowledged:true,
-	});err!=nil { done();t.Fatal(err) }
-	claim,err:=revocations.NewAuthorizedDispatchClaim(pool).Claim(authCtx,revocations.DispatchClaimInput{
-		OperationID:prepared.ID,ExpectedCandidateHash:hash,ExplicitExecutionApproval:true,
-	})
-	if err!=nil { done();t.Fatal(err) }
-	return revocations.NewAuthorizedTaskIdentityReservation(pool),
-		revocations.ReserveTaskIdentityInput{
-			OperationID:prepared.ID,ClaimID:claim.ID,ExpectedCandidateHash:hash,
-		},in.ServerID,user.ID,done
-}
-
 // Two callers must never receive two task identities for a claim, even when
 // they start at once. No response authorizes a transport send or Agent job.
 func TestCredentialRemovalTaskIdentityOnePerClaimAndImmutable(t *testing.T) {
