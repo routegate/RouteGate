@@ -42,3 +42,16 @@ test('public site explains release status in both supported languages', () => {
     assert.match(content, /commandButton: 'Unavailable'/)
   }
 })
+
+test('installation is prominent and honest on desktop and mobile', () => {
+  const installPosition = app.indexOf('className="section deployment-section container" id="install"')
+  const productPosition = app.indexOf('className="section product-section container" id="product"')
+  assert.ok(installPosition !== -1 && installPosition < productPosition,
+    'Quick Start must follow hero, not hide after product tour')
+  assert.match(app, /className="nav-install-link" href="#install"/)
+  assert.match(app, /className="hero-install-status"/)
+  assert.match(content, /start: 'Установка RouteGate'/)
+  assert.match(content, /start: 'Install RouteGate'/)
+  assert.match(content, /installStatus: 'v0\.2\.0 готовится к выпуску/)
+  assert.match(content, /installStatus: 'v0\.2\.0 is under review/)
+})
