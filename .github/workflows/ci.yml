@@ -460,6 +460,38 @@ jobs:
       - name: Build website
         run: npm run build
 
+  hybrid-grafana-native-e2e:
+    name: Disposable Hybrid with real Prometheus and Grafana
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            backend/go.sum
+            agent/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install genuine Hybrid, Prometheus and Grafana on one-use Ubuntu (test TLS)
+        env:
+          ROUTEGATE_E2E_GRAFANA: "1"
+        run: bash scripts/hybrid-disposable-installer-e2e.sh
+
   hybrid-native-e2e:
     name: Disposable native Hybrid installer
     runs-on: ubuntu-24.04

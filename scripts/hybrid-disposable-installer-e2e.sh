@@ -17,6 +17,12 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DOMAIN=routegate-hybrid-ci.invalid
 WORK="$RUNNER_TEMP/routegate-hybrid-clean-host-e2e"
 VERSION=ci-hybrid-e2e
+[[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "0" || "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]] ||
+  { echo "Invalid Grafana E2E mode" >&2; exit 2; }
+MONITORING_FLAGS=(--without-prometheus)
+if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
+  MONITORING_FLAGS=(--with-grafana)
+fi
 COMMIT=$(git -C "$ROOT" rev-parse HEAD)
 export ROUTEGATE_E2E_DOMAIN="$DOMAIN" ROUTEGATE_E2E_WORK_DIR="$WORK"
 mkdir -m 0700 "$WORK" "$WORK/bin"
@@ -113,6 +119,28 @@ systemctl reload nginx
 CERTBOT
 chmod 0700 "$WORK/bin/certbot"
 
+if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
+  # Process-local fault injection, strictly limited to the disposable runner.
+  cat >"$WORK/bin/apt-get" <<'APT_SHIM'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "${GITHUB_ACTIONS:-}" == true &&
+      "${ROUTEGATE_E2E_DOMAIN:-}" == routegate-hybrid-ci.invalid &&
+      "${ROUTEGATE_E2E_WORK_DIR:-}" == /home/runner/work/_temp/routegate-hybrid-clean-host-e2e &&
+      -f "$ROUTEGATE_E2E_WORK_DIR/fail-grafana-once" ]]; then
+  for arg in "$@"; do
+    if [[ "$arg" == grafana ]]; then
+      rm -f "$ROUTEGATE_E2E_WORK_DIR/fail-grafana-once"
+      printf '[hybrid-e2e] synthetic Grafana APT failure (once)\n' >&2
+      exit 79
+    fi
+  done
+fi
+exec /usr/bin/apt-get "$@"
+APT_SHIM
+  chmod 0700 "$WORK/bin/apt-get"
+fi
+
 log "Building native exact-commit Manager + Agent + frontend bundle."
 if ! OUTPUT_DIR="$WORK/dist" VERSION="$VERSION" COMMIT="$COMMIT" ARCHITECTURES=amd64 \
   "$ROOT/scripts/build-release-bundle.sh" >"$WORK/build.log" 2>&1; then
@@ -161,7 +189,7 @@ if sudo -n env \
     --domain "$DOMAIN" --email routegate-ci@example.invalid \
     --admin-email routegate-ci@example.invalid --server-name "$DOMAIN" \
     --version "$VERSION" --bundle-file "$BUNDLE" --checksum-file "$CHECKSUM" \
-    --without-prometheus --yes >"$WORK/rejected-acme.stdout" 2>&1; then
+    "${MONITORING_FLAGS[@]}" --yes >"$WORK/rejected-acme.stdout" 2>&1; then
   die "TLS failure injection was ignored by the native installer"
 fi
 grep -Fq 'Installation stopped at stage nginx_tls' "$WORK/rejected-acme.stdout" ||
@@ -182,6 +210,42 @@ PRESERVED_ADMIN_SHA=$(sudo sed -n 's/^ADMIN_PASSWORD=//p' /var/lib/routegate-ins
 log "Interrupted state and secrets preserved; retrying the exact same verified release."
 
 log "Installing all-in-one Hybrid on disposable Ubuntu with test TLS."
+
+if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
+  log "Injecting Grafana install failure AFTER core completion."
+  touch "$WORK/fail-grafana-once"
+  if sudo -n env \
+    "PATH=$WORK/bin:$PATH" "GITHUB_ACTIONS=true" "RUNNER_TEMP=$RUNNER_TEMP" \
+    "ROUTEGATE_E2E_DOMAIN=$DOMAIN" "ROUTEGATE_E2E_WORK_DIR=$WORK" \
+    "NO_PROXY=$NO_PROXY" "no_proxy=$no_proxy" \
+    bash "$ROOT/install.sh" \
+      --domain "$DOMAIN" --email routegate-ci@example.invalid \
+      --admin-email routegate-ci@example.invalid --server-name "$DOMAIN" \
+      --version "$VERSION" --bundle-file "$BUNDLE" --checksum-file "$CHECKSUM" \
+      --with-grafana --yes >"$WORK/rejected-grafana.stdout" 2>&1; then
+    die "Synthetic Grafana failure was ignored"
+  fi
+  [[ ! -e "$WORK/fail-grafana-once" ]] ||
+    die "Synthetic Grafana package failure was not exercised"
+  grep -Fq 'Core RouteGate remains complete, but Grafana failed.' "$WORK/rejected-grafana.stdout" ||
+    die "Grafana failure did not report core survived"
+  if grep -Fq 'RouteGate installation completed successfully.' "$WORK/rejected-grafana.stdout"; then
+    die "Install falsely reported total success before Grafana"
+  fi
+  sudo grep -Fxq 'STATUS=complete' /etc/routegate/install-state.env ||
+    die "Grafana failure damaged core ownership"
+  sudo grep -Fxq 'GRAFANA_REQUESTED=1' /etc/routegate/install-state.env ||
+    die "Grafana failure lost original intent"
+  if sudo grep -Fxq 'GRAFANA_MANAGED=1' /etc/routegate/install-state.env; then
+    die "Grafana failure falsely recorded success"
+  fi
+  for svc in postgresql nginx routegate-manager routegate-agent prometheus; do
+    sudo systemctl is-active --quiet "$svc" || die "Core service $svc died after Grafana failure"
+  done
+  curl -fsS --max-time 10 "https://$DOMAIN/api/admin/health" >/dev/null ||
+    die "Core HTTPS health failed after Grafana rollback"
+  log "Core preserved after failed Grafana; retrying with the same verified release."
+fi
 if ! sudo -n env \
   "PATH=$WORK/bin:$PATH" "GITHUB_ACTIONS=true" "RUNNER_TEMP=$RUNNER_TEMP" \
   "ROUTEGATE_E2E_DOMAIN=$DOMAIN" "ROUTEGATE_E2E_WORK_DIR=$WORK" \
@@ -190,7 +254,7 @@ if ! sudo -n env \
     --domain "$DOMAIN" --email routegate-ci@example.invalid \
     --admin-email routegate-ci@example.invalid --server-name "$DOMAIN" \
     --version "$VERSION" --bundle-file "$BUNDLE" --checksum-file "$CHECKSUM" \
-    --without-prometheus --yes >"$WORK/install.stdout" 2>&1; then
+    "${MONITORING_FLAGS[@]}" --yes >"$WORK/install.stdout" 2>&1; then
   # Installer stdout can contain a first-login bearer token: never display it.
   sudo grep -E 'ERROR at stage|stage=.*ERROR' /var/log/routegate-installer.log |
     sed -E 's@https?://[^[:space:]]+@[redacted-url]@g' >&2 || true
@@ -213,6 +277,83 @@ done
 sudo grep -Fq 'data-theme="dark"' /var/www/routegate/index.html || die "Stale frontend"
 curl -fsS --max-time 10 "https://$DOMAIN/api/admin/health" >/dev/null || die "HTTPS health failed"
 curl -fsS --max-time 10 "https://$DOMAIN/" >/dev/null || die "HTTPS frontend failed"
+
+if [[ "${ROUTEGATE_E2E_GRAFANA:-0}" == "1" ]]; then
+  log "Checking real Grafana package, Prometheus, HTTPS proxy and dashboard provisioning."
+  sudo grep -Fxq 'PROMETHEUS_MANAGED=1' /etc/routegate/install-state.env ||
+    die "Requested Prometheus ownership not persisted"
+  sudo grep -Fxq 'GRAFANA_REQUESTED=1' /etc/routegate/install-state.env ||
+    die "Grafana selection not persisted"
+  sudo grep -Fxq 'GRAFANA_MANAGED=1' /etc/routegate/install-state.env ||
+    die "Grafana installation did not complete"
+  for svc in prometheus grafana-server; do
+    sudo systemctl is-active --quiet "$svc" || die "$svc not active"
+    sudo systemctl is-enabled --quiet "$svc" || die "$svc not enabled"
+  done
+  sudo test -s /root/routegate-grafana-access.txt ||
+    die "Grafana access credentials missing"
+  [[ "$(sudo stat -c '%a' /root/routegate-grafana-access.txt)" == 600 ]] ||
+    die "Grafana access credentials are not root-only"
+  curl -fsS --max-time 15 "https://$DOMAIN/grafana/api/health" >/dev/null ||
+    die "Grafana HTTPS gateway is unhealthy"
+  GRAFANA_PASSWORD=$(sudo sed -n 's/^Initial password: //p' /root/routegate-grafana-access.txt)
+  [[ -n "$GRAFANA_PASSWORD" ]] || die "Grafana initial password unavailable"
+  curl -fsS --max-time 15 -u "admin:$GRAFANA_PASSWORD" \
+    "https://$DOMAIN/grafana/api/datasources/uid/routegate-prometheus" >/dev/null ||
+    die "Grafana Prometheus datasource was not provisioned"
+  curl -fsS --max-time 15 -u "admin:$GRAFANA_PASSWORD" \
+    "https://$DOMAIN/grafana/api/dashboards/uid/routegate-fleet-overview" >/dev/null ||
+    die "Grafana fleet dashboard was not provisioned"
+  unset GRAFANA_PASSWORD
+  log "Restarting Grafana to verify persistent service and HTTPS availability."
+  sudo systemctl restart grafana-server
+  for i in $(seq 1 30); do
+    curl -fsS --max-time 5 "https://$DOMAIN/grafana/api/health" >/dev/null 2>&1 && break
+    sleep 1
+  done
+  curl -fsS --max-time 5 "https://$DOMAIN/grafana/api/health" >/dev/null ||
+    die "Grafana did not recover after restart"
+  log "Re-running completed installation with Grafana enabled to prove idempotency."
+  # Fingerprints only; never print the first-login or Grafana credentials.
+  CORE_STATE_SHA=$(sudo sha256sum /etc/routegate/install-state.env | awk '{print $1}')
+  FIRST_LOGIN_SHA=$(sudo sha256sum /root/routegate-first-login.txt | awk '{print $1}')
+  GRAFANA_ACCESS_SHA=$(sudo sha256sum /root/routegate-grafana-access.txt | awk '{print $1}')
+  if ! sudo -n env \
+    "PATH=$WORK/bin:$PATH" "GITHUB_ACTIONS=true" "RUNNER_TEMP=$RUNNER_TEMP" \
+    "ROUTEGATE_E2E_DOMAIN=$DOMAIN" "ROUTEGATE_E2E_WORK_DIR=$WORK" \
+    "NO_PROXY=$NO_PROXY" "no_proxy=$no_proxy" \
+    bash "$ROOT/install.sh" \
+      --domain "$DOMAIN" --email routegate-ci@example.invalid \
+      --admin-email routegate-ci@example.invalid --server-name "$DOMAIN" \
+      --version "$VERSION" --bundle-file "$BUNDLE" --checksum-file "$CHECKSUM" \
+      --with-grafana --yes >"$WORK/grafana-rerun.stdout" 2>&1; then
+    # Explicitly print only diagnostic stage/error lines. Never expose the
+    # private initial admin setup URL, Grafana password, or full stdout.
+    grep -E 'ERROR at stage|ERROR:|WARNING:' "$WORK/grafana-rerun.stdout" >&2 || true
+    die "Completed RouteGate+Grafana installation was not idempotent"
+  fi
+  grep -Fq 'RouteGate is already installed and healthy.' "$WORK/grafana-rerun.stdout" ||
+    die "Completed install did not use the idempotent core verification path"
+  grep -Fq 'Grafana is already installed and healthy.' "$WORK/grafana-rerun.stdout" ||
+    die "Repeated Grafana install did not use the idempotent monitoring verification path"
+  [[ "$CORE_STATE_SHA" == "$(sudo sha256sum /etc/routegate/install-state.env | awk '{print $1}')" ]] ||
+    die "Idempotent retry unexpectedly rewrote RouteGate ownership"
+  [[ "$FIRST_LOGIN_SHA" == "$(sudo sha256sum /root/routegate-first-login.txt | awk '{print $1}')" ]] ||
+    die "Idempotent retry unexpectedly rotated first-login credentials"
+  [[ "$GRAFANA_ACCESS_SHA" == "$(sudo sha256sum /root/routegate-grafana-access.txt | awk '{print $1}')" ]] ||
+    die "Idempotent retry unexpectedly rotated Grafana initial credentials"
+  for svc in postgresql nginx routegate-manager routegate-agent prometheus grafana-server; do
+    sudo systemctl is-active --quiet "$svc" ||
+      die "Idempotent retry left $svc unhealthy"
+  done
+  curl -fsS --max-time 10 "https://$DOMAIN/grafana/api/health" >/dev/null ||
+    die "Idempotent retry broke Grafana HTTPS"
+  unset CORE_STATE_SHA FIRST_LOGIN_SHA GRAFANA_ACCESS_SHA
+  log "PASS: completed RouteGate/Grafana re-run was idempotent; ownership and credentials unchanged."
+  log "PASS: real Hybrid + Prometheus + Grafana installed in same run; HTTPS, datasource, dashboard, restart healthy."
+  log "OUT OF SCOPE: public Let's Encrypt, real external VPN client, physical reboot."
+  exit 0
+fi
 
 # Completed installs deliberately remove transient secrets.env. Retrieve the
 # owner-only recovery password instead, then prove the temporary secret is gone.
