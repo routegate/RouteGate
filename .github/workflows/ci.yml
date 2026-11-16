@@ -46,9 +46,6 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Run tests
-        run: go test ./...
-
       - name: Verify real Manager PostgreSQL removal candidate against independent Agent executor
         run: |
           set -euo pipefail
@@ -60,6 +57,9 @@ jobs:
           (cd ../agent && ROUTEGATE_TEST_REMOVAL_CONTRACT_FIXTURE="$fixture" \
             go test ./internal/tasks -run '^TestCredentialRemovalManagerPreparedContract$' -count=1 -timeout=120s)
           # Private synthetic Reality credentials never leave the temporary file.
+
+      - name: Run tests
+        run: go test ./...
 
       - name: Verify RG-140 recovery authorization policy and bound challenge under race detector
         run: go test -race ./internal/auth ./internal/recoveryauth -run '^(TestRuntimeRecovery|TestRecoveryChallenge)' -count=1 -timeout=120s -v
