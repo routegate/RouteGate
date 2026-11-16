@@ -11,7 +11,6 @@ import {
   publishedStableInstall,
   publishedStableTag,
   requiredPublishedAssets,
-  stableReleaseApi,
   stableReleaseSnapshotUrl,
 } from '../src/release.ts'
 
@@ -94,7 +93,6 @@ test('verified website release contract stays aligned with the GitHub release up
 })
 
 test('copied install command is one shell line, exact-tag pinned and checks before sudo', () => {
-  assert.equal(stableReleaseApi, 'https://api.github.com/repos/routegate/RouteGate/releases/latest')
   assert.equal(stableReleaseSnapshotUrl, '/quickstart-release.json')
   const command = buildInstallCommand('v1.2.3', 'a'.repeat(64))
   assert.ok(command.startsWith('( f=$(mktemp) && trap '))
@@ -292,6 +290,8 @@ test('site does not quietly fall back to a hardcoded obsolete tag', () => {
   assert.match(app, /publishedStableTag\(payload\)/)
   assert.match(app, /publishedStableInstall\(payload\)/)
   assert.match(app, /fetch\(stableReleaseSnapshotUrl/)
+  assert.ok(!app.includes('stableReleaseApi'), 'browser must not bypass revoked Pages snapshot')
+  assert.ok(!app.includes('api.github.com'), 'browser must never fetch latest directly from API')
   const pages = readFileSync(new URL('../../.github/workflows/pages.yml', import.meta.url), 'utf8')
   assert.match(pages, /types: \[published, unpublished, deleted, edited\]/)
   assert.match(pages, /scripts\/generate-release-snapshot\.mjs/)
