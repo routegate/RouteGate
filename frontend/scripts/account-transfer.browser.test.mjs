@@ -171,3 +171,59 @@ for (const width of [390, 1440]) test(`account deletion is blocked until an RG-1
     await page.close();
   }
 });
+
+for (const width of [390, 1440]) test(`reserved node explains which other transfer blocks changes (${width}px)`, async () => {
+  const page = await browser.newPage({ viewport: { width, height: 960 } });
+  const errors = [], writes = [];
+  const stamp = new Date().toISOString();
+  const account = { id: 'unrelated', displayName: 'Another account', status: 'active', serverId: 'source', createdAt: stamp, updatedAt: stamp };
+  const servers = [{ id: 'source', name: 'Source node', status: 'active' }, { id: 'target', name: 'Target node', status: 'active' }];
+  let blocker = { accountId: 'owner', state: 'target_applying', sourceServerId: 'source', targetServerId: 'target', updatedAt: stamp };
+  page.on('pageerror', e => errors.push(e.message));
+  await page.addInitScript(() => {
+    localStorage.setItem('routegate.locale', 'en');
+    localStorage.setItem('routegate.auth.token', 'fixture');
+  });
+  await page.route(url => url.pathname.startsWith('/api/'), async route => {
+    const path = new URL(route.request().url()).pathname, method = route.request().method();
+    const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    if (method !== 'GET') writes.push({ path, method });
+    if (path === '/api/admin/health') return json({ status: 'ok' });
+    if (path === '/api/admin/me') return json({ user: { id: 'admin', roles: ['super_admin'] } });
+    if (path === '/api/v1/servers') return json({ items: servers });
+    if (path === '/api/v1/vpn-accounts') return json({ items: [account], total: 1, page: 1, pageSize: 50, totalPages: 1 });
+    if (path === '/api/v1/vpn-accounts/unrelated') return json(account);
+    if (path === '/api/v1/vpn-accounts/unrelated/transfer') {
+      return json({ transfer: null, requiresTransfer: true, blockingTransfer: blocker });
+    }
+    if (path.endsWith('/routing-policy')) {
+      return json({
+        routingProfileSource: 'none', currentServerInGroup: false,
+        automaticSelection: false,
+        automaticSelectionPolicy: { enabled: false, allowDegraded: false, cooldownSeconds: 300 },
+        clientRoutingSupported: true,
+      });
+    }
+    if (path === '/api/v1/routing-profiles' || path === '/api/v1/node-groups' || path.endsWith('/devices')) return json({ items: [] });
+    if (path.endsWith('/notes')) return json({ notes: '', updatedAt: stamp });
+    return json({ message: `Unmocked ${method} ${path}` }, 404);
+  });
+  try {
+    await page.goto(`${origin}/vpn-accounts/unrelated/routing`);
+    const workspace = page.locator('.vpn-account-routing-workspace');
+    const warning = workspace.getByRole('alert');
+    await warning.getByText(/reserved by another account's unfinished transfer/).waitFor();
+    const link = warning.getByRole('link', { name: 'Open blocking transfer' });
+    assert.equal(await link.getAttribute('href'), '/vpn-accounts/owner/routing');
+    assert.equal(await workspace.getByRole('combobox').first().isDisabled(), true);
+    assert.equal(await workspace.getByRole('button', { name: 'Prepare transfer' }).isDisabled(), true);
+    assert.deepEqual(writes, []);
+    blocker = null;
+    await page.reload();
+    await workspace.waitFor();
+    await page.waitForFunction(() => !document.querySelector('.vpn-account-routing-workspace [role="alert"]'));
+    assert.equal(await workspace.getByRole('combobox').first().isDisabled(), false);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});

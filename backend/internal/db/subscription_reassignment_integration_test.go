@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"log/slog"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -71,6 +72,30 @@ func TestDeviceSubscriptionSurvivesBidirectionalHybridVPNNodeReassignment(t *tes
 					t.Fatal("device token changed")
 				}
 			}
+			// An unrelated account assigned to either reserved node must be shown
+			// the blocking transfer, without revealing credentials or token data.
+			readTransfer := func(selected string) (transfers.Transfer, *transfers.NodeTransferBlocker, string) {
+				t.Helper()
+				req := httptest.NewRequest(http.MethodGet, "/api/v1/vpn-accounts/"+selected+"/transfer", nil)
+				req.SetPathValue("id", selected)
+				rec := httptest.NewRecorder()
+				transfers.NewHandler(slog.Default(), pool).Latest(rec, req)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("transfer read model status=%d", rec.Code)
+				}
+				var result struct {
+					Transfer        *transfers.Transfer            `json:"transfer"`
+					BlockingTransfer *transfers.NodeTransferBlocker `json:"blockingTransfer"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				var own transfers.Transfer
+				if result.Transfer != nil {
+					own = *result.Transfer
+				}
+				return own, result.BlockingTransfer, rec.Body.String()
+			}
 			svc := transfers.NewServiceWithCheck(pool, func(context.Context, string, int) error { return nil })
 			act := func(tr transfers.Transfer, action string, ack bool) transfers.Transfer {
 				t.Helper()
@@ -88,6 +113,19 @@ func TestDeviceSubscriptionSurvivesBidirectionalHybridVPNNodeReassignment(t *tes
 			tr, err := svc.Start(ctx, account, target, "test-operator")
 			if err != nil {
 				t.Fatal(err)
+			}
+			own, blocker, readBody := readTransfer(other)
+			if blocker == nil || blocker.AccountID != account || blocker.SourceServerID != source ||
+				blocker.TargetServerID != target || blocker.State != tr.State || own.ID != "" {
+				t.Fatal("unrelated account did not receive exact active node reservation evidence")
+			}
+			if strings.Contains(readBody, raw) || strings.Contains(readBody, "tokenHash") ||
+				strings.Contains(readBody, "vlessUuid") || strings.Contains(readBody, "privateKey") {
+				t.Fatal("read-only blocker exposed sensitive subscription or protocol material")
+			}
+			own, blocker, _ = readTransfer(account)
+			if own.ID != tr.ID || blocker != nil {
+				t.Fatal("reserved account must show its own transfer, not an unrelated blocker")
 			}
 			again, e := svc.Start(ctx, account, target, "test-operator")
 			if e != nil || again.ID != tr.ID {
@@ -162,6 +200,10 @@ func TestDeviceSubscriptionSurvivesBidirectionalHybridVPNNodeReassignment(t *tes
 			tr = act(tr, "finish", false)
 			if tr.State != "complete" {
 				t.Fatal(tr.State)
+			}
+			_, blocker, _ = readTransfer(other)
+			if blocker != nil {
+				t.Fatal("completed transfer still shown as a node reservation")
 			}
 			assertServed("203.0.113.20", tc.targetPort, tk)
 			var kept bool
