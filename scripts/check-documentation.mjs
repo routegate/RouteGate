@@ -157,6 +157,77 @@ if (process.argv.includes('--external-inventory')) {
   }
 }
 
+// Review Markdown #fragment destinations separately from path existence.
+// Keep this diagnostic until all historical heading styles are triaged; an
+// inexact slugger must not produce false release-blocking failures.
+if (process.argv.includes('--anchor-inventory')) {
+  const missing = []
+  const cache = new Map()
+  const slug = text => text
+    .replace(/<[^>]+>/g, '')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[\x60*_~]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-')
+  function headings(file) {
+    if (cache.has(file)) return cache.get(file)
+    const ids = new Set(), count = new Map()
+    let code = false
+    for (const line of readFileSync(resolve(root, file), 'utf8').split('\n')) {
+      if (/^\s{0,3}(?:\x60{3,}|~{3,})/.test(line)) { code = !code; continue }
+      if (code) continue
+      const match = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
+      if (match) {
+        const base = slug(match[1]), nth = count.get(base) ?? 0
+        ids.add(base + (nth ? '-' + nth : ''))
+        count.set(base, nth + 1)
+      }
+      for (const m of line.matchAll(/\b(?:id|name)=["']([^"']+)["']/g)) ids.add(m[1])
+    }
+    cache.set(file, ids)
+    return ids
+  }
+  let scanned = 0
+  for (const file of docs.filter(f => /\.mdx?$/i.test(f))) {
+    let fenced = false
+    for (const [idx, line] of readFileSync(resolve(root, file), 'utf8').split('\n').entries()) {
+      if (/^\s{0,3}(?:\x60{3,}|~{3,})/.test(line)) { fenced = !fenced; continue }
+      if (fenced) continue
+      for (const match of line.matchAll(/!?\[[^\]]+\]\((<[^>]+>|[^)\n]+)\)/g)) {
+        const target = match[1].trim().replace(/^<|>$/g, '')
+        if (!target.includes('#')) continue
+        let link = target.split('#')[0], anchor = target.split('#').slice(1).join('#')
+        if (!anchor) continue
+        if (/^https?:/i.test(link)) {
+          const owned = ownedGithubPath(link)
+          if (!owned) continue
+          link = '/' + owned
+        }
+        if (/^[a-z]+:/i.test(link)) continue
+        if (link.startsWith('/')) continue
+        let abs
+        try { abs = resolve(root, dirname(file), decodeURIComponent(link || file.split('/').pop())) }
+        catch { continue }
+        const dest = relative(root, abs).split(sep).join('/')
+        if (!trackedSet.has(dest) || !/\.mdx?$/i.test(dest)) continue
+        scanned++
+        let fragment
+        try { fragment = decodeURIComponent(anchor).toLowerCase() }
+        catch { continue }
+        if (!headings(dest).has(fragment)) missing.push({ file, line: idx + 1, dest, fragment })
+      }
+    }
+  }
+  console.log('[anchor-inventory] checked=' + scanned + ' missing=' + missing.length)
+  for (const item of missing.slice(0, 100)) {
+    console.log('[anchor-inventory] ' + item.file + ':' + item.line +
+      ' -> ' + item.dest + '#' + item.fragment)
+  }
+}
+
 findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
 for (const f of findings) console.error('[docs] ' + f.file + ':' + f.line + ' [' + f.category + '] ' + f.target)
 console.log('[docs] scanned ' + docs.length + ' documents; ' + internalCount + ' local links; ' +
