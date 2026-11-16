@@ -138,11 +138,37 @@ See the task-oriented [first-install guide](../guides/first-install.md).
 
 ### Interactive numbered configuration (current installer candidate)
 
-The new installer presents a **numbered SSH menu** before host mutation:
-main settings (domain and emails), optional RouteGate-managed Prometheus,
-Grafana (which automatically enables Prometheus), an installation plan,
-proceed and cancel. The installer is not a silent `curl | sudo bash` pipe
-and is not considered publicly available while `v0.2.0` remains in review.
+The new installer presents a **numbered SSH menu** on an interactive
+`/dev/tty` before platform mutation:
+
+- `1` — domain, Let's Encrypt contact, administrator email and server name;
+- `2` — toggle RouteGate-managed Prometheus;
+- `3` — select Grafana (which requires managed Prometheus);
+- `4` — review the installation plan;
+- `5` — continue to preflight, confirmation and installation;
+- `0` — cancel before installing anything.
+
+Unattended `--yes` preserves the noninteractive path; explicitly use
+`--with-grafana` to request the add-on. Combining it with
+`--without-prometheus` is rejected. Grafana is offered during initial
+configuration, and its matching `install-grafana.sh` and
+`INSTALLER_SHA256SUMS` are verified **before package and ownership-state
+mutations**. A fully matched local release-candidate bundle may supply
+these two sidecars alongside the bundle for disposable CI; arbitrary
+custom bundle URLs cannot enable Grafana. Verified published installations
+use exact-tag release assets.
+
+If the core platform is interrupted, both its release tag/SHA-256
+and its saved `GRAFANA_REQUESTED=0|1` choice are immutable for retry.
+If selected Grafana fails **after core completion**, core remains
+`STATUS=complete`; the installer exits unsuccessfully without printing
+whole-install success. Retrying Grafana on the same pinned release checks
+core health and does not reinstall Manager, Agent or PostgreSQL.
+For completed hosts, the menu shows `INSTALLED` or `RETRY` when
+appropriate; it does not act as a Grafana uninstall tool.
+
+The installer is not a silent `curl | sudo bash` pipe and is not publicly
+available while `v0.2.0` remains in review.
 
 The public Manager requires a real DNS name and Let's Encrypt HTTPS.
 After installer success, the first administrator uses the one-time `/setup`
@@ -184,6 +210,10 @@ replace public HTTPS and real-VPN-client acceptance on a disposable VPS.
 --server-name NAME     Optional local All-in-One server display name.
 --version VERSION      Exact reviewed release tag; pin it explicitly (avoid the mutable latest selector).
 --verify-bundle        Non-root integrity/compatibility preflight only (candidate installer).
+--with-prometheus     Include RouteGate-managed Prometheus.
+--without-prometheus  Explicitly disable managed Prometheus.
+--with-grafana        Include Grafana within the same verified installation run.
+--without-grafana     Do not install Grafana (default).
 --bundle-file PATH     Local release bundle for controlled E2E/offline staging.
 --checksum-file PATH   Matching SHA256SUMS file for --bundle-file.
 --bundle-url URL       Explicit HTTPS bundle URL.
@@ -200,12 +230,12 @@ or whitespace. A bundle without a matching SHA-256 entry is rejected.
 
 The installer performs these stages in order:
 
-1. Prompts for missing domain/email values and validates arguments, Ubuntu version, architecture, systemd, required base commands, and privileges.
+1. Presents the numbered menu on an interactive terminal (or processes explicit noninteractive arguments); validates the domain, email, component choices, Ubuntu version, architecture, systemd, required commands and privileges.
 2. Enumerates active classic and deb822 APT sources and fails closed unless every active repository is inside the RouteGate-approved repository boundary. This happens before any `apt-get update` or package installation.
 3. Shows which required APT dependencies will be reused and which will be installed.
 4. Detects unowned RouteGate files, active web/database services, or listeners on TCP 80/443 before mutation.
 5. Verifies that the FQDN resolves to an IPv4 address detected for the VPS.
-6. Resolves the requested RouteGate release, downloads the native bundle, verifies `SHA256SUMS`, rejects unsafe archive paths/links, and validates the manifest **before APT installation or RouteGate ownership-state writes**. For a resumed installation, the verified tag and bundle SHA-256 must match the original interrupted state.
+6. Resolves the requested release, verifies the native bundle, `SHA256SUMS`, archive paths and manifest, and — when Grafana is selected — validates its pinned installer against `INSTALLER_SHA256SUMS` **before APT or RouteGate ownership-state writes**. A resumed installation must match the saved tag, bundle SHA-256 and Grafana choice.
 7. Writes root-owned installation state with the resolved release tag and verified bundle SHA-256 (or verifies the existing pinned state before resuming).
 8. Installs required platform APT packages including PostgreSQL, nginx, Certbot, curl, jq, OpenSSL, and Agent bootstrap utilities. Protocol-specific packages are deferred to the Agent runtime installation workflow.
 9. Installs Manager, Agent, migrations, frontend assets, nginx configuration, and systemd units.
@@ -220,7 +250,7 @@ The installer performs these stages in order:
 18. Removes bootstrap administrator values from the Manager environment and restarts Manager.
 19. Writes root-only first-access/recovery information and installs `routegate-recovery`.
 20. Verifies PostgreSQL, nginx, Manager, Agent, HTTPS health, Agent credentials, and local PostgreSQL exposure.
-21. Marks installation state complete and prints the `/setup` next action.
+21. Marks the core installation state complete; if requested, installs and verifies Grafana. Only after all selected components succeed, prints the `/setup` next action. An optional Grafana failure reports a recoverable add-on error while leaving the core complete.
 
 ## First administrator activation
 
@@ -307,8 +337,11 @@ fingerprint or uncertain selector **blocks automatic recovery**.
 Never erase partially installed PostgreSQL data, overwrite the state file or
 bypass the guard to make a retry work. Preserve the root-only state/logs and
 review the original version and artifact identity before manual recovery.
-Same-bundle retries preserve existing installer secrets. After successful
-verification, transient secrets are deleted and state becomes `complete`.
+Same-bundle retries must also preserve the original `GRAFANA_REQUESTED`
+choice. Missing/changed selections fail before package or service mutation.
+After successful core verification, transient secrets are deleted and state
+becomes `complete`. A failed post-core Grafana install can be retried on that
+same pinned version without resetting the core.
 
 When state is `complete`, running the installer again performs health/idempotency checks and exits without reinstalling the platform or rotating credentials.
 
@@ -322,6 +355,12 @@ See [RouteGate Recovery Tool](../operations/recovery-tool.md) for the fixed
 operation allow-list and rollback behavior.
 
 The installer refuses to overwrite partial RouteGate files that do not have valid RouteGate ownership state.
+
+A completed Grafana installation records `GRAFANA_MANAGED=1` for accurate
+idempotency and menu status. `INSTALLED` does not mean the installer's menu
+can uninstall Grafana; `RETRY` means the add-on was requested but not
+successfully managed. The disposable CI scenario uses local test TLS and
+a synthetic domain, **not** a real public Let's Encrypt issuance.
 
 ## Release bundles
 
