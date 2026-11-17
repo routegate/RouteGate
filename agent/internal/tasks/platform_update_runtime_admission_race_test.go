@@ -113,3 +113,36 @@ func TestDetachedUpdateFailedLeaseCompletionRetainsRecoveryFence(t *testing.T) {
 		t.Fatal("Agent admitted mutation despite damaged update recovery evidence")
 	}
 }
+
+func TestPlatformUpdateIdlePreflightAfterCompletedLease(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	if !RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("fresh runtime directory rejected")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("preflight created runtime directory unexpectedly: %v", err)
+	}
+	lease, err := BeginRuntimeMutation(dir,
+		"11111111-1111-4111-8111-111111111111", TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("preflight admitted live update lease")
+	}
+	if err := lease.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("completed update left a permanent false-positive block")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "unexpected-state"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("unknown runtime state must fail closed")
+	}
+}
