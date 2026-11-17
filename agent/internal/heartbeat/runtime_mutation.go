@@ -25,10 +25,14 @@ func (r *Runner) withRuntimeMutation(ctx context.Context, task tasks.ConfigTask,
 		// Dispatching or observing its receipt must not hold a dispatcher
 		// lease which ends before the worker starts.
 		switch task.EffectiveKind() {
-		case tasks.TaskKindDiagnostic, tasks.TaskKindPlatformUpdate:
-			if tasks.RuntimeMutationStatePresent(dir) && task.EffectiveKind() == tasks.TaskKindPlatformUpdate && task.Operation != tasks.PlatformUpdateOperationReconcile {
+		case tasks.TaskKindDiagnostic:
+			return execute(ctx)
+		case tasks.TaskKindPlatformUpdate:
+			if task.Operation != tasks.PlatformUpdateOperationReconcile && !tasks.RuntimeMutationIdleForPlatformUpdate(dir) {
 				return tasks.ErrRuntimeMutationBlocked
 			}
+			// The detached worker independently reserves the shared lease.
+			// A completed legacy mutation leaves the lock directory present.
 			return execute(ctx)
 		case tasks.TaskKindConfigApply, tasks.TaskKindVPNCoreService, tasks.TaskKindVPNCoreInstall, tasks.TaskKindMaintenance:
 			// Legacy mutations must participate in the same atomic admission
