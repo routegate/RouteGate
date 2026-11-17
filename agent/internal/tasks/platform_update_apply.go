@@ -160,7 +160,7 @@ func stagePlatformUpdateWithPreparedReceipt(ctx context.Context, store platformU
 // mutation attempt.
 func PrepareAndStartDetachedPlatformUpdate(ctx context.Context, taskID string, request PlatformUpdateRequest) (PlatformUpdateStagedCandidate, error) {
 	// No safe detached handoff exists for the experimental shared runtime fence.
-	if RuntimeMutationStatePresent(DefaultRuntimeMutationDir) {
+	if !RuntimeMutationIdleForPlatformUpdate(DefaultRuntimeMutationDir) {
 		return PlatformUpdateStagedCandidate{}, fmt.Errorf("%w: %w", ErrPlatformUpdateDispatchAmbiguous, ErrRuntimeMutationBlocked)
 	}
 	if !canonicalTaskIDPattern.MatchString(taskID) {
@@ -233,7 +233,7 @@ func platformUpdateDispatchHasPriorState(taskID string) (bool, error) {
 // monotonically crosses mutation_started before invoking the verified updater.
 func RunPlatformUpdateWorker(taskID string) error {
 	// A previously scheduled worker must check even if dispatch refused.
-	if RuntimeMutationStatePresent(DefaultRuntimeMutationDir) {
+	if !RuntimeMutationIdleForPlatformUpdate(DefaultRuntimeMutationDir) {
 		return ErrRuntimeMutationBlocked
 	}
 	if os.Geteuid() != 0 {
