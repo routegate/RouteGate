@@ -79,6 +79,55 @@ Use the **existing runtime-mutation lock namespace**, not a second lock.
   marker-clearing order before writing the implementation. Unknown
   outcome must remain blocked rather than being treated as success.
 
+## Recovery authorization: required decision matrix (not implemented)
+
+A terminal receipt is **not** an authorization to clear
+`mutation-inflight.json`. Recovery must serialize against new admissions
+using the existing `runtime.lock` and must not add a second lock namespace.
+
+| Receipt / runtime evidence | Recovery decision |
+| --- | --- |
+| `prepared`, no worker, no mutation intent | Reconcile as pre-dispatch failure; never rerun the same task |
+| `mutation_started`, worker still active | Do not clear; continue observing |
+| `mutation_started`, worker absent | Mark `outcome_unknown`; retain the marker |
+| `succeeded`, marker already absent | No recovery needed; no update replay |
+| `succeeded`, marker still present | Require independently verified installed version/runtime health and worker absence; do **not** auto-clear from receipt alone |
+| `failed` or `outcome_unknown` after mutation started | Retain marker pending independent diagnosis and explicitly authorized recovery |
+| Missing, corrupt, mismatched or unsafe marker/receipt | Fail closed; never infer ownership from task ID alone |
+| Probe error, unit still activating, or evidence changing during checks | Fail closed; retry observation, not mutation |
+
+**Proposed clearance protocol, subject to security review:**
+
+1. Obtain an explicitly authorized recovery request bound to the exact
+   task UUID, expected version and node identity. Never accept a generic
+   unlock command or trust the task ID alone.
+2. Under the **existing** exclusive admission lock, validate the owned
+   marker, matching durable receipt, filesystem permissions and the
+   fixed task-specific systemd unit identity. Reject unknown files.
+3. Independently establish that the updater is no longer running and
+   verify the installed release/runtime state, including post-restart
+   service health. A successful receipt by itself is insufficient.
+4. Recheck evidence under the lock immediately before clearance. Only
+   remove the exact verified marker with durable directory sync; do not
+   delete unrelated evidence or reopen a failed/unknown update task.
+5. Audit the authorization, evidence and outcome without exposing
+   credentials. On any uncertainty or I/O failure, preserve the fence.
+
+The current `RuntimeMutation.Complete` intentionally requires a live
+lease owner and is **not** a recovery API. Do not retrofit it into a
+force-unlock path. Build injectable verification and crash-cut tests
+before introducing any production recovery operation.
+
+## Upgrade compatibility gate (not implemented)
+
+An older Agent that never calls `BeginRuntimeMutation` cannot be
+excluded by the new worker's flock. Manager must not dispatch a detached
+update solely because a node reports general Agent connectivity.
+Require explicit compatible Agent capability/version negotiation and
+verify it survives restarts before enabling updates. Mixed-version
+deployments need a documented rollout and rollback procedure; no
+automatic bypass for legacy nodes.
+
 ## Deterministic tests required before enabling
 
 | Interleaving / crash cut | Expected behavior |
