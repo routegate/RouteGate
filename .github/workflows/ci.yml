@@ -100,7 +100,7 @@ jobs:
 
       - name: Reject unsafe RG-140 held-dispatch schema ownership
         run: |
-          go test ./internal/db -run '^TestCredentialRemoval(HeldDispatchOwnerIsolationGate|StartupRefusesOwnerOnlyHeldDispatch)$' -count=1 -timeout=120s -v
+          ROUTEGATE_TEST_HELD_ROLE_REHEARSAL=1 go test ./internal/db -run '^TestCredentialRemoval(HeldDispatchOwnerIsolationGate|StartupRefusesOwnerOnlyHeldDispatch|HeldDispatchSeparateRolesRehearsal)$' -count=1 -timeout=120s -v
 
       - name: Run tests
         run: go test ./...

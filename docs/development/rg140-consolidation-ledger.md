@@ -330,3 +330,14 @@ credentials, nodes or application startup behavior changed.
   disposable PostgreSQL regression proving a schema owner bypasses PUBLIC
   revocation. The check runs before Manager services and is inactive on
   canonical 170 where private held dispatch schema is absent.
+
+
+### Two-login role-isolation rehearsal (no production cutover)
+
+Added a gated disposable PostgreSQL `routegate_ci` test with independent
+schema-owner NOLOGIN and Manager-runtime LOGIN (NOINHERIT / NOCREATEROLE).
+An actual second PG session proves public read with private schema denial,
+forged receipt denial, no SET ROLE to owner, then deliberately grants owner
+membership to prove the startup guard fails even for non-inherited roles.
+The test drops the disposable test schema and roles. Not a production migration
+or replacement runtime connection. Future migration/installer work still NO-GO.

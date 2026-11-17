@@ -90,3 +90,28 @@ object-owner login, and that the guard rejects exactly this unsafe state.
 It then drops the disposable schema and verifies that the guard allows
 startup again. This **does not** provision the separately owned schema,
 grant coordinator authority, execute an Agent job or change production roles.
+
+
+## Disposable independent-login PostgreSQL ACL rehearsal
+
+`TestCredentialRemovalHeldDispatchSeparateRolesRehearsal` runs only when
+`ROUTEGATE_TEST_HELD_ROLE_REHEARSAL=1` **and** the supplied PostgreSQL database
+is the disposable `routegate_ci` with a superuser CI connection. It creates
+an ephemeral NOLOGIN schema owner and a distinct NOINHERIT/NOCREATEROLE
+Manager runtime LOGIN with a random test-only password. The separate
+`pgxpool` connects with that real runtime login, can read a granted public
+`schema_migrations` table, but cannot read, insert or create inside
+`routegate_dispatch`, or `SET ROLE` to the owner. A temporary owner-role
+membership must immediately make the guard reject the runtime even if
+NOINHERIT hides current schema privileges; revocation must restore isolation.
+All disposable namespace and global test roles are explicitly dropped.
+
+The startup boundary also rejects privileged roles (`SUPERUSER`,
+`CREATEROLE`, `CREATEDB`, `BYPASSRLS`), protected-schema owner membership,
+database ownership or CREATE privilege and effective SET ROLE escalation
+(`session_user != current_user`) once the protected namespace exists.
+
+This proves one **necessary ACL prerequisite** using real separate sessions,
+not yet application-wide runtime grants, migration ownership transfer,
+credential cutover or production coordinator isolation. **It changes
+nothing on current installed VPS.**
