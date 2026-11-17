@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"log/slog"
 	"errors"
 	"os"
 	"path/filepath"
@@ -83,5 +84,13 @@ func TestExternalMigrationRejectsShadowedLedgerLookup(t *testing.T) {
 	}
 	if err=RequireAppliedMigrations(ctx,shadow,"../../migrations");err!=nil {
 		t.Fatal("external readiness used shadowed rather than public migration history",err)
+	}
+	// The same pooled connection must not redirect migration ledger writes
+	// or the already-applied lookup to the forged pg_temp table either.
+	if err=Migrate(ctx,shadow,"../../migrations",slog.Default());err!=nil {
+		t.Fatal("migrator used shadowed rather than public migration history",err)
+	}
+	if err=RequireAppliedMigrations(ctx,shadow,"../../migrations");err!=nil {
+		t.Fatal("migration ledger changed after shadowed-session rehearsal",err)
 	}
 }
