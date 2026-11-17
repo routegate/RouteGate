@@ -60,6 +60,11 @@ func (a *App) Start(ctx context.Context) error {
 			return err
 		}
 	case "external":
+		// Reuse the reviewed owner check from #647. Schema readiness alone
+		// must never accept an owner-capable runtime login.
+		if err := db.CheckExternalMigrationRuntimeRole(ctx, pool); err != nil {
+			return err
+		}
 		if err := db.RequireAppliedMigrations(ctx, pool, "migrations"); err != nil {
 			return err
 		}

@@ -54,3 +54,51 @@ func CheckHeldDispatchRuntimeIsolation(ctx context.Context, pool *pgxpool.Pool) 
 	}
 	return nil
 }
+
+// ErrUnsafeExternalMigrationRuntimeRole stops an opt-in external-mode Manager
+// or dedicated migrator before it accepts an owner-capable runtime login.
+var ErrUnsafeExternalMigrationRuntimeRole = errors.New("external migrations require a non-owner, non-privileged Manager runtime database login")
+
+// CheckExternalMigrationRuntimeRole adapts the ownership check already
+// validated in historical Draft #647. Unlike the held-dispatch schema check,
+// it must run even before routegate_dispatch exists: database ownership,
+// public-object ownership or an inheritable/SET ROLE path to them already
+// invalidates the least-privileged runtime boundary. This check is SELECT-only.
+func CheckExternalMigrationRuntimeRole(ctx context.Context, pool *pgxpool.Pool) error {
+	var unsafe bool
+	err := pool.QueryRow(ctx, `SELECT
+		session_user <> current_user
+		OR has_database_privilege(session_user, current_database(), 'CREATE')
+		OR EXISTS (
+			SELECT 1 FROM pg_namespace n
+			WHERE n.nspname = 'public'
+			AND has_schema_privilege(session_user, n.oid, 'CREATE')
+		)
+		OR EXISTS (
+			SELECT 1 FROM pg_roles r
+			WHERE pg_has_role(session_user, r.oid, 'MEMBER')
+			AND (
+				r.rolsuper OR r.rolcreaterole OR r.rolcreatedb
+				OR r.rolreplication OR r.rolbypassrls
+				OR r.oid IN (
+					SELECT datdba FROM pg_database WHERE datname = current_database()
+				)
+				OR r.oid IN (
+					SELECT nspowner FROM pg_namespace
+					WHERE nspname IN ('public', 'routegate_dispatch')
+				)
+				OR r.oid IN (
+					SELECT c.relowner FROM pg_class c
+					JOIN pg_namespace n ON n.oid = c.relnamespace
+					WHERE n.nspname = 'public'
+				)
+			)
+		)`).Scan(&unsafe)
+	if err != nil {
+		return fmt.Errorf("inspect external runtime database authority: %w", err)
+	}
+	if unsafe {
+		return ErrUnsafeExternalMigrationRuntimeRole
+	}
+	return nil
+}

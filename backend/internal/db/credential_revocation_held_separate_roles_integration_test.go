@@ -112,6 +112,12 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);err!=nil {
 		t.Fatal("isolated runtime role was falsely rejected",err)
 	}
+	if err=CheckExternalMigrationRuntimeRole(ctx,login);err!=nil {
+		t.Fatal("non-owner external runtime was rejected",err)
+	}
+	if err=CheckExternalMigrationRuntimeRole(ctx,ownerPool);!errors.Is(err,ErrUnsafeExternalMigrationRuntimeRole) {
+		t.Fatal("external runtime accepted privileged disposable database owner",err)
+	}
 	for _,statement:=range []string{
 		`SELECT count(*) FROM routegate_dispatch.held_removals`,
 		`INSERT INTO routegate_dispatch.held_removals(id) VALUES(1)`,
@@ -132,11 +138,17 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);!errors.Is(err,ErrUnsafeHeldDispatchRuntimeRole) {
 		t.Fatal("runtime role membership gave a SET ROLE escalation path",err)
 	}
+	if err=CheckExternalMigrationRuntimeRole(ctx,login);!errors.Is(err,ErrUnsafeExternalMigrationRuntimeRole) {
+		t.Fatal("external runtime accepted private-owner SET ROLE membership",err)
+	}
 	if _,err=ownerPool.Exec(ctx,`REVOKE rg140_test_dispatch_owner FROM rg140_test_manager_runtime`);err!=nil {
 		t.Fatal("could not remove simulated privileged membership",err)
 	}
 	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);err!=nil {
 		t.Fatal("runtime role did not return to isolated state",err)
+	}
+	if err=CheckExternalMigrationRuntimeRole(ctx,login);err!=nil {
+		t.Fatal("external runtime did not recover after role membership revocation",err)
 	}
 	// A future runtime database login must not be promoted to a powerful
 	// database administrator even without explicit schema ownership.
@@ -144,13 +156,22 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);!errors.Is(err,ErrUnsafeHeldDispatchRuntimeRole) {
 		t.Fatal("CREATEDB runtime credential escaped the security boundary",err)
 	}
+	if err=CheckExternalMigrationRuntimeRole(ctx,login);!errors.Is(err,ErrUnsafeExternalMigrationRuntimeRole) {
+		t.Fatal("external runtime accepted CREATEDB role",err)
+	}
 	if _,err=ownerPool.Exec(ctx,`ALTER ROLE rg140_test_manager_runtime NOCREATEDB`);err!=nil {t.Fatal(err)}
 	if _,err=ownerPool.Exec(ctx,`GRANT CREATE ON DATABASE routegate_ci TO rg140_test_manager_runtime`);err!=nil {t.Fatal(err)}
 	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);!errors.Is(err,ErrUnsafeHeldDispatchRuntimeRole) {
 		t.Fatal("database CREATE grant escaped the security boundary",err)
 	}
+	if err=CheckExternalMigrationRuntimeRole(ctx,login);!errors.Is(err,ErrUnsafeExternalMigrationRuntimeRole) {
+		t.Fatal("external runtime accepted database CREATE grant",err)
+	}
 	if _,err=ownerPool.Exec(ctx,`REVOKE CREATE ON DATABASE routegate_ci FROM rg140_test_manager_runtime`);err!=nil {t.Fatal(err)}
 	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);err!=nil {
 		t.Fatal("least-privileged role did not recover after administrator grants removed",err)
+	}
+	if err=CheckExternalMigrationRuntimeRole(ctx,login);err!=nil {
+		t.Fatal("external runtime did not recover after privileged grants removed",err)
 	}
 }

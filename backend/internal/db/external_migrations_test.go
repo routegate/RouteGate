@@ -34,6 +34,11 @@ func TestExternalMigrationURLSeparation(t *testing.T) {
 func TestExternalMigrationReadOnlySchemaPreflight(t *testing.T) {
 	ctx,pool,done:=setupAppliedSettingsTest(t)
 	defer done()
+	// The ordinary migration test pool owns the disposable database: an
+	// external-mode Manager must refuse it even when dispatch SQL is absent.
+	if err:=CheckExternalMigrationRuntimeRole(ctx,pool);!errors.Is(err,ErrUnsafeExternalMigrationRuntimeRole) {
+		t.Fatal("external role preflight accepted ordinary database owner",err)
+	}
 	if err:=RequireAppliedMigrations(ctx,pool,"../../migrations");err!=nil {
 		t.Fatal("fully migrated schema failed read-only inspection",err)
 	}

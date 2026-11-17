@@ -153,3 +153,27 @@ two-login rehearsal also grants and removes `CREATEDB` and database
 Partial CI schema setup is cleaned even if a multi-statement grant fails.
 The source-only migrator treats context cancellation as failure, never as
 successful completion.
+
+## External-mode runtime owner check reused from historical Draft #647
+
+The current schema 170 has no private held-dispatch schema. Checking only
+`routegate_dispatch` would therefore allow a separate source-only migrator
+to report success even if Manager still owns its database or public tables.
+Canonical #812 now adapts the previously reviewed `CheckRuntimeOwnership`
+preflight from [historical Draft #647](https://github.com/routegate/RouteGate/pull/647)
+into the single `CheckExternalMigrationRuntimeRole` helper. Both explicit
+Manager `external` mode and the source-only migrator call that same
+SELECT-only gate. It refuses owner-capable membership (including
+`NOINHERIT` / `SET ROLE`), elevated PostgreSQL role attributes, database or
+public-schema `CREATE` grants, database/public-object ownership and active
+role switching **even when the protected schema does not yet exist**.
+
+The existing future-schema-specific held-dispatch guard remains in place;
+ordinary `startup` mode and installed credentials are intentionally
+unchanged. The previously tested but unmerged runtime DML-grant policy
+([#639](https://github.com/routegate/RouteGate/pull/639) and
+[#652](https://github.com/routegate/RouteGate/pull/652)) remains a separate
+review source, not duplicated or silently incorporated in this change.
+Neither this guard nor a green migration-readiness check provisions runtime
+DML grants, validates a complete Manager deployment, authorizes held
+dispatch, or permits a production role switch.

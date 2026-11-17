@@ -44,6 +44,9 @@ func run(parent context.Context,logger *slog.Logger) error {
 	if err=owner.QueryRow(ctx,`SELECT pg_has_role($1::name,$2::name,'MEMBER')`,
 		runtimeUser,ownerUser).Scan(&member);err!=nil {return err}
 	if member {return db.ErrUnseparatedMigrationCredentials}
+	// The private dispatch schema does not exist at the current schema head.
+	// Reject pre-existing owner authority even before it is introduced.
+	if err=db.CheckExternalMigrationRuntimeRole(ctx,runtime);err!=nil {return err}
 	if err=db.CheckHeldDispatchRuntimeIsolation(ctx,runtime);err!=nil {return err}
 	if err=db.Migrate(ctx,owner,"migrations",logger);err!=nil {return err}
 	if err=db.CheckHeldDispatchRuntimeIsolation(ctx,runtime);err!=nil {return err}
