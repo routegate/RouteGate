@@ -88,3 +88,51 @@ func TestLegacyServiceDispatchBlockedByDetachedWorker(t *testing.T) {
 		t.Fatalf("blocked legacy dispatch calls=%d results=%d", adapter.calls, results.Load())
 	}
 }
+
+func TestLegacyPlatformUpdateDispatchAfterCompletedMutation(t *testing.T) {
+	r, _, _ := fencedRunnerFixture(t, tasks.TaskKindPlatformUpdate, 204)
+	r.cfg.ExperimentalRuntimeMutationFencing = false
+	r.runtimeMutationManagerReady = false
+	lease, err := tasks.BeginRuntimeMutation(r.runtimeMutationDir,
+		"44444444-4444-4444-8444-444444444444", tasks.TaskKindVPNCoreService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	task := tasks.ConfigTask{ID: fencedTaskID, Kind: tasks.TaskKindPlatformUpdate, Operation: tasks.PlatformUpdateOperationDispatch}
+	if err := r.withRuntimeMutation(context.Background(), task, func(context.Context) error {
+		called = true
+		return nil
+	}); err != nil {
+		t.Fatalf("completed legacy mutation blocked later update dispatch: %v", err)
+	}
+	if !called {
+		t.Fatal("legacy update dispatcher was not invoked")
+	}
+}
+
+func TestLegacyPlatformUpdateDispatchBlockedByUnresolvedMutation(t *testing.T) {
+	r, _, _ := fencedRunnerFixture(t, tasks.TaskKindPlatformUpdate, 204)
+	r.cfg.ExperimentalRuntimeMutationFencing = false
+	r.runtimeMutationManagerReady = false
+	lease, err := tasks.BeginRuntimeMutation(r.runtimeMutationDir,
+		"44444444-4444-4444-8444-444444444444", tasks.TaskKindVPNCoreService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Close()
+	called := false
+	task := tasks.ConfigTask{ID: fencedTaskID, Kind: tasks.TaskKindPlatformUpdate, Operation: tasks.PlatformUpdateOperationDispatch}
+	if err := r.withRuntimeMutation(context.Background(), task, func(context.Context) error {
+		called = true
+		return nil
+	}); err == nil || called {
+		t.Fatal("legacy update dispatch bypassed unresolved mutation")
+	}
+}
