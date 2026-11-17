@@ -26,7 +26,7 @@ for number, line in enumerate(lines[jobs_headers[0] + 1:], start=jobs_headers[0]
             sys.exit(f"duplicate CI job {name!r} at lines {jobs[name]} and {number}")
         jobs[name] = number
 
-expected = {"backend", "agent", "installer", "frontend", "website"}
+expected = {"backend", "agent", "installer", "remote-node-bootstrap", "frontend", "website"}
 missing = expected - jobs.keys()
 if missing:
     sys.exit(f"missing CI jobs: {', '.join(sorted(missing))}")
