@@ -88,13 +88,21 @@ class API:
 
     def wait_job(self, path, expected="succeeded", timeout=240):
         deadline = time.monotonic() + timeout
+        last_status = "not_observed"
         while time.monotonic() < deadline:
             job = self.call("GET", path)
-            if job["status"] in ("succeeded", "failed"):
-                require(job["status"] == expected, f"Job ended {job['status']}; expected {expected}")
+            status = job.get("status")
+            # Print only a fixed, non-sensitive status label on timeout.
+            # Never include the job payload, response, IDs or credentials.
+            last_status = status if status in ("pending", "queued", "in_progress", "running",
+                                                "succeeded", "failed") else "unrecognized"
+            if status in ("succeeded", "failed"):
+                require(status == expected, f"Job ended {status}; expected {expected}")
                 return job
             time.sleep(1)
-        raise RuntimeError("Agent job exceeded its time budget")
+        marker = Path("/var/lib/routegate-agent/runtime-mutations/mutation-inflight.json")
+        admission = "intent_present" if marker.exists() else "no_intent_file"
+        raise RuntimeError(f"Agent job exceeded its time budget (status={last_status}, admission={admission})")
 
 
 def run(*args):
