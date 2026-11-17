@@ -177,3 +177,10 @@ review source, not duplicated or silently incorporated in this change.
 Neither this guard nor a green migration-readiness check provisions runtime
 DML grants, validates a complete Manager deployment, authorizes held
 dispatch, or permits a production role switch.
+
+// Read-only readiness must select `public.schema_migrations` explicitly,
+// matching historical #647's reviewed implementation. An unqualified lookup
+// may be redirected by the connection search path (including `pg_temp`).
+// `TestExternalMigrationRejectsShadowedLedgerLookup` verifies the real
+// applied manifest is used even with a shadowing temporary table; the test
+// changes only a disposable PostgreSQL session.

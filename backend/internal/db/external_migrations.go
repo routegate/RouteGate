@@ -49,7 +49,7 @@ func RequireAppliedMigrations(ctx context.Context,pool *pgxpool.Pool,migrationsD
 	for _,file:=range files {
 		wanted[strings.TrimSuffix(filepath.Base(file),".up.sql")]=struct{}{}
 	}
-	rows,err:=pool.Query(ctx,`SELECT version FROM schema_migrations`)
+	rows,err:=pool.Query(ctx,`SELECT version FROM public.schema_migrations`)
 	if err!=nil {return fmt.Errorf("%w: cannot read migration history: %v",ErrExternalMigrationIncomplete,err)}
 	defer rows.Close()
 	seen:=make(map[string]struct{},len(files))

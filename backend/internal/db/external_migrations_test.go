@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestExternalMigrationURLSeparation(t *testing.T) {
@@ -51,5 +54,33 @@ func TestExternalMigrationReadOnlySchemaPreflight(t *testing.T) {
 	}
 	if err:=RequireAppliedMigrations(ctx,pool,t.TempDir());!errors.Is(err,ErrExternalMigrationIncomplete){
 		t.Fatal("empty migration directory unexpectedly permitted",err)
+	}
+}
+
+// PostgreSQL resolves unqualified table names using search_path and may put
+// pg_temp before public. An opt-in external runtime must inspect the real
+// migration ledger even if a connection has a shadowing temporary table.
+func TestExternalMigrationRejectsShadowedLedgerLookup(t *testing.T) {
+	ctx,pool,done:=setupAppliedSettingsTest(t)
+	defer done()
+	cfg:=pool.Config()
+	cfg.MinConns=0
+	cfg.MaxConns=1
+	cfg.AfterConnect=func(ctx context.Context,conn *pgx.Conn) error {
+		if _,err:=conn.Exec(ctx,`CREATE TEMP TABLE schema_migrations (version text)`);err!=nil {
+			return err
+		}
+		_,err:=conn.Exec(ctx,`INSERT INTO schema_migrations(version) VALUES ('forged_temporary_history')`)
+		return err
+	}
+	shadow,err:=pgxpool.NewWithConfig(ctx,cfg)
+	if err!=nil {t.Fatal(err)}
+	defer shadow.Close()
+	var forged string
+	if err=shadow.QueryRow(ctx,`SELECT version FROM schema_migrations`).Scan(&forged);err!=nil || forged!="forged_temporary_history" {
+		t.Fatal("temporary migration ledger did not shadow the search path",err)
+	}
+	if err=RequireAppliedMigrations(ctx,shadow,"../../migrations");err!=nil {
+		t.Fatal("external readiness used shadowed rather than public migration history",err)
 	}
 }
