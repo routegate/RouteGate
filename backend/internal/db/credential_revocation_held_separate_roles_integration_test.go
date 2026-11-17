@@ -174,4 +174,37 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	if err=CheckExternalMigrationRuntimeRole(ctx,login);err!=nil {
 		t.Fatal("external runtime did not recover after privileged grants removed",err)
 	}
+	// The private-schema guard must reuse the external owner/role policy:
+	// PostgreSQL REPLICATION is unacceptable even without schema USAGE.
+	if _,err=ownerPool.Exec(ctx,`ALTER ROLE rg140_test_manager_runtime REPLICATION`);err!=nil {t.Fatal(err)}
+	if err=CheckExternalMigrationRuntimeRole(ctx,login);!errors.Is(err,ErrUnsafeExternalMigrationRuntimeRole) {
+		t.Fatal("external runtime accepted REPLICATION authority",err)
+	}
+	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);!errors.Is(err,ErrUnsafeHeldDispatchRuntimeRole) {
+		t.Fatal("held runtime accepted REPLICATION authority",err)
+	}
+	if _,err=ownerPool.Exec(ctx,`ALTER ROLE rg140_test_manager_runtime NOREPLICATION`);err!=nil {t.Fatal(err)}
+	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);err!=nil {
+		t.Fatal("held role failed to recover after REPLICATION was removed",err)
+	}
+	// Ownership of an ordinary public relation is also a dangerous
+	// privileged-runtime escape hatch, even for an otherwise restricted login.
+	const publicCanary="rg140_held_public_owner_canary"
+	if _,err=ownerPool.Exec(ctx,`CREATE TABLE public.rg140_held_public_owner_canary(id integer)`);err!=nil {t.Fatal(err)}
+	defer func(){
+		cleanup,cancel:=context.WithTimeout(context.Background(),10*time.Second)
+		defer cancel()
+		_,_=ownerPool.Exec(cleanup,`DROP TABLE IF EXISTS public.rg140_held_public_owner_canary`)
+	}()
+	if _,err=ownerPool.Exec(ctx,`ALTER TABLE public.rg140_held_public_owner_canary OWNER TO rg140_test_manager_runtime`);err!=nil {t.Fatal(err)}
+	if err=CheckExternalMigrationRuntimeRole(ctx,login);!errors.Is(err,ErrUnsafeExternalMigrationRuntimeRole) {
+		t.Fatal("external runtime accepted public-table ownership",err)
+	}
+	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);!errors.Is(err,ErrUnsafeHeldDispatchRuntimeRole) {
+		t.Fatal("held runtime accepted public-table ownership",err)
+	}
+	if _,err=ownerPool.Exec(ctx,`DROP TABLE public.`+publicCanary);err!=nil {t.Fatal(err)}
+	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);err!=nil {
+		t.Fatal("held role failed to recover after public ownership was removed",err)
+	}
 }
