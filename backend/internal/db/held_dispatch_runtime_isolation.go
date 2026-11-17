@@ -27,29 +27,25 @@ func CheckHeldDispatchRuntimeIsolation(ctx context.Context, pool *pgxpool.Pool) 
 	if !exists {
 		return nil
 	}
-	// Ownership is not the only privilege escalation route: NOINHERIT
-	// membership may still permit SET ROLE to the schema owner, and a
-	// superuser/CREATEROLE login could grant itself access later.
-	// Evaluate all these properties using the *runtime* connection.
-	var ownerOrMember, schemaAccess, powerfulRole, databaseOwner, databaseCreate, switchedRole bool
-	err:=pool.QueryRow(ctx,`SELECT
-		n.nspowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)
-			OR pg_has_role(current_user,n.nspowner,'MEMBER'),
-		has_schema_privilege(current_user,n.oid,'USAGE')
-			OR has_schema_privilege(current_user,n.oid,'CREATE'),
-		(SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls
-		 FROM pg_roles WHERE rolname=current_user),
-		(SELECT datdba=(SELECT oid FROM pg_roles WHERE rolname=current_user)
-		 FROM pg_database WHERE datname=current_database()),
-		has_database_privilege(current_user,current_database(),'CREATE'),
-		session_user<>current_user
-		FROM pg_namespace n WHERE n.nspname='routegate_dispatch'
-	`).Scan(&ownerOrMember,&schemaAccess,&powerfulRole,&databaseOwner,&databaseCreate,&switchedRole)
-	if err!=nil {
-		return fmt.Errorf("verify held-removal dispatch namespace: %w",err)
+	// A private schema is only safe when the ordinary runtime also passes the
+	// shared external-role ownership/administrative-authority boundary.
+	// Reuse that check rather than maintaining a weaker second role policy.
+	if err := CheckExternalMigrationRuntimeRole(ctx, pool); err != nil {
+		if errors.Is(err, ErrUnsafeExternalMigrationRuntimeRole) {
+			return ErrUnsafeHeldDispatchRuntimeRole
+		}
+		return fmt.Errorf("verify held-removal dispatch runtime authority: %w", err)
 	}
-	if ownerOrMember || schemaAccess || powerfulRole || databaseOwner ||
-		databaseCreate || switchedRole {
+	// A non-member can still receive USAGE or CREATE by an explicit grant
+	// (including PUBLIC). Keep the private-schema ACL check independent.
+	var schemaAccess bool
+	if err := pool.QueryRow(ctx, `SELECT
+		has_schema_privilege(session_user,n.oid,'USAGE')
+		OR has_schema_privilege(session_user,n.oid,'CREATE')
+		FROM pg_namespace n WHERE n.nspname='routegate_dispatch'`).Scan(&schemaAccess); err != nil {
+		return fmt.Errorf("verify held-removal dispatch namespace: %w", err)
+	}
+	if schemaAccess {
 		return ErrUnsafeHeldDispatchRuntimeRole
 	}
 	return nil
