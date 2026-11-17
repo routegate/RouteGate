@@ -146,3 +146,37 @@ func TestPlatformUpdateIdlePreflightAfterCompletedLease(t *testing.T) {
 		t.Fatal("unknown runtime state must fail closed")
 	}
 }
+
+func TestPlatformUpdatePreflightRejectsCrashedAndForeignAdmissionState(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	lease, err := BeginRuntimeMutation(dir,
+		"11111111-1111-4111-8111-111111111111", TaskKindVPNCoreService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate process exit: the kernel lock is gone, but intent persists.
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("preflight ignored orphaned legacy mutation marker")
+	}
+	if lease, err := BeginRuntimeMutation(dir,
+		"22222222-2222-4222-8222-222222222222", TaskKindPlatformUpdate); err == nil {
+		lease.Close()
+		t.Fatal("detached worker admitted over orphaned legacy mutation")
+	}
+}
+
+func TestPlatformUpdatePreflightRejectsLegacyRemovalMarker(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "inflight.json"), []byte("unresolved"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("preflight ignored legacy credential removal marker")
+	}
+}
