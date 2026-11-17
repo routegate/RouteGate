@@ -206,3 +206,38 @@ func TestCredentialRemovalDispatchStageLockedInvalidation(t *testing.T) {
   })
  }
 }
+
+
+// The SQL trigger is an independent enforcement boundary: a direct DB writer
+// must not convert a historical approval into an executable-looking stage
+// after the human super_admin grant has been revoked.
+func TestCredentialRemovalDispatchStageDirectSQLRevokedAuthority(t *testing.T) {
+ f:=newDispatchGateFixture(t)
+ if _,err:=f.pool.Exec(f.ctx,`DELETE FROM user_roles
+  WHERE user_id=(SELECT user_id FROM auth_sessions WHERE id=$1::uuid)
+  AND role_id=(SELECT id FROM roles WHERE code='super_admin')`,f.session);err!=nil{
+  t.Fatal("cannot revoke original human grant",err)
+ }
+ _,err:=f.pool.Exec(f.ctx,`INSERT INTO vpn_credential_removal_dispatch_stages
+  (operation_id,candidate_version_id,apply_job_id,agent_id,
+   agent_credential_generation,candidate_hash,candidate_runtime_hash,
+   actor_user_id,actor_session_id)
+  SELECT a.operation_id,a.candidate_version_id,a.apply_job_id,r.agent_id,
+   a.agent_credential_generation,a.candidate_hash,a.candidate_runtime_hash,
+   a.actor_user_id,a.actor_session_id
+  FROM vpn_credential_removal_dispatch_authorizations a
+  JOIN vpn_credential_revocations r ON r.id=a.operation_id
+  WHERE a.operation_id=$1::uuid`,f.operation)
+ var sqlerr *pgconn.PgError
+ if !errors.As(err,&sqlerr)||sqlerr.Code!="P0154"{
+  t.Fatal("direct SQL staged revocation after operator role withdrawal",err)
+ }
+ if stage,e:=f.svc.StagePreparedCredentialRemoval(f.ctx,f.operation,f.nonce,true);
+  !errors.Is(e,revocations.ErrPreflight)||stage!=(revocations.StagedCredentialRemoval{}){
+  t.Fatal("stale claimed browser role bypassed DB-backed reauthorization",e)
+ }
+ var n int
+ if err=f.pool.QueryRow(f.ctx,`SELECT count(*) FROM vpn_credential_removal_dispatch_stages`).Scan(&n);err!=nil||n!=0{
+  t.Fatal("revoked human authority left a staged intent",err,n)
+ }
+}

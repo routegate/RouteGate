@@ -92,7 +92,7 @@ jobs:
 
       - name: Verify dormant RG-140 approved dispatch staging with PostgreSQL
         run: |
-          go test ./internal/db -run '^TestCredentialRemovalDispatch(AdmissionGate|AdmissionInvalidated|AdmissionAuthorityInvalidatedDuringLockWait|StageAtomic|StageInvalidation|StageLockedInvalidation)$' -count=1 -timeout=120s -v
+          go test ./internal/db -run '^TestCredentialRemovalDispatch(AdmissionGate|AdmissionInvalidated|AdmissionAuthorityInvalidatedDuringLockWait|StageAtomic|StageInvalidation|StageLockedInvalidation|StageDirectSQLRevokedAuthority)$' -count=1 -timeout=120s -v
 
       - name: Run tests
         run: go test ./...

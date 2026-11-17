@@ -278,3 +278,8 @@ stale Agent, revoked human session, cancellation and lock-wait invalidation.
 subscription or VPN account is changed.** The actual trusted held-dispatch
 and authenticated result path remain for a reviewed, separate **171+** stage.
 RG-140 v0.2.0 remains NO-GO.
+
+- Schema-170 direct-SQL regression verifies that even a stored, originally
+  valid approval cannot be staged after the original super_admin's live role
+  is revoked: PostgreSQL refuses the INSERT (P0154) independently of the
+  stale browser role claims, and no stage is persisted.
