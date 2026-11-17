@@ -5,6 +5,33 @@ schema-170 consolidation branch, not the production VPS. The motivating
 deterministic interleaving is in
 `agent/internal/tasks/platform_update_runtime_admission_race_test.go`.
 
+## Implementation status (partial, not release-ready)
+
+- `4be797d` makes `RunPlatformUpdateWorker` acquire the existing
+  `BeginRuntimeMutation` lease after readiness and before
+  `MarkMutationStarted`. The worker retains the lease through updater
+  execution and clears the durable marker only after a successful updater
+  and persisted success receipt. Failure or crash leaves the marker.
+- `c1d5d4c` adds deterministic tests for mutual exclusion, durable
+  intent after worker exit, and ordinary admission after verified completion.
+  These tests exercise the shared lease, not an actual systemd update.
+- **Not solved:** the flag-off legacy `withRuntimeMutation` path can
+  execute a task without acquiring the lease if it previously observed no
+  state. It can therefore race with the detached worker's new admission.
+  Legacy compatibility must be resolved before claiming cross-protocol
+  atomic exclusion.
+- **Not solved:** the initial `RuntimeMutationStatePresent` predicate
+  considers the existence of the entire directory as blocking. A completed
+  lease leaves the directory present, so the old detached-worker entry
+  check may reject subsequent updates. Review and test an explicit
+  safe-empty-state predicate under the shared lock, without relaxing
+  fail-closed handling of unknown state.
+- **Not solved:** update success receipt versus marker clearing can be
+  interrupted by a crash. An authenticated, independently verified
+  recovery/clearance protocol is required.
+- Exact-HEAD CI, real systemd integration and compatibility review are
+  still required. **Draft / NO-GO**.
+
 ## Existing invariants that must survive
 
 1. The Agent's `BeginRuntimeMutation` persists `mutation-inflight.json`
