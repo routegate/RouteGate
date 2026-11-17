@@ -43,6 +43,14 @@ func (r *Runner) withRuntimeMutation(ctx context.Context, task tasks.ConfigTask,
 				return tasks.ErrRuntimeMutationBlocked
 			}
 			defer lease.Close()
+			// Cancellation before the handler runs cannot have mutated the
+			// runtime. Release only this still-owned, unchanged intent.
+			if err := ctx.Err(); err != nil {
+				if lease.Complete() != nil {
+					return errRuntimeMutationRecovery
+				}
+				return err
+			}
 			if err := execute(ctx); err != nil {
 				return err
 			}
