@@ -86,3 +86,30 @@ func TestCompletedDetachedUpdateLeaseAllowsNewAdmission(t *testing.T) {
 	}
 	defer agentLease.Close()
 }
+
+func TestDetachedUpdateFailedLeaseCompletionRetainsRecoveryFence(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	updateID := "11111111-1111-4111-8111-111111111111"
+	agentID := "22222222-2222-4222-8222-222222222222"
+
+	workerLease, err := BeginRuntimeMutation(dir, updateID, TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a damaged durable intent after the updater has started.
+	// A successful updater alone is not proof that recovery can be cleared.
+	if err := os.WriteFile(filepath.Join(dir, "mutation-inflight.json"),
+		[]byte("changed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workerLease.Complete(); err == nil {
+		t.Fatal("changed detached-worker intent was cleared")
+	}
+	if err := workerLease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if lease, err := BeginRuntimeMutation(dir, agentID, TaskKindConfigApply); err == nil {
+		lease.Close()
+		t.Fatal("Agent admitted mutation despite damaged update recovery evidence")
+	}
+}
