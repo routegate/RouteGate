@@ -20,8 +20,35 @@ func (r *Runner) withRuntimeMutation(ctx context.Context, task tasks.ConfigTask,
 	if dir == "" {
 		dir = tasks.DefaultRuntimeMutationDir
 	}
-	if !r.cfg.ExperimentalRuntimeMutationFencing && !r.runtimeMutationManagerReady && !tasks.RuntimeMutationStatePresent(dir) {
-		return execute(ctx)
+	if !r.cfg.ExperimentalRuntimeMutationFencing && !r.runtimeMutationManagerReady {
+		// A detached platform-update worker owns its own durable lease.
+		// Dispatching or observing its receipt must not hold a dispatcher
+		// lease which ends before the worker starts.
+		switch task.EffectiveKind() {
+		case tasks.TaskKindDiagnostic, tasks.TaskKindPlatformUpdate:
+			if tasks.RuntimeMutationStatePresent(dir) && task.EffectiveKind() == tasks.TaskKindPlatformUpdate && task.Operation != tasks.PlatformUpdateOperationReconcile {
+				return tasks.ErrRuntimeMutationBlocked
+			}
+			return execute(ctx)
+		case tasks.TaskKindConfigApply, tasks.TaskKindVPNCoreService, tasks.TaskKindVPNCoreInstall, tasks.TaskKindMaintenance:
+			// Legacy mutations must participate in the same atomic admission
+			// as detached updates, even when experimental fencing is off.
+			// On ambiguous failure, retain the durable intent for recovery.
+			lease, err := tasks.BeginRuntimeMutation(dir, task.ID, task.EffectiveKind())
+			if err != nil {
+				return tasks.ErrRuntimeMutationBlocked
+			}
+			defer lease.Close()
+			if err := execute(ctx); err != nil {
+				return err
+			}
+			if err := lease.Complete(); err != nil {
+				return errRuntimeMutationRecovery
+			}
+			return nil
+		default:
+			return execute(ctx) // Existing unsupported-kind rejection.
+		}
 	}
 	switch task.EffectiveKind() {
 	case tasks.TaskKindDiagnostic:
