@@ -40,3 +40,51 @@ func TestLegacyUnfencedDispatchCannotEnableDormantMutations(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacyServiceDispatchSharesDetachedWorkerAdmission(t *testing.T) {
+	r, adapter, results := fencedRunnerFixture(t, tasks.TaskKindVPNCoreService, 204)
+	r.cfg.ExperimentalRuntimeMutationFencing = false
+	r.runtimeMutationManagerReady = false
+	adapter.run = func() error {
+		if _, err := os.Stat(r.runtimeMutationDir + "/mutation-inflight.json"); err != nil {
+			t.Errorf("legacy handler ran without durable admission: %v", err)
+		}
+		other, err := tasks.BeginRuntimeMutation(r.runtimeMutationDir,
+			"44444444-4444-4444-8444-444444444444", tasks.TaskKindPlatformUpdate)
+		if err == nil {
+			other.Close()
+			t.Error("detached worker admitted during legacy mutation")
+		}
+		return nil
+	}
+	if err := r.processNextTask(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if adapter.calls != 1 || results.Load() != 1 {
+		t.Fatalf("legacy service dispatch calls=%d results=%d", adapter.calls, results.Load())
+	}
+	worker, err := tasks.BeginRuntimeMutation(r.runtimeMutationDir,
+		"44444444-4444-4444-8444-444444444444", tasks.TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatalf("completed legacy mutation blocked detached worker: %v", err)
+	}
+	defer worker.Close()
+}
+
+func TestLegacyServiceDispatchBlockedByDetachedWorker(t *testing.T) {
+	r, adapter, results := fencedRunnerFixture(t, tasks.TaskKindVPNCoreService, 204)
+	r.cfg.ExperimentalRuntimeMutationFencing = false
+	r.runtimeMutationManagerReady = false
+	worker, err := tasks.BeginRuntimeMutation(r.runtimeMutationDir,
+		"44444444-4444-4444-8444-444444444444", tasks.TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Close()
+	if err := r.processNextTask(context.Background()); err == nil {
+		t.Fatal("legacy dispatch entered occupied update admission")
+	}
+	if adapter.calls != 0 || results.Load() != 0 {
+		t.Fatalf("blocked legacy dispatch calls=%d results=%d", adapter.calls, results.Load())
+	}
+}
