@@ -104,7 +104,8 @@ jobs:
 
       - name: Verify externally migrated Manager preflight and schema-170 table catalog
         run: |
-          go test ./internal/db -run '^(TestExternalMigration(URLSeparation|ReadOnlySchemaPreflight)|TestRG140Schema170PublicTableInventory)
+          go test ./internal/db -run TestExternalMigration -count=1 -timeout=120s -v
+          go test ./internal/db -run TestRG140Schema170PublicTableInventory -count=1 -timeout=120s -v
       - name: Run tests
         run: go test ./...
 
