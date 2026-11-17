@@ -180,3 +180,34 @@ func TestPlatformUpdatePreflightRejectsLegacyRemovalMarker(t *testing.T) {
 		t.Fatal("preflight ignored legacy credential removal marker")
 	}
 }
+
+func TestPlatformUpdatePreflightRejectsUnsafeRuntimeDirectory(t *testing.T) {
+	parent := t.TempDir()
+	target := filepath.Join(parent, "target")
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "runtime-mutations")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(link) {
+		t.Fatal("symlinked admission directory passed preflight")
+	}
+	if _, err := os.Stat(filepath.Join(target, "runtime.lock")); !os.IsNotExist(err) {
+		t.Fatalf("unsafe preflight wrote through symlink: %v", err)
+	}
+}
+
+func TestPlatformUpdatePreflightRejectsUnexpectedLockFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "runtime.lock"), []byte("lock"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("unsafe shared lock permissions passed preflight")
+	}
+}
