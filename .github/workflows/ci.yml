@@ -94,6 +94,10 @@ jobs:
         run: |
           go test ./internal/db -run '^TestCredentialRemovalDispatch(AdmissionGate|AdmissionInvalidated|AdmissionAuthorityInvalidatedDuringLockWait|StageAtomic|StageInvalidation|StageLockedInvalidation|StageDirectSQLRevokedAuthority)$' -count=1 -timeout=120s -v
 
+      - name: Verify independently signed RG-140 removal intent without executable task
+        run: |
+          go test ./internal/db -run '^TestCredentialRemovalIndependentSignedIntentIsReadOnly$' -count=1 -timeout=120s -v
+
       - name: Run tests
         run: go test ./...
 

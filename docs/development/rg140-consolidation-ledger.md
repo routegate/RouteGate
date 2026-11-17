@@ -283,3 +283,27 @@ RG-140 v0.2.0 remains NO-GO.
   valid approval cannot be staged after the original super_admin's live role
   is revoked: PostgreSQL refuses the INSERT (P0154) independently of the
   stale browser role claims, and no stage is persisted.
+
+
+## Independent signed removal intent preflight (no migration / no issue)
+
+Selected read-only legacy #713 `RemovalDispatchDecision` and Ed25519 verifier
+are now adapted to our 168–170 PostgreSQL authorization/staging sources.
+`backend/internal/revocations/removal_dispatch_authority.go` independently
+matches the original Manager-side human approval, exact account/node, Agent
+generation, version/job IDs, baseline and candidate hashes, expiry, audience
+and nonce against a signature from a **separately supplied public verifier
+key**. It uses current `authenticatedRevocationActor` plus the locked live
+`super_admin` and three-grant validation from schema 169/170.
+
+The private signing key is generated **only in the isolated test**, and this
+code does not provision an actual independent signer/coordinator or elevate the
+Manager runtime to signing authority. No HTTP route or task is introduced.
+The legacy #713 held-issued version/job path requires additional isolation
+of dedicated SQL roles; it remains unported, pending security review.
+
+The targeted PostgreSQL regression denies wrong keys, unsigned decisions,
+tampering with every bound field, and session revocation after a valid
+signature. It checks no config version/job/stage is allocated by verification.
+This remains a **non-executable preflight**; actual dispatch/receipt/terminal
+proof still NO-GO.
