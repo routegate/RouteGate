@@ -178,9 +178,27 @@ Neither this guard nor a green migration-readiness check provisions runtime
 DML grants, validates a complete Manager deployment, authorizes held
 dispatch, or permits a production role switch.
 
-// Read-only readiness must select `public.schema_migrations` explicitly,
-// matching historical #647's reviewed implementation. An unqualified lookup
-// may be redirected by the connection search path (including `pg_temp`).
-// `TestExternalMigrationRejectsShadowedLedgerLookup` verifies the real
-// applied manifest is used even with a shadowing temporary table; the test
-// changes only a disposable PostgreSQL session.
+## Migration ledger search-path hardening (canonical #812)
+
+Both the read-only external readiness check and the actual migration runner
+now address the existing ledger as `public.schema_migrations` explicitly.
+This covers CREATE, applied-version SELECT and INSERT; it does **not** rename
+or rewrite any historical migration identity. The disposable PostgreSQL
+`TestExternalMigrationRejectsShadowedLedgerLookup` also executes the real
+migrator through a connection with a shadowing `pg_temp.schema_migrations`.
+The corresponding CI result must be checked on the exact commit before release.
+
+## Historical SQL role PR disposition (not yet integrated)
+
+| Historical Draft | Review result for schema 170 | Disposition |
+| --- | --- | --- |
+| [#647](https://github.com/routegate/RouteGate/pull/647) | Owner-capable runtime refusal is adapted in `CheckExternalMigrationRuntimeRole` | Reuse complete for this guard; retain historical PR pending final audit |
+| [#639](https://github.com/routegate/RouteGate/pull/639) | `ProvisionRuntimeRole` hard-codes a schema-175 table allowlist and refuses any other schema version | **Do not cherry-pick**; requires a separately reviewed schema-170 grant inventory and installer/credential design |
+| [#652](https://github.com/routegate/RouteGate/pull/652) | `CheckRuntimeRequiredPrivileges` uses #639's schema-175 allowlist | **Not implemented** in canonical #812; a successful owner/readiness preflight is not proof that Manager can run with restricted grants |
+
+These historical branches have diverged from the canonical migration history;
+their original `000160_*` and later identities conflict with current-main's
+forward-only migration numbering. Compare behavior and tests, not full branch
+trees. Do not close, delete, merge, rebase or rewrite those branches as a
+side effect of this documentation. Current role separation is still **NO-GO**
+for live deployment, and executable held dispatch remains disabled.
