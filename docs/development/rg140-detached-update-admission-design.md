@@ -1,36 +1,39 @@
-# RG-140: detached platform-update admission design (proposal)
+# RG-140: detached platform-update admission and recovery
 
-**Status: DESIGN ONLY — NOT IMPLEMENTED / NO-GO.** Applies to the
-schema-170 consolidation branch, not the production VPS. The motivating
-deterministic interleaving is in
-`agent/internal/tasks/platform_update_runtime_admission_race_test.go`.
+**Status: PARTIALLY IMPLEMENTED — Draft / NO-GO.** Applies to the
+schema-170 consolidation branch only; no production VPS changes.
 
-## Implementation status (partial, not release-ready)
+## Current implementation and evidence
 
-- `4be797d` makes `RunPlatformUpdateWorker` acquire the existing
-  `BeginRuntimeMutation` lease after readiness and before
-  `MarkMutationStarted`. The worker retains the lease through updater
-  execution and clears the durable marker only after a successful updater
-  and persisted success receipt. Failure or crash leaves the marker.
-- `c1d5d4c` adds deterministic tests for mutual exclusion, durable
-  intent after worker exit, and ordinary admission after verified completion.
-  These tests exercise the shared lease, not an actual systemd update.
-- **Not solved:** the flag-off legacy `withRuntimeMutation` path can
-  execute a task without acquiring the lease if it previously observed no
-  state. It can therefore race with the detached worker's new admission.
-  Legacy compatibility must be resolved before claiming cross-protocol
-  atomic exclusion.
-- **Not solved:** the initial `RuntimeMutationStatePresent` predicate
-  considers the existence of the entire directory as blocking. A completed
-  lease leaves the directory present, so the old detached-worker entry
-  check may reject subsequent updates. Review and test an explicit
-  safe-empty-state predicate under the shared lock, without relaxing
-  fail-closed handling of unknown state.
-- **Not solved:** update success receipt versus marker clearing can be
-  interrupted by a crash. An authenticated, independently verified
-  recovery/clearance protocol is required.
-- Exact-HEAD CI, real systemd integration and compatibility review are
-  still required. **Draft / NO-GO**.
+- Detached update worker acquires the existing `BeginRuntimeMutation`
+  lease before `MarkMutationStarted`, and holds it through updater
+  execution. Successful updater + durable success receipt precede
+  `lease.Complete()`. A crash or uncertain result retains the marker.
+- The legacy Agent path now uses that same lease for config apply,
+  VPN-core service/install and maintenance, even with experimental fencing
+  disabled. Cancellation **before** the handler runs clears only its own
+  unchanged marker; errors after entering the handler retain uncertainty.
+- Update dispatch/worker preflight uses
+  `RuntimeMutationIdleForPlatformUpdate` instead of treating a completed
+  lease's directory as permanently busy. The actual worker still performs
+  atomic admission under the shared lock; preflight is not a reservation.
+- Existing test files cover mutual exclusion in both directions, process
+  exit, damaged marker, post-completion admission, legacy handler error,
+  and cancellation before handler execution. They do **not** exercise a
+  real systemd transient unit or a live upgrade/restart.
+- **Unresolved:** a crash after the success receipt but before clearing
+  the shared marker leaves a safe-but-stuck admission. No authenticated,
+  independently verified clearance protocol exists yet.
+- **Unresolved:** legacy Agent handler errors and lost Manager
+  acknowledgements may leave a durable marker without an automated
+  recovery path. Compatibility and result/reconciliation semantics need
+  independent review.
+- **Unresolved:** old deployed Agent versions that do not use this
+  shared lease may still mutate during an update. Upgrade sequencing and
+  feature negotiation require explicit compatibility controls.
+- **Unresolved:** the detached worker's process lifetime, Agent binary
+  replacement/restart and reconciliation races need real systemd tests.
+  Exact-HEAD CI has not passed yet. **Do not release or deploy.**
 
 ## Existing invariants that must survive
 
