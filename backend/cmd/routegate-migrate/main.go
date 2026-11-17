@@ -49,6 +49,9 @@ func run(parent context.Context,logger *slog.Logger) error {
 	if err=db.CheckExternalMigrationRuntimeRole(ctx,runtime);err!=nil {return err}
 	if err=db.CheckHeldDispatchRuntimeIsolation(ctx,runtime);err!=nil {return err}
 	if err=db.Migrate(ctx,owner,"migrations",logger);err!=nil {return err}
+	// Recheck the same runtime authority boundary after privileged DDL.
+	// A new migration must not silently grant Manager owner privileges.
+	if err=db.CheckExternalMigrationRuntimeRole(ctx,runtime);err!=nil {return err}
 	if err=db.CheckHeldDispatchRuntimeIsolation(ctx,runtime);err!=nil {return err}
 	if err=db.RequireAppliedMigrations(ctx,runtime,"migrations");err!=nil {return err}
 	if err=ctx.Err();err!=nil {return err}
