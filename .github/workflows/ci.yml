@@ -86,6 +86,10 @@ jobs:
         run: |
           go test ./internal/db -run '^TestRevocation(PreparedIDBindingIsStableAndNonExecutable|BindingRefusesDirectIdentityForgery)$' -count=1 -timeout=120s -v
 
+      - name: Verify fresh human RG-140 removal approval in PostgreSQL
+        run: |
+          go test ./internal/db -run '^TestCredentialRemovalDispatchHumanApproval$' -count=1 -timeout=120s -v
+
       - name: Run tests
         run: go test ./...
 
