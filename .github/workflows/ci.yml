@@ -82,6 +82,10 @@ jobs:
             "$test_dir/agent.test" -test.run '^TestCredentialRemovalManagerPreparedRealityTraffic$' -test.timeout=75s -test.v
           # Never upload the private fixture: it contains disposable Reality credentials.
 
+      - name: Verify immutable RG-140 job ID binding under real PostgreSQL
+        run: |
+          go test ./internal/db -run '^TestRevocation(PreparedIDBindingIsStableAndNonExecutable|BindingRefusesDirectIdentityForgery)$' -count=1 -timeout=120s -v
+
       - name: Run tests
         run: go test ./...
 
