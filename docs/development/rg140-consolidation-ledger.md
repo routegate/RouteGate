@@ -307,3 +307,21 @@ tampering with every bound field, and session revocation after a valid
 signature. It checks no config version/job/stage is allocated by verification.
 This remains a **non-executable preflight**; actual dispatch/receipt/terminal
 proof still NO-GO.
+
+
+## Blocking owner/privilege issue before new held-dispatch schema 171
+
+`install.sh` provisions the `routegate` login as database owner and
+`app.Start` runs migrations using the same runtime `db.Connect` pool.
+Thus historical #713 migration 176's `REVOKE FROM PUBLIC` cannot isolate
+its held-removal table from the ordinary Manager **which is its owner**.
+Do **not** port it as new 171 until a split migration-owner/runtime-role
+and independent coordinator are implemented. See
+`docs/development/rg140-held-dispatch-role-isolation.md`.
+
+New early PostgreSQL negative CI guard
+`TestCredentialRemovalHeldDispatchOwnerIsolationGate` fails if a future
+`routegate_dispatch` namespace is still owned by, or USAGE-granted to,
+the ordinary Manager runtime role. The test is not a grant of authority or
+a substitute for complete DB-role isolation. No production permissions,
+credentials, nodes or application startup behavior changed.
