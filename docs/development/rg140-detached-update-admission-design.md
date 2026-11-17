@@ -3,6 +3,29 @@
 **Status: PARTIALLY IMPLEMENTED — Draft / NO-GO.** Applies to the
 schema-170 consolidation branch only; no production VPS changes.
 
+## CI regression triage (17 November 2026)
+
+RouteGate CI run `44042671781` at `b52d911` **failed**.
+Backend, installer, frontend and website jobs passed. Two failures
+require separate resolution before any compatibility rollout:
+
+- **Agent tests:** `TestFencedDispatchDefaultAndCancellation` asserted
+  that flag-off legacy dispatch never creates a runtime-mutation
+  directory. This is obsolete after shared admission became mandatory
+  for legacy mutating tasks. The test now asserts the directory exists
+  and the completed mutation intent is absent (fix `5ff5939`).
+  The new test expectation still requires an exact-HEAD CI run.
+- **Manager command to Reality traffic:** remote VPN end-to-end bootstrap
+  registered Agent and observed heartbeat, then timed out while waiting
+  for the sing-box installation job
+  (`[remote-vpn-e2e] FAILED: Agent job exceeded its time budget`).
+  This is **not** a confirmed shared-admission bug. Inspect Agent and
+  Manager job status, service logs and installer state in an isolated
+  runner before attributing cause. Do not loosen fail-closed admission
+  or increase timeout as a substitute for diagnosis.
+
+Do not claim the integration test is green based on older runs.
+
 ## Current implementation and evidence
 
 - Detached update worker acquires the existing `BeginRuntimeMutation`
