@@ -353,3 +353,41 @@ Default `startup` is unchanged. Added source-only
 URLs are required, identities cannot match or inherit the migration owner,
 and post-migration catalog/held-dispatch isolation is revalidated through
 the runtime login. Not installed, no migration 171, no production cutover.
+
+## Schema-170 role-policy inventory and shared authority guard (17 Nov 2026)
+
+- Existing `CheckExternalMigrationRuntimeRole` now supplies the **one shared**
+  ownership/administrator test when the future private `routegate_dispatch`
+  namespace exists. `CheckHeldDispatchRuntimeIsolation` reuses it and adds
+  only the namespace-specific `USAGE`/`CREATE` ACL denial. Previously the
+  two checks could diverge (e.g. REPLICATION or public-relation ownership).
+  Two-login PostgreSQL regressions cover both escalations and recovery when
+  the extra authority is removed. Reuse, not a new runtime role subsystem.
+- Historical [#639](https://github.com/routegate/RouteGate/pull/639)
+  and [#652](https://github.com/routegate/RouteGate/pull/652) remain the
+  sources for grant issuance and missing-grant detection **patterns**, but
+  their static schema-175 table list is **not** valid for current schema 170.
+  A read-only scan of all 95 current `.up.sql` migration files reconstructed
+  **74 candidate public base table names** versus 76 in #639:
+  11 canonical tables are absent from #639 (one traffic checkpoint and
+  ten `vpn_runtime_*` recovery/checkpoint relations), while 13 legacy
+  `runtime_recovery_*` relations are absent from canonical migrations.
+  This is a source-level inventory, **not** yet a successful live catalog
+  attestation or an authorization to grant DML to every table.
+- `TestRG140Schema170PublicTableInventory` now compares the names from
+  migrations with the actual `pg_catalog.pg_class` public base-table
+  catalog on disposable PostgreSQL after applying schema 170; it deliberately
+  excludes the special read-only `schema_migrations` journal and performs
+  **no privilege changes**. It is called in the **existing** external
+  migration preflight CI step, not through a parallel grant-policy system.
+  Check the current exact-HEAD test result before treating the inventory
+  as verified.
+- **Next safe action:** distinguish ordinary Manager DML from privileged
+  issuance-only tables and verify every allowed table/sequence operation under
+  a truly restricted LOGIN. Adapt #639/#652 only after that reviewed
+  least-privilege matrix exists; never use `GRANT ALL ON ALL TABLES`, copy
+  schema-175 names wholesale, switch live credentials, import legacy schema
+  176 as canonical 171, or claim an executable Agent job.
+- Work is exclusively in Draft #812. `main`, existing VPS, installed
+  Manager configuration, Git history and legacy branch/PR retention are
+  unchanged. **RG-140 #545 / v0.2.0 remains NO-GO.**
