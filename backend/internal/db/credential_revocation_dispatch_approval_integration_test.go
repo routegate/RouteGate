@@ -130,3 +130,62 @@ func TestCredentialRemovalDispatchHumanApproval(t *testing.T) {
 		t.Fatal("failed downgrade erased one-use approval record",err)
 	}
 }
+
+ 
+// SQL authorization is an independent safety boundary. Even a writer with
+// direct table INSERT permission must not impersonate a super_admin or skip
+// a privilege which the Go preparation adapter requires.
+func TestCredentialRemovalDirectSQLRejectsLesserHumanApproval(t *testing.T) {
+	for _,tc := range []struct {
+		name,role string
+		perms []string
+	}{
+		{"ordinary_admin_all_permissions","admin",[]string{"system:manage","configs:apply","vpn_users:disable"}},
+		{"super_admin_missing_disable","super_admin",[]string{"system:manage","configs:apply"}},
+		{"super_admin_missing_system","super_admin",[]string{"configs:apply","vpn_users:disable"}},
+	} {
+		t.Run(tc.name,func(t *testing.T){
+			ctx,pool,in,_,done:=removalPreparationFixture(t)
+			defer done()
+			svc:=revocations.NewService(pool)
+			prepared,e:=svc.Prepare(ctx,in)
+			if e!=nil{t.Fatal(e)}
+			ids,e:=svc.ReservePreparedRemovalJobIDs(ctx,prepared.ID)
+			if e!=nil{t.Fatal(e)}
+			var userID,sessionID string
+			if e=pool.QueryRow(ctx,`INSERT INTO users(email,display_name,user_type,status)
+				VALUES($1,'Direct SQL reviewer','human','active') RETURNING id::text`,
+				"review-"+tc.name+"@isolated.invalid").Scan(&userID);e!=nil{t.Fatal(e)}
+			if e=pool.QueryRow(ctx,`INSERT INTO auth_sessions(user_id,token_hash,expires_at)
+				VALUES($1::uuid,$2,clock_timestamp()+interval '1 hour') RETURNING id::text`,
+				userID,"review-"+tc.name).Scan(&sessionID);e!=nil{t.Fatal(e)}
+			if _,e=pool.Exec(ctx,`INSERT INTO roles(code,name)
+				VALUES ($1,$2) ON CONFLICT(code) DO NOTHING`,tc.role,tc.role);e!=nil{t.Fatal(e)}
+			if _,e=pool.Exec(ctx,`INSERT INTO user_roles(user_id,role_id)
+				SELECT $1::uuid,id FROM roles WHERE code=$2 ON CONFLICT DO NOTHING`,userID,tc.role);e!=nil{t.Fatal(e)}
+			for _,permission:=range tc.perms {
+				if _,e=pool.Exec(ctx,`INSERT INTO permissions(code,name) VALUES($1,$1) ON CONFLICT(code) DO NOTHING`,permission);e!=nil{t.Fatal(e)}
+				if _,e=pool.Exec(ctx,`INSERT INTO role_permissions(role_id,permission_id)
+					SELECT r.id,p.id FROM roles r,permissions p WHERE r.code=$1 AND p.code=$2
+					ON CONFLICT DO NOTHING`,tc.role,permission);e!=nil{t.Fatal(e)}
+			}
+			_,e=pool.Exec(ctx,`INSERT INTO vpn_credential_removal_dispatch_authorizations
+				(operation_id,actor_user_id,actor_session_id,nonce,
+				candidate_version_id,apply_job_id,agent_credential_generation,
+				candidate_hash,candidate_runtime_hash,issued_at,expires_at)
+				VALUES($1::uuid,$2::uuid,$3::uuid,repeat('a',64),
+					$4::uuid,$5::uuid,$6,$7,$8,
+					clock_timestamp(),clock_timestamp()+interval '1 minute')`,
+					prepared.ID,userID,sessionID,ids.CandidateVersionID,ids.ApplyJobID,
+					ids.AgentGeneration,ids.CandidateHash,ids.CandidateRuntimeHash)
+			var sqlerr *pgconn.PgError
+			if !errors.As(e,&sqlerr) || sqlerr.Code!="P0153" {
+				t.Fatal("direct SQL forged a human dispatch approval",e)
+			}
+			var n int
+			if e=pool.QueryRow(ctx,`SELECT count(*) FROM vpn_credential_removal_dispatch_authorizations`).Scan(&n);e!=nil||n!=0{
+				t.Fatal("unauthorized approval persisted",e,n)
+			}
+		})
+	}
+}
