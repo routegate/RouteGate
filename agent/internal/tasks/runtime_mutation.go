@@ -23,6 +23,31 @@ func RuntimeMutationStatePresent(dir string) bool {
 	return !os.IsNotExist(err)
 }
 
+// RuntimeMutationIdleForPlatformUpdate is a conservative preflight only.
+// Unlike RuntimeMutationStatePresent, a previously completed lease may leave
+// an empty lock directory. Final admission still requires BeginRuntimeMutation
+// inside the detached worker; this observation never reserves a mutation.
+func RuntimeMutationIdleForPlatformUpdate(dir string) bool {
+	if !RuntimeMutationStatePresent(dir) {
+		return true
+	}
+	lock, err := lockRuntimeMutation(dir)
+	if err != nil {
+		return false
+	}
+	defer lock.Close()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.Name() != "runtime.lock" {
+			return false
+		}
+	}
+	return true
+}
+
 // RuntimeMutation is an admission lease, not proof of a successful operation.
 // Close releases the process lock but deliberately retains the durable marker.
 // Only a live caller that has verified a safe terminal runtime state may call
