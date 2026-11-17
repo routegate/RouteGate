@@ -56,6 +56,43 @@ only that unknown and credential-removal kinds remain unsupported in that
 legacy path. It deliberately does not assert that platform-update dispatch
 is disabled.
 
+## Cross-protocol race: detached worker versus shared runtime lease
+
+**Unresolved safety gap, code-inspection finding (not an observed exploit):**
+
+- `tasks.PrepareAndStartDetachedPlatformUpdate` checks
+  `RuntimeMutationStatePresent(DefaultRuntimeMutationDir)` before preparing
+  and launching the detached worker.
+- `tasks.RunPlatformUpdateWorker` independently checks that same predicate
+  before validating its staged bundle and advancing its own durable receipt to
+  `mutation_started`.
+- `tasks.BeginRuntimeMutation` uses `lockRuntimeMutation` (flock) and writes
+  `mutation-inflight.json`, but the detached platform-update worker **does
+  not acquire that lock**. Its check is therefore a point-in-time observation,
+  not an atomic admission handshake with the shared lease.
+- Potential interleaving: detached worker observes the runtime-mutation
+  directory absent; another Agent task creates the directory, acquires the
+  lock and begins a config/service mutation; detached worker continues toward
+  its independently recorded `mutation_started` and updater invocation.
+  The inverse race around Agent admission also requires review.
+- The platform-update receipt's no-replace creation, monotonic transitions,
+  worker probe and reconciliation prevent many *same-task* replays; they do
+  **not** by themselves establish exclusion against a *different* Agent
+  runtime mutation.
+
+**Do not fix this by simply taking the shared lock for the duration of the
+Agent's detached launcher:** that process exits before the actual updater
+runs, leaving the same handoff gap. A safe design must cover the detached
+worker's real mutation lifetime, process death and reboot, while retaining
+existing receipt and reconciliation semantics. It also needs to consider
+whether the updater restarts the Agent holding a lock and how that lock is
+released or inherited.
+
+Before any executable change: design and test a single cross-protocol
+admission boundary with deterministic interleaving tests, plus crash and
+restart cases. Do not add a second independent lock or silently turn off
+legacy platform updates.
+
 ## Required follow-up before release
 
 1. Trace every real Agent task-dispatch call site and prove credential removal
