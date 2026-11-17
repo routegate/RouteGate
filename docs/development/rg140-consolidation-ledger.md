@@ -325,3 +325,8 @@ New early PostgreSQL negative CI guard
 the ordinary Manager runtime role. The test is not a grant of authority or
 a substitute for complete DB-role isolation. No production permissions,
 credentials, nodes or application startup behavior changed.
+
+- Added fail-closed Manager startup check `CheckHeldDispatchRuntimeIsolation` and
+  disposable PostgreSQL regression proving a schema owner bypasses PUBLIC
+  revocation. The check runs before Manager services and is inactive on
+  canonical 170 where private held dispatch schema is absent.

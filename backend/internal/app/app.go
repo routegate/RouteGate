@@ -46,6 +46,11 @@ func (a *App) Start(ctx context.Context) error {
 	if err := db.Migrate(ctx, pool, "migrations", a.logger); err != nil {
 		return err
 	}
+	// Do not serve HTTP or start workers if the future privileged issuance
+	// schema is owned by (or usable through) Manager's normal DB connection.
+	if err := db.CheckHeldDispatchRuntimeIsolation(ctx, pool); err != nil {
+		return err
+	}
 	a.backfillClientSettings(ctx, pool)
 	if err := updates.RecoverInterruptedJobs(ctx, a.logger, pool); err != nil {
 		return err

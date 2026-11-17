@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -38,5 +39,33 @@ func TestCredentialRemovalHeldDispatchOwnerIsolationGate(t *testing.T) {
 	if current==owner || canUse {
 		t.Fatalf("unsafe held-dispatch schema: Manager runtime role %q is owner=%t or has schema USAGE=%t; require a separate migrator/independent coordinator before schema 171",
 			current,current==owner,canUse)
+	}
+}
+
+
+// Confirm the startup guard itself fails closed when the Manager runtime DB
+// login owns a private schema, despite an apparently restrictive PUBLIC
+// revocation. The ephemeral database is exclusive to this integration test;
+// no installed RouteGate database or service is touched.
+func TestCredentialRemovalStartupRefusesOwnerOnlyHeldDispatch(t *testing.T) {
+	ctx,pool,done:=setupAppliedSettingsTest(t)
+	defer done()
+	if err:=CheckHeldDispatchRuntimeIsolation(ctx,pool);err!=nil {
+		t.Fatal("canonical 170 unexpectedly has held-dispatch authority",err)
+	}
+	_,err:=pool.Exec(ctx,`CREATE SCHEMA routegate_dispatch;
+		REVOKE ALL ON SCHEMA routegate_dispatch FROM PUBLIC;`)
+	if err!=nil {t.Fatal("create disposable owner-only schema",err)}
+	t.Cleanup(func(){
+		_,_ = pool.Exec(ctx,`DROP SCHEMA IF EXISTS routegate_dispatch CASCADE`)
+	})
+	if err:=CheckHeldDispatchRuntimeIsolation(ctx,pool);!errors.Is(err,ErrUnsafeHeldDispatchRuntimeRole){
+		t.Fatal("Manager startup accepted a private schema it owns despite PUBLIC revocation",err)
+	}
+	if _,err=pool.Exec(ctx,`DROP SCHEMA routegate_dispatch`);err!=nil {
+		t.Fatal("drop disposable held schema",err)
+	}
+	if err=CheckHeldDispatchRuntimeIsolation(ctx,pool);err!=nil {
+		t.Fatal("Manager startup did not recover after unsafe schema was removed",err)
 	}
 }

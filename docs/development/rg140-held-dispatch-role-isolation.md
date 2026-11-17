@@ -71,3 +71,22 @@ Until the independently provisioned privilege boundary is built and audited,
 keep the signed decision checker as **dormant read-only preflight** and RG-140
 as **NO-GO**. The earlier proven two-account Manager→Agent→Reality fixture
 continues to demonstrate scoped local execution only, not authorized delivery.
+
+
+## Manager startup fail-closed check
+
+`backend/internal/db/held_dispatch_runtime_isolation.go` provides the
+read-only `CheckHeldDispatchRuntimeIsolation` check, invoked from
+`backend/internal/app/app.go::Start` immediately after migration and **before**
+any account backfill, worker startup or HTTP serving. A current-schema 170
+database has no `routegate_dispatch` namespace, so normal startup continues.
+If that namespace exists but Manager's login owns it or has schema `USAGE`,
+startup refuses to proceed with `ErrUnsafeHeldDispatchRuntimeRole`.
+Catalog inspection errors are also fail-closed.
+
+`TestCredentialRemovalStartupRefusesOwnerOnlyHeldDispatch` proves on
+ephemeral PostgreSQL that `REVOKE ALL FROM PUBLIC` does not protect against
+object-owner login, and that the guard rejects exactly this unsafe state.
+It then drops the disposable schema and verifies that the guard allows
+startup again. This **does not** provision the separately owned schema,
+grant coordinator authority, execute an Agent job or change production roles.
