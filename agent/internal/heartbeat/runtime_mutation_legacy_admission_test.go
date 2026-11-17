@@ -2,6 +2,7 @@ package heartbeat
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -134,5 +135,32 @@ func TestLegacyPlatformUpdateDispatchBlockedByUnresolvedMutation(t *testing.T) {
 		return nil
 	}); err == nil || called {
 		t.Fatal("legacy update dispatch bypassed unresolved mutation")
+	}
+}
+
+func TestLegacyServiceErrorRetainsUncertainRuntimeFence(t *testing.T) {
+	r, adapter, results := fencedRunnerFixture(t, tasks.TaskKindVPNCoreService, 204)
+	r.cfg.ExperimentalRuntimeMutationFencing = false
+	r.runtimeMutationManagerReady = false
+	adapter.run = func() error {
+		return errors.New("simulated service failure after runtime invocation")
+	}
+	if err := r.processNextTask(context.Background()); err == nil {
+		t.Fatal("legacy handler failure was ignored")
+	}
+	if adapter.calls != 1 {
+		t.Fatalf("legacy handler calls=%d, want 1", adapter.calls)
+	}
+	if _, err := os.Stat(r.runtimeMutationDir + "/mutation-inflight.json"); err != nil {
+		t.Fatalf("ambiguous legacy error lost durable recovery fence: %v", err)
+	}
+	if err := r.processNextTask(context.Background()); !errors.Is(err, tasks.ErrRuntimeMutationBlocked) {
+		t.Fatalf("legacy task retried after ambiguous error: %v", err)
+	}
+	if adapter.calls != 1 {
+		t.Fatal("legacy handler was invoked twice after uncertain outcome")
+	}
+	if results.Load() > 1 {
+		t.Fatalf("unexpected duplicate terminal reports: %d", results.Load())
 	}
 }
