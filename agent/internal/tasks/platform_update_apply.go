@@ -262,6 +262,14 @@ func RunPlatformUpdateWorker(taskID string) error {
 		}
 		return fmt.Errorf("platform update runtime is not safely ready before mutation")
 	}
+	// Acquire the SAME durable admission lease used by Agent runtime tasks.
+	// The earlier state-presence probe is not atomic with other admissions.
+	// A crash leaves this intent in place rather than authorizing a replay.
+	lease, err := BeginRuntimeMutation(DefaultRuntimeMutationDir, taskID, TaskKindPlatformUpdate)
+	if err != nil {
+		return fmt.Errorf("platform update cannot reserve shared runtime mutation admission: %w", err)
+	}
+	defer lease.Close()
 	if _, err := store.MarkMutationStarted(taskID); err != nil {
 		return fmt.Errorf("persist platform update mutation start: %w", err)
 	}
@@ -303,6 +311,11 @@ func RunPlatformUpdateWorker(taskID string) error {
 			if waitErr == nil {
 				if _, err := store.MarkSucceeded(taskID); err != nil {
 					return fmt.Errorf("persist platform update success receipt: %w", err)
+				}
+				// Only this live owner, after a successful updater and durable
+				// receipt, may clear its admission marker.
+				if err := lease.Complete(); err != nil {
+					return fmt.Errorf("clear completed platform update admission: %w", err)
 				}
 				return nil
 			}
