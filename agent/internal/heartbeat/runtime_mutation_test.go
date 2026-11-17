@@ -206,8 +206,14 @@ func TestFencedDispatchDefaultAndCancellation(t *testing.T) {
 	if a.calls != 1 {
 		t.Fatal(a.calls)
 	}
-	if _, err := os.Stat(r.runtimeMutationDir); !os.IsNotExist(err) {
-		t.Fatal("default path created state", err)
+	// Legacy dispatch now participates in shared admission even with the
+	// experimental result-fencing flag off. A completed lease may leave
+	// the lock directory, but must not leave an unresolved intent.
+	if _, err := os.Stat(r.runtimeMutationDir); err != nil {
+		t.Fatal("legacy dispatch did not initialize shared admission", err)
+	}
+	if _, err := os.Stat(filepath.Join(r.runtimeMutationDir, "mutation-inflight.json")); !os.IsNotExist(err) {
+		t.Fatal("completed legacy dispatch retained mutation intent", err)
 	}
 	r.cfg.ExperimentalRuntimeMutationFencing = true
 	r.runtimeMutationManagerReady = true
