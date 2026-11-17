@@ -13,7 +13,9 @@ import (
 var ErrRuntimeMutationBlocked = errors.New("runtime mutation blocked: exclusive state unavailable or recovery required")
 
 // DefaultRuntimeMutationDir is deliberately outside all config cleanup roots.
-// The experimental Agent gate and a future removal dispatcher must share it.
+// The Agent (including legacy dispatch) and detached platform-update worker
+// share this admission directory. Credential removal must use this same
+// namespace before its currently dormant dispatch path can be enabled.
 const DefaultRuntimeMutationDir = "/var/lib/routegate-agent/runtime-mutations"
 
 // RuntimeMutationStatePresent never creates state. Unknown filesystem state
@@ -53,9 +55,9 @@ func RuntimeMutationIdleForPlatformUpdate(dir string) bool {
 // Only a live caller that has verified a safe terminal runtime state may call
 // Complete. There is deliberately no force-unlock or crash-recovery API here.
 //
-// Heartbeat integration is experimental and off by default; detached worker
-// handoff is not implemented. Every participant must use the same private
-// directory as CredentialRemovalExecutor, beyond normal cleanup roots.
+// Enhanced heartbeat result fencing remains experimental. Shared admission
+// is also used by the legacy Agent and detached platform-update worker.
+// Every participant must use the same private directory, beyond cleanup roots.
 type RuntimeMutation struct {
 	mu        sync.Mutex
 	lock      *os.File
