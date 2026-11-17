@@ -146,9 +146,59 @@ input and read-only replay. No production Agent task is claimed, no human
 execution approval is fabricated by Manager, and **no real sing-box restart or
 network session termination is claimed by this gate**.
 
-This is explicitly a contract seam below the previously validated historical
-[#703](https://github.com/routegate/RouteGate/pull/703) full two-user systemd
-Reality E2E; that network test and production-mounted authorization/result
-lifecycle must still be adapted under reviewed schema 168+ without importing
-legacy SQL. The ephemeral fixture contains test Reality private material and
-must never be checked into Git or uploaded as a CI artifact.
+This fake-service contract test is intentionally narrower than the new
+real-systemd Manager-prepared Reality test documented below. The authenticated
+production delivery/result lifecycle still needs a separately reviewed 168+
+schema adaptation; no legacy SQL was imported. The ephemeral fixtures contain
+test Reality private material and must never be checked into Git or uploaded
+as CI artifacts.
+
+
+## Manager-prepared two-user sing-box/Reality execution verified
+
+The historical two-account traffic acceptance from [#703](https://github.com/routegate/RouteGate/pull/703) /
+[#713](https://github.com/routegate/RouteGate/pull/713) has now been **adapted**
+to the **current** Manager PostgreSQL `Service.Prepare` output and existing
+Agent `CredentialRemovalExecutor`, with no conflicting SQL or production
+route imported.
+
+- Manager fixture: `backend/internal/db/credential_revocation_agent_contract_export_test.go`.
+  Before rendering the applied baseline, configure a disposable `localhost`
+  Reality SNI and temporary listener port. The candidate comes from the
+  actual `vpn_credential_revocations` row, not handwritten Agent JSON.
+- Live fixture: `agent/internal/tasks/credential_removal_manager_reality_contract_test.go`.
+  Run pinned sing-box 1.12.8 as a **new isolated systemd unit**, exercise two
+  independent VLESS credentials over loopback, execute the Manager-prepared
+  removal, check both pre-existing streams end on the shared process restart,
+  check second account reconnects, and verify durable report replay.
+- Strict denial proof: ported the legacy #703 negative probe (HTTP `GotConn`
+  for the *local* proxy, reject network timeouts, reject any request arriving
+  at the test HTTP origin, reject successful/non-5xx HTTP responses). This
+  prevents proxy death or test-network hangs from being counted as revoked-UUID
+  rejection.
+- CI: the disposable PostgreSQL/backend job in `.github/workflows/ci.yml`
+  generates a private mode-0600 candidate fixture, downloads/checksums the
+  pinned sing-box binary and runs the test with sudo **only on the ephemeral
+  GitHub Actions VM**. Fixture is deleted, no artifacts/credentials published.
+  The dedicated live-Reality test step is **SUCCESS** at
+  [run 43983861513](https://github.com/routegate/RouteGate/actions/runs/43983861513).
+
+**Precisely what this proves:** the current Manager's candidate bytes and
+the current Agent executor can revoke a targeted UUID on real sing-box/Reality
+while preserving the other account's fresh access, in isolation.
+
+**Precisely what it does NOT prove:** this test directly invokes the Agent
+executor with a synthetic task ID. It does **not** prove a live human
+confirmation endpoint, immutable authorized dispatch, Agent HTTP claim,
+durable acknowledged result, separate independently verified terminal
+observation, session/account state transition or subscription token retirement.
+The `vpn_credential_revocations` prepared ledger retains its fail-closed
+reservation, and **RG-140 #545 remains NO-GO**.
+
+**Next implementation boundary:** adapt the *already reviewed* isolated
+claim/result and confirmation contracts from #703/#713 to the canonical
+161–167 history. Choose collision-free new **168+** migration(s), with fresh
+operator/session consent, exact Agent identity, one-use dispatch, transport
+loss/unknown outcome reconciliation and independently verified terminal proof.
+Do not simply mount the legacy test-only HTTP endpoints or route a removal
+task through the generic config-apply queue.
