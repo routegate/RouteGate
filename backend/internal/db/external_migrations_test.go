@@ -85,6 +85,14 @@ func TestExternalMigrationRejectsShadowedLedgerLookup(t *testing.T) {
 	if err=RequireAppliedMigrations(ctx,shadow,"../../migrations");err!=nil {
 		t.Fatal("external readiness used shadowed rather than public migration history",err)
 	}
+	// SchemaVersionRepository must read the same public ledger, not the
+	// attacker-controlled pg_temp table on this pooled connection.
+	version,err:=NewSchemaVersionRepository(shadow).AppliedSchemaVersion(ctx)
+	if err!=nil {t.Fatal(err)}
+	if version=="" || version=="forged_temporary_history" {
+		t.Fatalf("applied schema version came from shadowed or empty ledger: %q",version)
+	}
+
 	// The same pooled connection must not redirect migration ledger writes
 	// or the already-applied lookup to the forged pg_temp table either.
 	if err=Migrate(ctx,shadow,"../../migrations",slog.Default());err!=nil {
