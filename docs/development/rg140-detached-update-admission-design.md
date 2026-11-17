@@ -128,6 +128,41 @@ verify it survives restarts before enabling updates. Mixed-version
 deployments need a documented rollout and rollback procedure; no
 automatic bypass for legacy nodes.
 
+## Verified Manager admission surfaces (compatibility review)
+
+Source inspection on this consolidation branch found a concrete downgrade gap:
+
+- `agent/internal/client/client.go` advertises `softwareUpdate` as
+  `{schemaVersion: 1, state: "ready", request: "version_only"}` whenever
+  `PlatformUpdateRuntimeReady()` succeeds. This does **not** attest to
+  shared Agent/worker admission.
+- `backend/internal/agents/platform_update_repository.go` compares the
+  Agent's `softwareUpdate` JSON to the exact same three-field Manager
+  capability in `createPlatformUpdateJobTx`. A legacy Agent advertising
+  this contract is therefore not distinguishable by that predicate.
+- `backend/internal/agents/platform_update_rollout_repository.go` also
+  uses this exact capability comparison during rollout planning.
+  Tightening only the direct-create path would leave a divergent
+  eligibility policy. Preserve one shared capability builder and update
+  both admission surfaces together.
+
+**Proposed change, not yet merged:** introduce a new explicit
+shared-admission capability version/marker in the existing
+`softwareUpdate` object. The Agent must advertise it only when its
+shared-admission implementation and update-worker prerequisites are
+available. Manager must reject legacy schema-v1 readiness for both
+direct updates and rollout planning. Keep the update task payload
+schema separate: a capability schema upgrade does not imply changing
+`PlatformUpdateSchemaVersion` or the task's wire format.
+
+Before implementation, inventory and update all test fixtures and
+schema-170 integration tests that currently write the three-field
+ready capability. Include mixed-version tests proving an old ready
+Agent cannot create a job or enter an eligible rollout, while a
+compatible Agent can. Verify how the Agent reports readiness while
+another mutation is active: transient admission contention should not
+masquerade as a missing protocol capability.
+
 ## Deterministic tests required before enabling
 
 | Interleaving / crash cut | Expected behavior |
