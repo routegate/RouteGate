@@ -239,3 +239,41 @@ func TestSuccessPathCrashDoesNotBypassUnclearedAdmission(t *testing.T) {
 		t.Fatal("another update admitted over uncleared update intent")
 	}
 }
+
+func TestSuccessfulReceiptAndOrphanedAdmissionRequireRecovery(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	store := testPlatformUpdateReceiptStore(t)
+	updateID := "11111111-1111-4111-8111-111111111111"
+	if _, err := store.CreatePrepared(updateID, "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := BeginRuntimeMutation(dir, updateID, TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkMutationStarted(updateID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkSucceeded(updateID); err != nil {
+		t.Fatal(err)
+	}
+	// Crash cut between durable success receipt and admission completion.
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := store.Read(updateID)
+	if err != nil || receipt.Phase != PlatformUpdateReceiptSucceeded {
+		t.Fatalf("durable success receipt lost: receipt=%+v err=%v", receipt, err)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("success receipt silently cleared orphaned cross-protocol admission")
+	}
+	if next, err := BeginRuntimeMutation(dir,
+		"22222222-2222-4222-8222-222222222222", TaskKindConfigApply); err == nil {
+		next.Close()
+		t.Fatal("Agent mutation admitted despite orphaned successful update")
+	}
+	if _, err := store.CreatePrepared(updateID, "v1.2.3"); err == nil {
+		t.Fatal("same-task update receipt allowed replay after success")
+	}
+}
