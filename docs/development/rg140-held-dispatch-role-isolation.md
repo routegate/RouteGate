@@ -141,3 +141,15 @@ SELECT/INSERT/UPDATE/DELETE grants, secrets distribution, schema upgrades,
 rollback/backup and coordinator service are still unimplemented. Never put
 the privileged migrator URL into the Manager systemd environment. Prove the
 new role model on an isolated database before changing a live deployment.
+
+
+## Review hardening: pre-migration guard and privilege escalation tests
+
+Manager now checks `CheckHeldDispatchRuntimeIsolation` **before and after**
+its configured migration phase, so an already-created unsafe private schema
+cannot receive additional DDL before refusing HTTP startup. The disposable
+two-login rehearsal also grants and removes `CREATEDB` and database
+`CREATE` on the normal runtime login, proving that both are rejected.
+Partial CI schema setup is cleaned even if a multi-statement grant fails.
+The source-only migrator treats context cancellation as failure, never as
+successful completion.

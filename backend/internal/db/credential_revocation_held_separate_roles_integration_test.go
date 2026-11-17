@@ -72,6 +72,9 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 		}
 		rolesCreated=true
 	}
+	// Schema was verified absent above; mark it as ours before DDL so a
+	// partial multi-statement setup failure still removes any created objects.
+	schemaCreated=true
 	if _,err:=ownerPool.Exec(ctx,`GRANT CONNECT ON DATABASE routegate_ci TO rg140_test_manager_runtime;
 		GRANT USAGE ON SCHEMA public TO rg140_test_manager_runtime;
 		GRANT SELECT ON public.schema_migrations TO rg140_test_manager_runtime;
@@ -82,7 +85,6 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 		REVOKE ALL ON ALL TABLES IN SCHEMA routegate_dispatch FROM PUBLIC;`);err!=nil{
 		t.Fatal("cannot set up isolated owner/runtime ACL",err)
 	}
-	schemaCreated=true
 
 	cfg,err:=pgxpool.ParseConfig(os.Getenv("ROUTEGATE_TEST_DATABASE_URL"))
 	if err!=nil {t.Fatal(err)}
@@ -135,5 +137,20 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	}
 	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);err!=nil {
 		t.Fatal("runtime role did not return to isolated state",err)
+	}
+	// A future runtime database login must not be promoted to a powerful
+	// database administrator even without explicit schema ownership.
+	if _,err=ownerPool.Exec(ctx,`ALTER ROLE rg140_test_manager_runtime CREATEDB`);err!=nil {t.Fatal(err)}
+	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);!errors.Is(err,ErrUnsafeHeldDispatchRuntimeRole) {
+		t.Fatal("CREATEDB runtime credential escaped the security boundary",err)
+	}
+	if _,err=ownerPool.Exec(ctx,`ALTER ROLE rg140_test_manager_runtime NOCREATEDB`);err!=nil {t.Fatal(err)}
+	if _,err=ownerPool.Exec(ctx,`GRANT CREATE ON DATABASE routegate_ci TO rg140_test_manager_runtime`);err!=nil {t.Fatal(err)}
+	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);!errors.Is(err,ErrUnsafeHeldDispatchRuntimeRole) {
+		t.Fatal("database CREATE grant escaped the security boundary",err)
+	}
+	if _,err=ownerPool.Exec(ctx,`REVOKE CREATE ON DATABASE routegate_ci FROM rg140_test_manager_runtime`);err!=nil {t.Fatal(err)}
+	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);err!=nil {
+		t.Fatal("least-privileged role did not recover after administrator grants removed",err)
 	}
 }

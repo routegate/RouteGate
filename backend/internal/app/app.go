@@ -45,6 +45,12 @@ func (a *App) Start(ctx context.Context) error {
 
 	a.pool = pool
 
+	// Reject a dangerously owned protected namespace BEFORE attempting
+	// migrations. A second check after migrations catches new exposure.
+	if err := db.CheckHeldDispatchRuntimeIsolation(ctx, pool); err != nil {
+		return err
+	}
+
 	// Default startup mode preserves all existing legacy installations.
 	// The opt-in 'external' mode performs only a read-only migration-history
 	// check, so a least-privileged Manager cannot issue schema DDL.
