@@ -164,3 +164,31 @@ func TestLegacyServiceErrorRetainsUncertainRuntimeFence(t *testing.T) {
 		t.Fatalf("unexpected duplicate terminal reports: %d", results.Load())
 	}
 }
+
+func TestLegacyCancelledBeforeHandlerReleasesAdmission(t *testing.T) {
+	r, _, _ := fencedRunnerFixture(t, tasks.TaskKindVPNCoreService, 204)
+	r.cfg.ExperimentalRuntimeMutationFencing = false
+	r.runtimeMutationManagerReady = false
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	task := tasks.ConfigTask{ID: fencedTaskID, Kind: tasks.TaskKindVPNCoreService}
+	if err := r.withRuntimeMutation(ctx, task, func(context.Context) error {
+		called = true
+		return nil
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-handler cancellation returned %v", err)
+	}
+	if called {
+		t.Fatal("cancelled legacy handler was invoked")
+	}
+	if _, err := os.Stat(r.runtimeMutationDir + "/mutation-inflight.json"); !os.IsNotExist(err) {
+		t.Fatalf("proven pre-handler cancellation retained false recovery fence: %v", err)
+	}
+	lease, err := tasks.BeginRuntimeMutation(r.runtimeMutationDir,
+		"44444444-4444-4444-8444-444444444444", tasks.TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatalf("cancelled legacy admission blocked later update: %v", err)
+	}
+	defer lease.Close()
+}
