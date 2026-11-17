@@ -39,3 +39,50 @@ func TestPlatformUpdateStateProbeDoesNotReserveRuntimeMutationLease(t *testing.T
 	// detached worker must perform atomic admission at the actual mutation
 	// boundary; rechecking a predicate alone cannot close this race.
 }
+
+func TestDetachedUpdateLeaseExcludesAgentAndSurvivesWorkerExit(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	updateID := "11111111-1111-4111-8111-111111111111"
+	agentID := "22222222-2222-4222-8222-222222222222"
+
+	workerLease, err := BeginRuntimeMutation(dir, updateID, TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatalf("detached worker failed to reserve shared admission: %v", err)
+	}
+	if lease, err := BeginRuntimeMutation(dir, agentID, TaskKindConfigApply); err == nil {
+		lease.Close()
+		t.Fatal("Agent mutation admitted while detached worker owns lease")
+	}
+	// A worker crash releases the kernel flock but not the durable intent.
+	if err := workerLease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if lease, err := BeginRuntimeMutation(dir, agentID, TaskKindVPNCoreService); err == nil {
+		lease.Close()
+		t.Fatal("Agent mutation admitted after detached worker lost its lease")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mutation-inflight.json")); err != nil {
+		t.Fatalf("worker crash did not retain update admission evidence: %v", err)
+	}
+}
+
+func TestCompletedDetachedUpdateLeaseAllowsNewAdmission(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	workerLease, err := BeginRuntimeMutation(dir,
+		"11111111-1111-4111-8111-111111111111", TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workerLease.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if err := workerLease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	agentLease, err := BeginRuntimeMutation(dir,
+		"22222222-2222-4222-8222-222222222222", TaskKindConfigApply)
+	if err != nil {
+		t.Fatalf("completed update blocked next Agent admission: %v", err)
+	}
+	defer agentLease.Close()
+}
