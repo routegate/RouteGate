@@ -88,7 +88,7 @@ jobs:
 
       - name: Verify fresh human RG-140 removal approval in PostgreSQL
         run: |
-          go test ./internal/db -run '^TestCredentialRemovalDispatchHumanApproval$' -count=1 -timeout=120s -v
+          go test ./internal/db -run '^TestCredentialRemoval(DispatchHumanApproval|DirectSQLRejectsLesserHumanApproval)$' -count=1 -timeout=120s -v
 
       - name: Run tests
         run: go test ./...
