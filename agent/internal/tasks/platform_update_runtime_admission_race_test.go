@@ -212,16 +212,16 @@ func TestPlatformUpdatePreflightRejectsUnexpectedLockFile(t *testing.T) {
 	}
 }
 
-func TestSucceededUpdateReceiptDoesNotBypassUnclearedAdmission(t *testing.T) {
+func TestSuccessPathCrashDoesNotBypassUnclearedAdmission(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "runtime-mutations")
 	updateID := "11111111-1111-4111-8111-111111111111"
 	lease, err := BeginRuntimeMutation(dir, updateID, TaskKindPlatformUpdate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Models a crash after the updater and durable success receipt, but
-	// before the live worker could call Complete. A receipt alone cannot
-	// authorize another mutation or silently clear cross-protocol intent.
+	// Models the shared admission side of a crash after an updater succeeds
+	// but before the live worker calls Complete. Receipt persistence is
+	// tested separately; this test proves orphaned admission stays closed.
 	if err := lease.Close(); err != nil {
 		t.Fatal(err)
 	}
