@@ -211,3 +211,31 @@ func TestPlatformUpdatePreflightRejectsUnexpectedLockFile(t *testing.T) {
 		t.Fatal("unsafe shared lock permissions passed preflight")
 	}
 }
+
+func TestSucceededUpdateReceiptDoesNotBypassUnclearedAdmission(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	updateID := "11111111-1111-4111-8111-111111111111"
+	lease, err := BeginRuntimeMutation(dir, updateID, TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Models a crash after the updater and durable success receipt, but
+	// before the live worker could call Complete. A receipt alone cannot
+	// authorize another mutation or silently clear cross-protocol intent.
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("uncleared success-path intent was treated as idle")
+	}
+	if next, err := BeginRuntimeMutation(dir,
+		"22222222-2222-4222-8222-222222222222", TaskKindConfigApply); err == nil {
+		next.Close()
+		t.Fatal("Agent admitted new mutation over uncleared update intent")
+	}
+	if next, err := BeginRuntimeMutation(dir,
+		"33333333-3333-4333-8333-333333333333", TaskKindPlatformUpdate); err == nil {
+		next.Close()
+		t.Fatal("another update admitted over uncleared update intent")
+	}
+}
