@@ -104,6 +104,9 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	if err=login.QueryRow(ctx,`SELECT count(*) FROM public.schema_migrations`).Scan(&n);err!=nil || n==0 {
 		t.Fatal("least-privileged runtime cannot read ordinary granted public data",err)
 	}
+	if err=RequireAppliedMigrations(ctx,login,"../../migrations");err!=nil {
+		t.Fatal("read-only external migration preflight failed on true runtime login",err)
+	}
 	if err=CheckHeldDispatchRuntimeIsolation(ctx,login);err!=nil {
 		t.Fatal("isolated runtime role was falsely rejected",err)
 	}

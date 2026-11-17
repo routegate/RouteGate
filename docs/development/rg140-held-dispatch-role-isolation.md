@@ -115,3 +115,29 @@ This proves one **necessary ACL prerequisite** using real separate sessions,
 not yet application-wide runtime grants, migration ownership transfer,
 credential cutover or production coordinator isolation. **It changes
 nothing on current installed VPS.**
+
+
+## First opt-in one-shot migration plumbing (not deployed)
+
+The new source-only `backend/cmd/routegate-migrate` tool requires both
+`ROUTEGATE_MIGRATOR_DATABASE_URL` and `ROUTEGATE_DATABASE_URL`. They
+must refer to the same host/port/database but different PostgreSQL login
+identities. The tool connects to both accounts, rejects runtime membership
+in the migration-owner role, rechecks the dispatch boundary, runs the existing
+forward-only `db.Migrate` **as migrator**, and then uses the normal runtime
+login to verify the complete migration catalog **read-only**. It does not
+print database URLs or credentials, and is not packaged by the installer.
+
+`ROUTEGATE_DATABASE_MIGRATION_MODE=external` is an explicit Manager
+opt-in: startup **never calls db.Migrate** in this mode. It reads the exact
+`schema_migrations` catalog, refusing absent, pending or unrecognized
+migration filenames before HTTP serving. Default mode `startup` is unchanged
+for all existing production installations and tests; the installer does not
+set `external`.
+
+This is *preparatory plumbing*, not a supported deployment or a credential
+cutover. The role provisioner, ownership/DEFAULT PRIVILEGES, per-table
+SELECT/INSERT/UPDATE/DELETE grants, secrets distribution, schema upgrades,
+rollback/backup and coordinator service are still unimplemented. Never put
+the privileged migrator URL into the Manager systemd environment. Prove the
+new role model on an isolated database before changing a live deployment.

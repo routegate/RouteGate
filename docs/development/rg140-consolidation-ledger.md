@@ -341,3 +341,15 @@ forged receipt denial, no SET ROLE to owner, then deliberately grants owner
 membership to prove the startup guard fails even for non-inherited roles.
 The test drops the disposable test schema and roles. Not a production migration
 or replacement runtime connection. Future migration/installer work still NO-GO.
+
+
+### Explicit read-only external migration mode (not deployed)
+
+Added an opt-in `ROUTEGATE_DATABASE_MIGRATION_MODE=external` Manager path:
+verify complete `schema_migrations` catalog with SELECT-only and fail
+startup on any missing/foreign migration instead of running DDL.
+Default `startup` is unchanged. Added source-only
+`backend/cmd/routegate-migrate`: separate migrator and runtime database
+URLs are required, identities cannot match or inherit the migration owner,
+and post-migration catalog/held-dispatch isolation is revalidated through
+the runtime login. Not installed, no migration 171, no production cutover.
