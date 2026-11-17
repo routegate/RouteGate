@@ -318,6 +318,7 @@ func TestCredentialRevocationDowngradePreservesHistory(t *testing.T) {
 	// preparation ledger. A legitimate empty downgrade must reverse those
 	// dependencies first, and must not CASCADE away retained evidence.
 	for _, name := range []string{
+		"000170_credential_removal_dispatch_stages.down.sql",
 		"000169_credential_removal_dispatch_authorizations.down.sql",
 		"000168_credential_removal_dispatch_bindings.down.sql",
 	} {
@@ -340,6 +341,7 @@ func TestCredentialRevocationDowngradePreservesHistory(t *testing.T) {
 	for _, name := range []string{
 		"000168_credential_removal_dispatch_bindings.up.sql",
 		"000169_credential_removal_dispatch_authorizations.up.sql",
+		"000170_credential_removal_dispatch_stages.up.sql",
 	} {
 		migration, e := os.ReadFile("../../migrations/" + name)
 		if e != nil { t.Fatal(e) }

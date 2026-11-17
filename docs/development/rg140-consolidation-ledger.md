@@ -258,3 +258,23 @@ transition be considered. Until then RG-140 #545 remains **NO-GO**.
 **Branch cleanup:** keep #703/#713/#811 and related draft sources until
 their unique code and tests are accounted for. Never delete an unmerged
 branch solely because this PR currently builds; no `main` or VPS changes.
+
+
+## Canonical migration 170: non-executable intent staging
+
+Selective port of the reviewed #713 legacy migration 175 plus transaction-bound
+admission gate: `000170_credential_removal_dispatch_stages`.
+A stage is **NOT** a config version, executable job, Agent claim or proof of
+revoke. Under the original server → preparation → Agent → user/session locks,
+it rechecks applied baseline, original Agent credential generation, frozen
+168 UUID/hash binding and fresh 169 nonce/approval. Both Go and SQL require
+current active human `super_admin` with `system:manage`, `configs:apply`,
+`vpn_users:disable` (legacy `admin` discarded). Ordinary config_apply
+remains blocked by P0141; history is immutable and downgrade is non-destructive.
+The adapted old PostgreSQL tests check concurrent staging, forged job IDs,
+stale Agent, revoked human session, cancellation and lock-wait invalidation.
+
+**No production dispatcher or HTTP route is mounted; no task, version,
+subscription or VPN account is changed.** The actual trusted held-dispatch
+and authenticated result path remain for a reviewed, separate **171+** stage.
+RG-140 v0.2.0 remains NO-GO.
