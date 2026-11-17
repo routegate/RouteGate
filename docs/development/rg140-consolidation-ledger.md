@@ -197,8 +197,64 @@ reservation, and **RG-140 #545 remains NO-GO**.
 
 **Next implementation boundary:** adapt the *already reviewed* isolated
 claim/result and confirmation contracts from #703/#713 to the canonical
-161–167 history. Choose collision-free new **168+** migration(s), with fresh
-operator/session consent, exact Agent identity, one-use dispatch, transport
-loss/unknown outcome reconciliation and independently verified terminal proof.
+161–169 history. Choose collision-free new **170+** migration(s), with
+exact Agent identity, one-use dispatch, transport loss/unknown outcome
+reconciliation and independently verified terminal proof; the human consent
+ledger is now preserved separately but is **not yet executable**.
 Do not simply mount the legacy test-only HTTP endpoints or route a removal
 task through the generic config-apply queue.
+
+
+## Canonical 168–169: immutable proposed task IDs and human approval
+
+These are **selective ports of the original reviewed #713 code**, not
+another parallel authority/transport implementation. The legacy source
+migration 173 is now `000168_credential_removal_dispatch_bindings` and legacy
+174 is now `000169_credential_removal_dispatch_authorizations`. They follow
+our existing 161–167 schema. The original 160 preparation SQL and the current
+161 SQL were compared: identical executable statements, with a comment-only
+difference. **Old 173/174 names must never be cherry-picked in addition.**
+
+- `backend/internal/revocations/prepared_integrity.go` independently
+  rechecks in a read-only repeatable-read snapshot that the prepared frozen
+  candidate and applied node/account/Agent generation/hashes still match.
+  This **does not** issue authorization.
+- `removal_job_binding.go` uses server → preparation lock order and
+  `vpn_credential_revocation_dispatch_bindings` to assign **stable, never
+  yet issued** candidate version/job UUIDs. A concurrent retry returns
+  the same IDs, while direct SQL changes, forged hashes/generation and
+  destructive downgrade fail closed. Original prepared reservation continues
+  to reject generic config-apply jobs.
+- `removal_dispatch_approval.go` records **explicit fresh human consent**
+  bound to exactly those IDs, the original candidate hashes, Agent generation,
+  one user/session and an expiry no later than two minutes. It creates no
+  actual config version, config apply job, Agent task or result.
+- `removal_dispatch_actor.go` and SQL migration 169 **tighten legacy #713
+  `admin` permission** to match our current authorized preparation: an active
+  human **`super_admin`**, live and unrevoked session, with all three
+  permissions `system:manage`, `configs:apply` and
+  `vpn_users:disable`. These grants are rechecked **under database locks**;
+  caller-supplied identity is not trusted. PostgreSQL also independently
+  refuses direct INSERT of an ordinary admin or incomplete permission set.
+- Both DOWN migrations refuse to discard a nonempty durable history.
+
+Tests: `backend/internal/db/credential_revocation_dispatch_binding_integration_test.go`
+and `credential_revocation_dispatch_approval_integration_test.go`, run
+early with real PostgreSQL in the existing Backend CI job. Targeted
+migration 168, migration 169, and direct-SQL privilege-bypass steps were
+**SUCCESS** on [run 43986030449](https://github.com/routegate/RouteGate/actions/runs/43986030449)
+at exact code HEAD `4e716db8622959be6a45a790000c8ccdc9f8376d`; the
+full CI run may still be in progress and must be inspected separately.
+
+**No change to the release gate:** a consent row can neither authorize itself
+nor prove an Agent executed anything. No HTTP endpoint/Runner handler consumes
+this row. A future reviewed **170+** stage must atomically consume a *fresh*
+human decision under its original account/Agent/node locks and admission gate,
+create a narrowly held work item and account for connection-loss/unknown
+outcomes. Only after authenticated Agent delivery and independently
+verified real traffic evidence may a terminal PostgreSQL/UX/subscription
+transition be considered. Until then RG-140 #545 remains **NO-GO**.
+
+**Branch cleanup:** keep #703/#713/#811 and related draft sources until
+their unique code and tests are accounted for. Never delete an unmerged
+branch solely because this PR currently builds; no `main` or VPS changes.
