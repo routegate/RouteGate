@@ -32,6 +32,30 @@ authorize dispatch, production rollout, automatic recovery or a merge.
   the durable mutation marker. An acknowledged result is not proof that the
   live runtime is safe to unlock.
 
+## Legacy platform-update dispatch boundary: separate review required
+
+The polled task path is `Runner.processNextTask` →
+`dispatchTask` → `withRuntimeMutation` → `dispatchTaskUnfenced`.
+For `platform_update`, the unfenced switch calls
+`processPlatformUpdateReconciliationTask`, which explicitly routes
+`PlatformUpdateOperationDispatch` to `processPlatformUpdateDispatchTask`
+and ultimately `PrepareAndStartDetachedPlatformUpdate`.
+
+**Observed difference:** with fencing enabled or persistent mutation state,
+`withRuntimeMutation` rejects detached dispatch. With fencing disabled,
+Manager negotiation absent, and no persistent mutation state, its early
+legacy return still permits the historical platform-update dispatch path.
+This is **not** evidence of a new bypass introduced by consolidation, nor
+proof that the detached worker is unsafe: it is a distinct legacy operation
+with its own prepared receipt and reconciliation model. Do not silently
+disable it, or claim it is covered by the shared Agent mutation lock.
+A release decision needs an explicit compatibility and handoff review.
+
+The new `TestLegacyUnfencedDispatchCannotEnableDormantMutations` asserts
+only that unknown and credential-removal kinds remain unsupported in that
+legacy path. It deliberately does not assert that platform-update dispatch
+is disabled.
+
 ## Required follow-up before release
 
 1. Trace every real Agent task-dispatch call site and prove credential removal
