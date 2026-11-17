@@ -9,8 +9,9 @@ import (
 )
 
 // The opt-in runtime fence intentionally leaves legacy service tasks working
-// when no durable state exists. It must NOT accidentally enable dormant task
-// kinds or detached platform-update dispatch through the unfenced switch.
+// when no durable state exists. Unsupported task kinds must stay rejected even
+// through that legacy path. Detached platform-update dispatch has a separate
+// historical path and is not covered by this test.
 func TestLegacyUnfencedDispatchCannotEnableDormantMutations(t *testing.T) {
 	for _, tc := range []struct {
 		name string
