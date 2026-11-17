@@ -56,9 +56,10 @@ func TestCredentialRemovalStartupRefusesOwnerOnlyHeldDispatch(t *testing.T) {
 	_,err:=pool.Exec(ctx,`CREATE SCHEMA routegate_dispatch;
 		REVOKE ALL ON SCHEMA routegate_dispatch FROM PUBLIC;`)
 	if err!=nil {t.Fatal("create disposable owner-only schema",err)}
-	t.Cleanup(func(){
-		_,_ = pool.Exec(ctx,`DROP SCHEMA IF EXISTS routegate_dispatch CASCADE`)
-	})
+	// LIFO: remove the disposable schema before the deferred pool close.
+	defer func(){
+		_,_ = pool.Exec(ctx,`DROP SCHEMA IF EXISTS routegate_dispatch`)
+	}()
 	if err:=CheckHeldDispatchRuntimeIsolation(ctx,pool);!errors.Is(err,ErrUnsafeHeldDispatchRuntimeRole){
 		t.Fatal("Manager startup accepted a private schema it owns despite PUBLIC revocation",err)
 	}
