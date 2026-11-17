@@ -314,11 +314,38 @@ func TestCredentialRevocationDowngradePreservesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, string(down)); err != nil {
-		t.Fatal("empty-schema downgrade", err)
+	// Newer immutable 168/169 histories hold foreign keys to the
+	// preparation ledger. A legitimate empty downgrade must reverse those
+	// dependencies first, and must not CASCADE away retained evidence.
+	for _, name := range []string{
+		"000169_credential_removal_dispatch_authorizations.down.sql",
+		"000168_credential_removal_dispatch_bindings.down.sql",
+	} {
+		migration, e := os.ReadFile("../../migrations/" + name)
+		if e != nil { t.Fatal(e) }
+		if _, e = pool.Exec(ctx, string(migration)); e != nil {
+			t.Fatal("empty descendant downgrade", name, e)
+		}
 	}
-	if _, err = pool.Exec(ctx, string(up)); err != nil {
-		t.Fatal("reapply", err)
+	if _, err = pool.Exec(ctx, string(down)); err != nil {
+		t.Fatal("empty-schema preparation downgrade", err)
+	}
+	for _, migration := range []struct{name string; sql []byte}{
+		{"000161_credential_revocation_preparations.up.sql", up},
+	} {
+		if _, err = pool.Exec(ctx, string(migration.sql)); err != nil {
+			t.Fatal("reapply preparation", migration.name, err)
+		}
+	}
+	for _, name := range []string{
+		"000168_credential_removal_dispatch_bindings.up.sql",
+		"000169_credential_removal_dispatch_authorizations.up.sql",
+	} {
+		migration, e := os.ReadFile("../../migrations/" + name)
+		if e != nil { t.Fatal(e) }
+		if _, e = pool.Exec(ctx, string(migration)); e != nil {
+			t.Fatal("reapply descendant", name, e)
+		}
 	}
 	service := revocations.NewService(pool)
 	p, err := service.Prepare(ctx, in)

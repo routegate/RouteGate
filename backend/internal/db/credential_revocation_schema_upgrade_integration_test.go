@@ -72,8 +72,8 @@ func TestCredentialRevocationPreparationUpgradesCurrent160WithoutDataLoss(t *tes
 		t.Fatalf("re-run upgraded migration idempotently: %v", err)
 	}
 	version, err = NewSchemaVersionRepository(pool).AppliedSchemaVersion(ctx)
-	if err != nil || version != "000167_runtime_recovery_enrollment_preparation" {
-		t.Fatalf("latest version = %q (%v), expected 167 dormant enrollment preparation ledger", version, err)
+	if err != nil || version != "000169_credential_removal_dispatch_authorizations" {
+		t.Fatalf("latest version = %q (%v), expected 169 dormant human authorization ledger", version, err)
 	}
 
 	var previousCount, newCount, legacyCollision int
