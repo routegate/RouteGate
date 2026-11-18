@@ -101,10 +101,13 @@ func (r *Runner) withRuntimeMutation(ctx context.Context, task tasks.ConfigTask,
 	recoveryAdapter := r.runtimeRecoveryAdapter(task)
 	expectedHash := ""
 	if recoveryAdapter != nil {
+		r.logger.Info("runtime mutation preflight", "phase", "witness_before")
 		observed, err := tasks.CaptureRuntimeRecoveryWitness(ctx, r.cfg.ActiveConfigPath, recoveryAdapter)
 		if err != nil {
+			r.logger.Warn("runtime mutation preflight", "phase", "witness_unavailable")
 			return errRuntimeMutationRecovery
 		}
+		r.logger.Info("runtime mutation preflight", "phase", "witness_ready")
 		before = &observed
 		expectedHash = observed.RuntimeHash
 		if task.EffectiveKind() == tasks.TaskKindConfigApply {
