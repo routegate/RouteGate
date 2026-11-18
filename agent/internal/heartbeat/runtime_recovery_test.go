@@ -104,6 +104,7 @@ func TestFencedInitialApplyMissingRuntimeDoesNotExecute(t *testing.T) {
  task := tasks.ConfigTask{
   ID: fencedTaskID, AgentID: fencedAgentID, ServerID: fencedServerID,
   Kind: tasks.TaskKindConfigApply, Status: "in_progress",
+  RenderedConfig: []byte(`{}`), // Legacy default selects the VLESS adapter.
  }
  invoked := false
  err := r.withRuntimeMutation(context.Background(), task, func(context.Context) error {
