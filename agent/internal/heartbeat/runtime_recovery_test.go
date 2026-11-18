@@ -145,3 +145,32 @@ func TestFencedInitialApplyUnprovenRuntimeDoesNotExecute(t *testing.T) {
 		})
 	}
 }
+
+
+ // Even with a trustworthy running service, an invalid target envelope
+ // cannot enter config apply. The target hash must be verified under the
+ // existing mutation lease, before any handler invocation.
+func TestFencedConfigApplyRejectsUnboundTarget(t *testing.T) {
+ r, base, results := fencedRunnerFixture(t, tasks.TaskKindConfigApply, 204)
+ r.vpnCoreAdapter = &recoveryServiceAdapter{fencedServiceAdapter: base}
+ r.cfg.ActiveConfigPath = filepath.Join(t.TempDir(), "active.json")
+ if err := os.WriteFile(r.cfg.ActiveConfigPath, []byte(`{"inbounds":[]}`), 0600); err != nil {
+  t.Fatal(err)
+ }
+ task := tasks.ConfigTask{
+  ID: fencedTaskID, AgentID: fencedAgentID, ServerID: fencedServerID,
+  Kind: tasks.TaskKindConfigApply, Status: "in_progress",
+  RenderedConfig: []byte(`{}`), // Adapter selection succeeds, target hash must fail.
+ }
+ invoked := false
+ err := r.withRuntimeMutation(context.Background(), task, func(context.Context) error {
+  invoked = true
+  return nil
+ })
+ if !errors.Is(err, errRuntimeMutationRecovery) || invoked || base.calls != 0 || results.Load() != 0 {
+  t.Fatalf("unbound target admitted: err=%v invoked=%v calls=%d results=%d", err, invoked, base.calls, results.Load())
+ }
+ if _, err := os.Stat(filepath.Join(r.runtimeMutationDir, "mutation-inflight.json")); err != nil {
+  t.Fatalf("unbound target lost durable intent: %v", err)
+ }
+}
