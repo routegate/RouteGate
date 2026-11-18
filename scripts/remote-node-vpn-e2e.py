@@ -86,7 +86,7 @@ class API:
         require(status == expected, f"API {method} returned HTTP {status}; expected {expected}")
         return json.loads(raw) if raw else {}
 
-    def wait_job(self, path, expected="succeeded", timeout=240):
+    def wait_job(self, path, expected="succeeded", timeout=240, phase="unspecified"):
         deadline = time.monotonic() + timeout
         last_status = "not_observed"
         while time.monotonic() < deadline:
@@ -123,7 +123,7 @@ class API:
         binary = "present" if Path("/usr/bin/sing-box").is_file() else "absent"
         source = "present" if Path("/etc/apt/sources.list.d/sagernet.sources").is_file() else "absent"
         raise RuntimeError(
-            f"Agent job exceeded its time budget (status={last_status}, "
+            f"Agent job exceeded its time budget (phase={phase}, status={last_status}, "
             f"admission={admission}, package_manager={package_manager}, "
             f"agent_service={agent_service}, sing_box_binary={binary}, "
             f"repository_source={source})")
@@ -226,7 +226,7 @@ def exercise(work, manager):
         install = api.call("POST", base + "/vpn-core/installations",
                            {"operation": "install_sing_box"}, expected=202)
         try:
-            api.wait_job(base + "/vpn-core/installations/" + install["job"]["id"], timeout=660)
+            api.wait_job(base + "/vpn-core/installations/" + install["job"]["id"], timeout=660, phase="install")
         except RuntimeError as error:
             agent_started_after = agent_activation()
             if agent_started_before is None or agent_started_after is None:
@@ -249,7 +249,7 @@ def exercise(work, manager):
             checked = api.call("POST", base + "/config/versions/" + version + "/validate", {})
             require(checked["validationResult"]["valid"], "Manager validation rejected test config")
             submitted = api.call("POST", base + "/config/versions/" + version + "/apply", {}, expected=202)
-            job = api.wait_job(base + "/config/apply-jobs/" + submitted["job"]["id"], expected)
+            job = api.wait_job(base + "/config/apply-jobs/" + submitted["job"]["id"], expected, phase="config_apply")
             return job
 
         render_apply("succeeded")
