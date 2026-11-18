@@ -219,3 +219,27 @@ masquerade as a missing protocol capability.
 **Important:** `RuntimeMutationStatePresent` is an observation, not
 admission. The existing interleaving test proves that distinction; it
 does not test a fixed handoff or establish release readiness.
+
+## CI regression: initial config apply is rejected before handler (2026-11-18)
+
+Disposable-runner CI `44377277938` (HEAD `4ae656a`) confirms the first
+post-install `config_apply` times out with `last_agent_phase=witness_unavailable`,
+`status=in_progress`, and a retained durable intent. The sing-box installation
+completed and released its own intent before this apply was submitted. The
+other CI jobs passed. The Agent emits `witness_unavailable` only when
+`CaptureRuntimeRecoveryWitness` fails **before** `execute` is called in the
+experimental mutation gate. Thus this is a pre-handler admission failure, not
+an observed config-apply handler or Manager result failure.
+
+The witness currently requires an already running, enabled sing-box with a
+readable active config and listener. Initial bootstrap has no such runtime yet.
+Do **not** simply skip the witness when missing: an existing but broken or
+ambiguous runtime must remain fenced, and a retained intent must never be
+silently cleared. A correct bootstrap path needs an explicit, independently
+verifiable *pristine-runtime* proof under the existing shared lease, with
+negative tests for corrupt/partial/previously used state, concurrent updates,
+crashes, and ambiguous Manager acknowledgements. Reuse the existing admission
+primitive; do not create a second lock or a broad exception for config apply.
+
+Until that proof and its regression tests exist, PR #812 remains Draft / NO-GO.
+No live VPS should be changed as part of this investigation.
