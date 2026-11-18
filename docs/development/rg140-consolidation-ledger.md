@@ -8,54 +8,67 @@
 
 **Status: NOT RELEASE-READY / NO-GO. No production deployments, schema writes or Agent credential removal.**
 
-## What has actually been consolidated
+## Completion audit — 19 November 2026
 
-1. On the consolidation branch, the first commit `de84758c0419df76c59932b48a68edcb3cecde37` has **one parent, current `main`**, and uses the *identical Git tree SHA* `2301ba6c136c2c05d2de16fce16350ba38701b70` from #789. Thus its code is initially identical to the already-tested large integration preview, but its **461 experimental commits are not ancestors** of this new branch.
-2. Next, ported **only** the new *unmounted session-authorized preparation adapter* from the #811 lineage, with its unit and PostgreSQL integration tests. This supplies authenticated human super-admin + explicit shared-process-impact acknowledgement instead of trusting a caller-supplied audit actor. It adds **no SQL migration, API endpoint, Agent task or job**.
+This section supersedes older status/count/next-step notes below; those notes
+remain provenance, not a queue of new architecture work. Baseline inspected:
+`a31fdd3a2f8ecf0a354cc018f8676ee19a1ef354` (107 commits, 251 changed files,
+79 non-test Go files). All six ordinary CI jobs except Manager-to-Reality
+passed in run `44399731535`; Workspace `44399731980` and Docs `44399731585`
+also passed. The failing bootstrap reached `config_apply/witness_unavailable`.
 
-This is **history consolidation and the first narrow reconciliation**, not the completion of the end-to-end revocation workflow. The inherited #789 snapshot includes Hybrid/Grafana and website/release changes, which must be scoped/split on review **before merging**; it must not be treated as a small RG-140-only PR.
+### First blocker: accidental recovery opt-in after legacy installation
 
-## Canonical migration numbering decision — provisional
+The missing running witness is the immediate rejection, **not the root reason
+an ordinary new node entered experimental recovery**. After mandatory shared
+admission was added to legacy tasks, successful `vpn_core_install` left an
+idle directory containing `runtime.lock`. `prepareRuntimeMutationHeartbeat`
+used directory existence to advertise `runtimeMutationFencingV1`; Manager
+persisted that capability, and the next ordinary first apply required an
+already running sing-box. Default bootstrap does not set the experimental flag.
 
-| Ordinal | Consolidation candidate (preserved from #789) |
+The narrow fix reuses `RuntimeMutationIdleForPlatformUpdate` in heartbeat
+capability selection. A completed shared lease is not enrollment. Explicit
+opt-in, prior Manager acknowledgement, unresolved markers, unknown files,
+unsafe state and lock contention retain conservative negotiation. Actual
+dispatch still acquires the same durable lease. No witness validation, Manager
+sticky policy, lock, journal, dispatcher or offline enrollment code is bypassed
+or replaced. Already stuck nodes are **not** automatically unlocked/reset.
+
+The new HTTP-heartbeat regression reproduces install completion -> capability
+exchange -> first-apply admission; it fails with the old predicate and passes
+with the fix. Negative cases cover retained/held install intent, unknown state,
+explicit opt-in and a Manager that already persisted fencing. Existing missing,
+corrupt and untrusted witness tests remain unchanged. Real E2E must separately
+confirm the complete bootstrap; callback admission alone is not VPN traffic.
+
+### Existing work and remaining transfers
+
+| Area / source | Verified state and disposition |
 | --- | --- |
-| 161 | `000161_credential_revocation_preparations` |
-| 162 | `000162_runtime_recovery_reservations` |
-| 163 | `000163_runtime_recovery_challenge_ledger` |
-| 164 | `000164_runtime_recovery_attempt_ledger` |
-| 165 | `000165_runtime_recovery_observation_nonce` |
-| 166 | `000166_runtime_pre_dispatch_checkpoint` |
-| 167 | `000167_runtime_recovery_enrollment_preparation` |
+| #789 snapshot | Preserved as the consolidation's initial identical tree; experimental source ancestry was already excluded by that one-parent snapshot. Later scope cuts are documented below. |
+| Canonical SQL | One ordinal each at 160–170; 160 is unchanged. Source comparison confirms legacy #713 160 -> current 161 and 173 -> 168 have identical executable SQL. 174 -> 169 and 175 -> 170 are adapted with current human super-admin authority. No 175/176 collision was imported. |
+| #647 | External runtime owner/membership refusal is already adapted in the shared `CheckExternalMigrationRuntimeRole`; do not port a second guard. |
+| #639 / #652 | Historical schema-175 grant creation/required-grant checks are not ported. Their table list is incompatible with canonical 170. Reuse the implementation pattern only after adapting the existing table review matrix. |
+| #713 / #703 | Held dispatch/transport, terminal evidence/commit, retirement and failed-result handling remain reuse sources. Current production router and Runner do not mount credential removal. The current two-user Reality contract test proves local effect, not that complete product path. |
+| #811 | Session-authorized preparation was selectively ported. Alternative 161–165 schema and dispatch identity path must not be merged wholesale. |
+| Shared admission | Agent and detached update worker now both call `BeginRuntimeMutation`; the earlier ownership review's claim that the worker takes no lock is stale. Real worker/Agent restart and mixed-version compatibility remain acceptance gaps. |
+| Duplicates | Hash scan found no byte-identical non-test Go files involving this PR. The two trust-boundary validators are intentional. This is not a claim of an exhaustive semantic duplicate audit. |
 
-The alternate #811 branch implements **different SQL at 161** and assigns **unrelated operations to 162–165**. These two histories are **not** safe to merge, concatenate, rename or cherry-pick. Any reviewed additional durable object must be integrated as a separate migration **168+**, subject to verifying existing production and test database schema state and upgrade safety. Never assume unmerged migration numbers were executed on production.
+### Finite completion gates (no new parallel subsystems)
 
-## Deduplication decisions
-
-| Source | Current decision | Reason |
-| --- | --- | --- |
-| #789 / #784 / #783 | Keep as immutable reference until final review | Existing recovery, Agent, journal, Manager evidence, tests and 161–167 schema |
-| #737 | Keep pending differential review | Disposable two-user VLESS/Reality test and later Agent hardening may not be identical |
-| #713 | Keep pending differential review | Earlier distinct recovery history; unverified unique hardening |
-| #811 (and #806/#808/#809/#810) | Do **not** merge full stack | Alternative SQL and unmounted duplicate/parallel dispatch model |
-| #811 authorized preparation + tests | **Ported** | Isolated, no schema conflict, typed session identity; still dormant |
-| #811 schema-162..165 confirmation/claim/task reservations | **Not ported** | Collide with canonical migration ordinals and recovery architecture |
-| #811 identity parser / Agent token matcher | Pending protocol gap analysis | Identity check alone is not authenticated execution or receipt |
-| #811 claim-readback/concurrency tests | Pending adaptation | Incompatible alternate dispatch tables; avoid tests of wrong contract |
-| #745/#746 | Preserve through #789 | Their changes are ancestors of the consolidated source snapshot |
-
-A branch being an ancestor of a survivor is evidence that its **commits** are preserved in that survivor, **not** proof that its PR can safely be closed. Check reviews, external consumers, unique revisions and dependent PR bases first. Avoid deleting canary/ops branches without verifying whether they hold operational recovery history.
-
-## Non-negotiable acceptance before changing `main`
-
-- [ ] Code/ADR diff: identify which RG-140 actions are really mounted versus intentionally dormant. No completed-via-HTTP-200 inference.
-- [ ] Verify all authorization, replay and result evidence bindings to current Agent identity and candidate version.
-- [ ] Real PostgreSQL migration upgrade and rollback/downgrade history: exact ordinal 160→167; never re-use 161–165 from #811.
-- [ ] Check Agent's durable, one-shot failure/recovery semantics across restart, stale generation, lost reply and simultaneous tasks.
-- [ ] Disposable two-or-more-user sing-box VLESS/Reality run, including old-session termination and unrelated-user preservation.
-- [ ] Fail-closed account/subscription UX and unrelated node/Hybrid continuity.
-- [ ] Exact-head Backend/Agent/Workspace/installer/website/traffic CI all green.
-- [ ] Independent review of exact final diff and a deliberate scoped merge approval.
-- [ ] **Only after** code, tests and dependency review: close obsolete PRs and delete obsolete branch refs; never rewrite `main` or claim GitHub PR metadata/history can be erased.
+1. **Bootstrap regression:** land the narrow capability fix and obtain green
+   generated-command -> Agent -> first apply -> real Reality E2E. Never clear
+   old ambiguous intents to manufacture success.
+2. **Canonical dispatch prerequisites:** adapt #639/#652 role/grant wiring to
+   schema 170 using the existing external migrator and guard. Verify installer,
+   update and restore ownership boundaries in disposable environments before
+   adapting #713 protected dispatch tables; no legacy migration cherry-pick.
+3. **Complete the existing revocation path:** adapt #713/#703 held issuance,
+   authenticated claim/result, independent terminal evidence, atomic terminal
+   state and retired-credential fence; connect one human-authorized production
+   entry point and one Agent path. Acceptance is the issue #545 two-account
+   test through those actua…1611 tokens truncated…e erased.
 
 ## Working protocol to prevent another fork
 

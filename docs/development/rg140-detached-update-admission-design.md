@@ -3,6 +3,15 @@
 **Status: PARTIALLY IMPLEMENTED — Draft / NO-GO.** Applies to the
 schema-170 consolidation branch only; no production VPS changes.
 
+**19 November correction:** the initial-apply failure described below was
+caused by heartbeat treating the idle shared-lock directory left by successful
+legacy installation as experimental recovery opt-in. See the current
+[completion audit](rg140-consolidation-ledger.md#completion-audit--19-november-2026).
+The narrow fix changes capability selection, not witness validation. The
+pristine-runtime/enrollment discussion below remains applicable only to a
+future explicitly enabled recovery bootstrap, not a prerequisite for restoring
+ordinary flag-off installation. Existing ambiguous intents remain blocked.
+
 ## CI regression triage (17 November 2026)
 
 RouteGate CI run `44042671781` at `b52d911` **failed**.

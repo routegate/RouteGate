@@ -185,7 +185,12 @@ func (r *Runner) prepareRuntimeMutationHeartbeat(info *systeminfo.Info) {
 	if dir == "" {
 		dir = tasks.DefaultRuntimeMutationDir
 	}
-	if r.cfg.ExperimentalRuntimeMutationFencing || tasks.RuntimeMutationStatePresent(dir) {
+	// Legacy handlers and the detached worker also use this directory. A
+	// completed lease leaves runtime.lock behind; that is not an opt-in to
+	// experimental witness/recovery semantics. Reuse the lock-held idle check
+	// so unresolved, contended or unreadable state still requests preservation.
+	// This observation never grants admission: dispatch acquires its own lease.
+	if r.cfg.ExperimentalRuntimeMutationFencing || r.runtimeMutationManagerReady || !tasks.RuntimeMutationIdleForPlatformUpdate(dir) {
 		if info.Capabilities == nil {
 			info.Capabilities = map[string]any{}
 		}

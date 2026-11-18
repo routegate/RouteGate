@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/ikaevus/routegate/agent/internal/config"
+	"github.com/ikaevus/routegate/agent/internal/tasks"
 )
 
 // Regression: the newer traffic-accounting heartbeat must coexist with the
@@ -18,8 +20,8 @@ import (
 func TestFencedHeartbeatPreservesModernTrafficAccounting(t *testing.T) {
 	for _, tc := range []struct {
 		name, acknowledgedAgent string
-		accepted               bool
-		wantReady              bool
+		accepted                bool
+		wantReady               bool
 	}{
 		{"matching_ack", fencedAgentID, true, true},
 		{"missing_ack", fencedAgentID, false, false},
@@ -75,6 +77,96 @@ func TestFencedHeartbeatPreservesModernTrafficAccounting(t *testing.T) {
 			traffic, ok := capabilities["trafficAccounting"].(map[string]any)
 			if !ok || traffic["enabled"] != true || traffic["source"] != "sing-box-v2ray-api" {
 				t.Fatalf("modern traffic accounting capability lost: %#v", traffic)
+			}
+		})
+	}
+}
+
+// Reproduce install -> heartbeat -> first config apply. Shared legacy admission
+// must not silently enroll a fresh node in the experimental recovery protocol.
+func TestPostInstallHeartbeatPreservesAdmissionPolicy(t *testing.T) {
+	for _, mode := range []string{"completed", "unresolved", "contended", "unknown_state", "opt_in", "manager_already_fenced"} {
+		t.Run(mode, func(t *testing.T) {
+			accepted := mode == "manager_already_fenced"
+			requests := make(chan bool, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.Path != "/api/v1/agent/heartbeat" || req.Header.Get("Authorization") != "Bearer isolated-token" {
+					http.Error(w, "unexpected request", http.StatusBadRequest)
+					return
+				}
+				var body struct {
+					Capabilities map[string]any `json:"capabilities"`
+				}
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					t.Error(err)
+					return
+				}
+				requested, _ := body.Capabilities["runtimeMutationFencingV1"].(bool)
+				requests <- requested
+				accepted = accepted || requested // Manager's persisted policy is sticky.
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(map[string]any{
+					"ok": true, "agentId": fencedAgentID, "serverId": fencedServerID,
+					"runtimeMutationFencingAccepted": accepted,
+				}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer srv.Close()
+			r := NewRunner(config.Config{
+				ManagerURL: srv.URL, AgentID: fencedAgentID, ServerID: fencedServerID,
+				AgentToken: "isolated-token", ServiceControlEnabled: true,
+				ActiveConfigPath:                   filepath.Join(t.TempDir(), "not-yet-created.json"),
+				ExperimentalRuntimeMutationFencing: mode == "opt_in",
+			}, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+			r.vpnCoreAdapter = &recoveryServiceAdapter{fencedServiceAdapter: &fencedServiceAdapter{}}
+			r.runtimeMutationDir = filepath.Join(t.TempDir(), "mutations")
+			install, err := tasks.BeginRuntimeMutation(r.runtimeMutationDir, fencedTaskID, tasks.TaskKindVPNCoreInstall)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer install.Close()
+			if mode != "unresolved" && mode != "contended" {
+				if err := install.Complete(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode != "contended" {
+				if err := install.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "unknown_state" {
+				if err := os.WriteFile(filepath.Join(r.runtimeMutationDir, "unknown.json"), []byte("untrusted"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := r.sendHeartbeat(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			wantRequest := mode != "completed" && mode != "manager_already_fenced"
+			requested := <-requests
+			if requested != wantRequest || r.runtimeMutationManagerReady != (mode != "completed") {
+				t.Fatalf("wrong post-install policy: request=%v ready=%v", requested, r.runtimeMutationManagerReady)
+			}
+			called := false
+			task := tasks.ConfigTask{ID: fencedTaskID, AgentID: fencedAgentID, ServerID: fencedServerID,
+				Kind: tasks.TaskKindConfigApply, Status: "in_progress", RenderedConfig: []byte(`{}`)}
+			err = r.withRuntimeMutation(context.Background(), task, func(context.Context) error {
+				called = true
+				other, err := tasks.BeginRuntimeMutation(r.runtimeMutationDir, fencedTaskID, tasks.TaskKindPlatformUpdate)
+				if err == nil {
+					other.Close()
+					t.Error("first apply bypassed shared admission")
+				}
+				return nil
+			})
+			if mode == "completed" {
+				if err != nil || !called || !tasks.RuntimeMutationIdleForPlatformUpdate(r.runtimeMutationDir) {
+					t.Fatalf("clean legacy first apply blocked: called=%v err=%v", called, err)
+				}
+			} else if err == nil || called {
+				t.Fatal("unresolved or explicitly fenced initial runtime was admitted")
 			}
 		})
 	}

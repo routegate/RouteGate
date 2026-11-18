@@ -323,6 +323,7 @@ func TestFencedDispatchRequiresManagerNegotiation(t *testing.T) {
 
 func TestFencedHeartbeatRequestsTimeoutPreservation(t *testing.T) {
 	r, _, _ := fencedRunnerFixture(t, tasks.TaskKindVPNCoreService, 204)
+	r.runtimeMutationManagerReady = false
 	for _, enabled := range []bool{false, true} {
 		r.cfg.ExperimentalRuntimeMutationFencing = enabled
 		info := systeminfo.Info{}
@@ -334,6 +335,9 @@ func TestFencedHeartbeatRequestsTimeoutPreservation(t *testing.T) {
 	}
 	r.cfg.ExperimentalRuntimeMutationFencing = false
 	if err := os.Mkdir(r.runtimeMutationDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.runtimeMutationDir, "mutation-inflight.json"), []byte("unresolved"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	info := systeminfo.Info{}
