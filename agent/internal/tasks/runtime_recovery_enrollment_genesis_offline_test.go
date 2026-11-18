@@ -336,3 +336,31 @@ func TestRuntimeRecoveryEnrollmentGenesisOfflineV1RuntimeContinuityAnchorCannotB
   })
  }
 }
+
+
+func TestRuntimeRecoveryEnrollmentGenesisOfflineV1LostJournalCannotReenroll(t *testing.T) {
+ runtimeDir, journalDir := recoveryEnrollmentOfflineDirectoriesV1(t)
+ genesis := recoveryEnrollmentGenesisFixtureV1()
+ ctx := context.Background()
+ if err := writeRecoveryEnrollmentGenesisOfflineV1(ctx, runtimeDir, journalDir, genesis, nil); err != nil {
+  t.Fatal(err)
+ }
+ journalPath := filepath.Join(journalDir, recoveryEnrollmentGenesisFilenameV1)
+ if err := os.Remove(journalPath); err != nil {
+  t.Fatal(err)
+ }
+ // The independent runtime continuity anchor must survive journal loss.
+ if _, err := os.Stat(filepath.Join(runtimeDir, recoveryEnrollmentAnchorFilenameV1)); err != nil {
+  t.Fatal("runtime continuity anchor lost:", err)
+ }
+ observation, err := inspectRecoveryEnrollmentGenesisOfflineV1(ctx, runtimeDir, journalDir, genesis)
+ requireRecoveryEnrollmentGenesisRefusedV1(t, err)
+ if observation != (recoveryEnrollmentGenesisObservationV1{}) {
+  t.Fatal("lost journal was accepted as trusted enrollment", observation)
+ }
+ requireRecoveryEnrollmentGenesisRefusedV1(t,
+  writeRecoveryEnrollmentGenesisOfflineV1(ctx, runtimeDir, journalDir, genesis, nil))
+ if _, err := os.Lstat(journalPath); !os.IsNotExist(err) {
+  t.Fatal("journal was silently recreated after continuity loss:", err)
+ }
+}
