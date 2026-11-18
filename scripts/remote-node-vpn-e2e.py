@@ -100,6 +100,23 @@ class API:
                 require(status == expected, f"Job ended {status}; expected {expected}")
                 return job
             time.sleep(1)
+        # Only allowlisted phase names are emitted; never print journal content.
+        phases = ("selected", "validated", "applied", "restart", "healthcheck",
+                  "persistence", "listener", "report")
+        last_phase = "not_observed"
+        try:
+            journal = subprocess.run(
+                ["journalctl", "-u", "routegate-agent.service", "--no-pager",
+                 "--output=cat", "--since=-15min"],
+                capture_output=True, text=True, timeout=8, check=False)
+            if journal.returncode == 0:
+                for line in journal.stdout.splitlines():
+                    if "config apply phase" in line:
+                        for phase_name in phases:
+                            if f"phase={phase_name}" in line:
+                                last_phase = phase_name
+        except (OSError, subprocess.TimeoutExpired):
+            pass
         marker = Path("/var/lib/routegate-agent/runtime-mutations/mutation-inflight.json")
         admission = "intent_present" if marker.exists() else "no_intent_file"
         # /proc/<pid>/comm contains only a short executable name, never
@@ -123,7 +140,7 @@ class API:
         binary = "present" if Path("/usr/bin/sing-box").is_file() else "absent"
         source = "present" if Path("/etc/apt/sources.list.d/sagernet.sources").is_file() else "absent"
         raise RuntimeError(
-            f"Agent job exceeded its time budget (phase={phase}, status={last_status}, "
+            f"Agent job exceeded its time budget (phase={phase}, last_agent_phase={last_phase}, status={last_status}, "
             f"admission={admission}, package_manager={package_manager}, "
             f"agent_service={agent_service}, sing_box_binary={binary}, "
             f"repository_source={source})")
