@@ -211,10 +211,31 @@ def exercise(work, manager):
         thread.start()
         stack.callback(origin.shutdown)
 
+        # Capture only a systemd monotonic timestamp; no logs or unit metadata.
+        # A changed timestamp proves the Agent service restarted during install.
+        def agent_activation():
+            result = subprocess.run(
+                ["systemctl", "show", "--value", "--property=ActiveEnterTimestampMonotonic",
+                 "routegate-agent.service"],
+                capture_output=True, text=True, timeout=5, check=False)
+            value = result.stdout.strip()
+            return value if result.returncode == 0 and value.isdecimal() else None
+
+        agent_started_before = agent_activation()
         print("[remote-vpn-e2e] Installing sing-box through the registered Agent.", flush=True)
         install = api.call("POST", base + "/vpn-core/installations",
                            {"operation": "install_sing_box"}, expected=202)
-        api.wait_job(base + "/vpn-core/installations/" + install["job"]["id"], timeout=660)
+        try:
+            api.wait_job(base + "/vpn-core/installations/" + install["job"]["id"], timeout=660)
+        except RuntimeError as error:
+            agent_started_after = agent_activation()
+            if agent_started_before is None or agent_started_after is None:
+                restart = "unknown"
+            elif agent_started_before != agent_started_after:
+                restart = "yes"
+            else:
+                restart = "no"
+            raise RuntimeError(f"{error} (agent_restarted={restart})") from None
         api.call("POST", base + "/protocol-settings/recommended", {"serverName": TARGET})
         account = api.call("POST", "/api/v1/vpn-accounts",
                            {"displayName": "Reality E2E", "serverId": server}, expected=201)
