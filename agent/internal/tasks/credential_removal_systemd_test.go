@@ -175,6 +175,13 @@ func TestCredentialRemovalSystemdRealityTraffic(t *testing.T) {
 		lease.Close()
 		t.Fatal(err)
 	}
+	// A Type=simple restart can return before sing-box has opened its listener.
+	// Use the same bounded readiness check as the later restart in this test
+	// before taking the strict process/config witness; never retry the mutation.
+	if _, err := adapter.CheckHealth(ctx, e.activePath); err != nil {
+		lease.Close()
+		t.Fatal(err)
+	}
 	witness, err := CaptureRuntimeRecoveryWitness(ctx, e.activePath, adapter)
 	if err != nil {
 		lease.Close()
