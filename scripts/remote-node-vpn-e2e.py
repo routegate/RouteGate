@@ -236,6 +236,11 @@ def exercise(work, manager):
             else:
                 restart = "no"
             raise RuntimeError(f"{error} (agent_restarted={restart})") from None
+        # Successful installation must release durable admission before config apply.
+        install_intent = Path("/var/lib/routegate-agent/runtime-mutations/mutation-inflight.json")
+        require(not install_intent.exists(),
+                "Successful VPN Core installation retained runtime mutation intent")
+        print("[remote-vpn-e2e] sing-box installation completed; admission released.", flush=True)
         api.call("POST", base + "/protocol-settings/recommended", {"serverName": TARGET})
         account = api.call("POST", "/api/v1/vpn-accounts",
                            {"displayName": "Reality E2E", "serverId": server}, expected=201)
@@ -249,6 +254,7 @@ def exercise(work, manager):
             checked = api.call("POST", base + "/config/versions/" + version + "/validate", {})
             require(checked["validationResult"]["valid"], "Manager validation rejected test config")
             submitted = api.call("POST", base + "/config/versions/" + version + "/apply", {}, expected=202)
+            print("[remote-vpn-e2e] Awaiting config apply result.", flush=True)
             job = api.wait_job(base + "/config/apply-jobs/" + submitted["job"]["id"], expected, phase="config_apply")
             return job
 
