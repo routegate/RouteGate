@@ -101,7 +101,8 @@ class API:
                 return job
             time.sleep(1)
         # Only allowlisted phase names are emitted; never print journal content.
-        phases = ("selected", "validated", "applied", "restart", "healthcheck",
+        phases = ("witness_before", "witness_unavailable", "witness_ready",
+                  "selected", "validated", "applied", "restart", "healthcheck",
                   "persistence", "listener", "report")
         last_phase = "not_observed"
         try:
@@ -111,7 +112,7 @@ class API:
                 capture_output=True, text=True, timeout=8, check=False)
             if journal.returncode == 0:
                 for line in journal.stdout.splitlines():
-                    if "config apply phase" in line:
+                    if "config apply phase" in line or "runtime mutation preflight" in line:
                         for phase_name in phases:
                             if f"phase={phase_name}" in line:
                                 last_phase = phase_name
