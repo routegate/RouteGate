@@ -120,10 +120,13 @@ class API:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
             check=False)
         agent_service = "active" if agent.returncode == 0 else "not_active"
+        binary = "present" if Path("/usr/bin/sing-box").is_file() else "absent"
+        source = "present" if Path("/etc/apt/sources.list.d/sagernet.sources").is_file() else "absent"
         raise RuntimeError(
             f"Agent job exceeded its time budget (status={last_status}, "
             f"admission={admission}, package_manager={package_manager}, "
-            f"agent_service={agent_service})")
+            f"agent_service={agent_service}, sing_box_binary={binary}, "
+            f"repository_source={source})")
 
 
 def run(*args):
