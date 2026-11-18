@@ -97,33 +97,51 @@ func TestFencedDispatchSavesRuntimeRecoveryWitness(t *testing.T) {
  // the first post-install apply currently stops at the witness preflight.
  // Preserve this fail-closed property until a separately verified bootstrap
  // admission protocol exists; never "fix" E2E by bypassing all witness errors.
-func TestFencedInitialApplyMissingRuntimeDoesNotExecute(t *testing.T) {
- r, base, results := fencedRunnerFixture(t, tasks.TaskKindConfigApply, 204)
- r.vpnCoreAdapter = &recoveryServiceAdapter{fencedServiceAdapter: base}
- r.cfg.ActiveConfigPath = filepath.Join(t.TempDir(), "never-created.json")
- task := tasks.ConfigTask{
-  ID: fencedTaskID, AgentID: fencedAgentID, ServerID: fencedServerID,
-  Kind: tasks.TaskKindConfigApply, Status: "in_progress",
-  RenderedConfig: []byte(`{}`), // Legacy default selects the VLESS adapter.
- }
- invoked := false
- err := r.withRuntimeMutation(context.Background(), task, func(context.Context) error {
-  invoked = true
-  return nil
- })
- if !errors.Is(err, errRuntimeMutationRecovery) {
-  t.Fatalf("missing runtime preflight returned %v", err)
- }
- if invoked || base.calls != 0 || results.Load() != 0 {
-  t.Fatal("missing runtime bypassed preflight or emitted terminal result")
- }
- if _, err := os.Stat(filepath.Join(r.runtimeMutationDir, "mutation-inflight.json")); err != nil {
-  t.Fatalf("unproven initial apply lost durable intent: %v", err)
- }
- if err := r.withRuntimeMutation(context.Background(), task, func(context.Context) error {
-  invoked = true
-  return nil
- }); !errors.Is(err, tasks.ErrRuntimeMutationBlocked) || invoked {
-  t.Fatalf("unproven initial apply retried: %v", err)
- }
+// Missing, corrupt or unobservable runtime state cannot authorize a mutation.
+// This guards against broad witness bypasses when initial bootstrap is fixed.
+func TestFencedInitialApplyUnprovenRuntimeDoesNotExecute(t *testing.T) {
+	for _, scenario := range []struct {
+		name string
+		config string
+		observerFails bool
+	}{
+		{name: "missing_config"},
+		{name: "corrupt_config", config: "{invalid"},
+		{name: "untrusted_generation", config: `{"inbounds":[]}`, observerFails: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			r, base, results := fencedRunnerFixture(t, tasks.TaskKindConfigApply, 204)
+			r.vpnCoreAdapter = &recoveryServiceAdapter{
+				fencedServiceAdapter: base, observationError: scenario.observerFails,
+			}
+			r.cfg.ActiveConfigPath = filepath.Join(t.TempDir(), "active.json")
+			if scenario.config != "" {
+				if err := os.WriteFile(r.cfg.ActiveConfigPath, []byte(scenario.config), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			task := tasks.ConfigTask{
+				ID: fencedTaskID, AgentID: fencedAgentID, ServerID: fencedServerID,
+				Kind: tasks.TaskKindConfigApply, Status: "in_progress",
+				RenderedConfig: []byte(`{}`), // Legacy default selects the VLESS adapter.
+			}
+			invoked := false
+			execute := func(context.Context) error {
+				invoked = true
+				return nil
+			}
+			if err := r.withRuntimeMutation(context.Background(), task, execute); !errors.Is(err, errRuntimeMutationRecovery) {
+				t.Fatalf("unproven runtime preflight returned %v", err)
+			}
+			if invoked || base.calls != 0 || results.Load() != 0 {
+				t.Fatal("unproven runtime bypassed preflight or emitted terminal result")
+			}
+			if _, err := os.Stat(filepath.Join(r.runtimeMutationDir, "mutation-inflight.json")); err != nil {
+				t.Fatalf("unproven runtime lost durable intent: %v", err)
+			}
+			if err := r.withRuntimeMutation(context.Background(), task, execute); !errors.Is(err, tasks.ErrRuntimeMutationBlocked) || invoked {
+				t.Fatalf("unproven runtime retried: %v", err)
+			}
+		})
+	}
 }
