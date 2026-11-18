@@ -91,3 +91,38 @@ func TestFencedDispatchSavesRuntimeRecoveryWitness(t *testing.T) {
 		})
 	}
 }
+
+
+ // A missing active config is not proof of a pristine runtime. In particular,
+ // the first post-install apply currently stops at the witness preflight.
+ // Preserve this fail-closed property until a separately verified bootstrap
+ // admission protocol exists; never "fix" E2E by bypassing all witness errors.
+func TestFencedInitialApplyMissingRuntimeDoesNotExecute(t *testing.T) {
+ r, base, results := fencedRunnerFixture(t, tasks.TaskKindConfigApply, 204)
+ r.vpnCoreAdapter = &recoveryServiceAdapter{fencedServiceAdapter: base}
+ r.cfg.ActiveConfigPath = filepath.Join(t.TempDir(), "never-created.json")
+ task := tasks.ConfigTask{
+  ID: fencedTaskID, AgentID: fencedAgentID, ServerID: fencedServerID,
+  Kind: tasks.TaskKindConfigApply, Status: "in_progress",
+ }
+ invoked := false
+ err := r.withRuntimeMutation(context.Background(), task, func(context.Context) error {
+  invoked = true
+  return nil
+ })
+ if !errors.Is(err, errRuntimeMutationRecovery) {
+  t.Fatalf("missing runtime preflight returned %v", err)
+ }
+ if invoked || base.calls != 0 || results.Load() != 0 {
+  t.Fatal("missing runtime bypassed preflight or emitted terminal result")
+ }
+ if _, err := os.Stat(filepath.Join(r.runtimeMutationDir, "mutation-inflight.json")); err != nil {
+  t.Fatalf("unproven initial apply lost durable intent: %v", err)
+ }
+ if err := r.withRuntimeMutation(context.Background(), task, func(context.Context) error {
+  invoked = true
+  return nil
+ }); !errors.Is(err, tasks.ErrRuntimeMutationBlocked) || invoked {
+  t.Fatalf("unproven initial apply retried: %v", err)
+ }
+}
