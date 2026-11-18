@@ -102,7 +102,28 @@ class API:
             time.sleep(1)
         marker = Path("/var/lib/routegate-agent/runtime-mutations/mutation-inflight.json")
         admission = "intent_present" if marker.exists() else "no_intent_file"
-        raise RuntimeError(f"Agent job exceeded its time budget (status={last_status}, admission={admission})")
+        # /proc/<pid>/comm contains only a short executable name, never
+        # command-line arguments, environment, URLs, credentials or logs.
+        # Inspect process names only on the disposable CI runner.
+        process_names = set()
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            try:
+                process_names.add((entry / "comm").read_text().strip())
+            except (OSError, UnicodeError):
+                continue
+        package_manager = "running" if process_names.intersection(
+            {"apt-get", "apt", "dpkg", "dpkg-deb", "gpgv"}) else "not_observed"
+        agent = subprocess.run(
+            ["systemctl", "is-active", "--quiet", "routegate-agent.service"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+            check=False)
+        agent_service = "active" if agent.returncode == 0 else "not_active"
+        raise RuntimeError(
+            f"Agent job exceeded its time budget (status={last_status}, "
+            f"admission={admission}, package_manager={package_manager}, "
+            f"agent_service={agent_service})")
 
 
 def run(*args):
