@@ -243,3 +243,44 @@ primitive; do not create a second lock or a broad exception for config apply.
 
 Until that proof and its regression tests exist, PR #812 remains Draft / NO-GO.
 No live VPS should be changed as part of this investigation.
+
+
+## Reuse the existing offline enrollment genesis; do not fork bootstrap admission (2026-11-19)
+
+Source inspection found the existing **package-private, offline-only** enrollment
+prototype in `agent/internal/tasks/runtime_recovery_enrollment_genesis_offline.go`,
+with its continuity anchor in
+`runtime_recovery_enrollment_anchor_offline.go` and root-isolation checks in
+`runtime_recovery_enrollment_path_isolation_offline.go`. These are deliberately
+**not wired** into Runner, Manager, installer, or the mutation gate. Their
+`prepared_unattested` record is explicitly *not* evidence of a trusted host,
+pristine VPN state, or permission to execute a task. The prototype's extra
+journal filename is deliberately incompatible with the current journal reader.
+
+Do not introduce a parallel `bootstrap.lock`, second enrollment marker, or
+alternate dispatcher to work around `witness_unavailable`. Any future
+production path must reuse the existing shared runtime lease and versioned
+journal grammar, and first define and test:
+
+1. A Manager-authenticated, one-time enrollment transition bound to Agent,
+   Server, credential generation and an exact task/target hash; offline
+   `prepared_unattested` alone must never authorize mutation.
+2. Independent proof that the local runtime is pristine, not merely missing
+   `/etc/sing-box/config.json`: no prior activation, no partial or corrupt
+   state, no previous journal or receipt, and no conflicting mutation or
+   detached worker. Ambiguity must preserve the durable intent.
+3. A post-apply first-generation witness and durable receipt that cannot be
+   mistaken for the existing two-generation restart witness. Define an
+   explicit schema/validation contract on both Agent and Manager before
+   dispatch; do not fabricate a previous process generation.
+4. Crash and replay tests at enrollment, config promotion, service restart,
+   witness capture, receipt persistence and Manager ACK boundaries; never
+   auto-retry or unlock an uncertain outcome.
+5. Compatibility tests proving that legacy or partially upgraded components
+   reject unknown journal/enrollment states instead of ignoring them.
+
+The current fail-closed tests in `heartbeat/runtime_recovery_test.go` cover
+missing/corrupt/untrusted preflight and unbound target rejection. They do not
+prove clean-bootstrap eligibility. The disposable E2E failure is therefore
+still a **known, unresolved admission protocol gap**, not an excuse to weaken
+runtime recovery or to enable the offline prototype in production.
