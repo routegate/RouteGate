@@ -89,7 +89,8 @@ func CheckExternalMigrationRuntimeRole(ctx context.Context, pool *pgxpool.Pool) 
 					SELECT 1 FROM pg_catalog.pg_class c
 					JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
 					WHERE n.nspname='public' AND c.relkind='S'
-					AND pg_catalog.has_sequence_privilege(r.oid,c.oid,'UPDATE')
+					AND CASE WHEN c.relkind='S' THEN
+						pg_catalog.has_sequence_privilege(r.oid,c.oid,'UPDATE') ELSE false END
 				)
 				OR r.rolsuper OR r.rolcreaterole OR r.rolcreatedb
 				OR r.rolreplication OR r.rolbypassrls
