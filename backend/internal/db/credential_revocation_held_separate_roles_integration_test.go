@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -63,8 +64,17 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	var secret [24]byte
 	if _,err:=rand.Read(secret[:]);err!=nil {t.Fatal(err)}
 	password:=hex.EncodeToString(secret[:])
-	if err:=ProvisionRuntimeRole(ctx,ownerPool,runtime);err!=nil { t.Fatal("provision canonical runtime policy",err) }
 	rolesCreated=true
+	// Exercise the actual adapted administrative entry point, with only the
+	// disposable migration credential. The normal Manager is never started.
+	command:=exec.CommandContext(ctx,"go","run","./cmd/routegate-migrate","--create-runtime-role",runtime)
+	command.Dir="../.."
+	command.Env=append(os.Environ(),"ROUTEGATE_MIGRATOR_DATABASE_URL="+os.Getenv("ROUTEGATE_TEST_DATABASE_URL"))
+	if err:=command.Run();err!=nil { t.Fatal("canonical runtime role provisioning command failed",err) }
+	var canLogin bool
+	if err:=ownerPool.QueryRow(ctx,`SELECT rolcanlogin FROM pg_roles WHERE rolname=$1`,runtime).Scan(&canLogin);err!=nil || canLogin {
+		t.Fatal("provisioning must create only a NOLOGIN role",err)
+	}
 	for _,statement:=range []string{
 		`CREATE ROLE rg140_test_dispatch_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,
 		fmt.Sprintf(`ALTER ROLE rg140_test_manager_runtime LOGIN PASSWORD '%s'`,password),

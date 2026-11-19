@@ -46,8 +46,12 @@ DML exceeding the explicit policy. It does not repair shared ACLs, rotate
 passwords, enable LOGIN or assign memberships. Only owned sequences of
 insertable tables receive USAGE; no sequence UPDATE or default privileges.
 The trusted deployment layer still has to separate credentials and explicitly
-provision authentication. The issuer is a source API, not an automatically
-invoked installation step.
+provision authentication. The existing `routegate-migrate` command exposes the adapted #639 option
+`--create-runtime-role NAME`, using only `ROUTEGATE_MIGRATOR_DATABASE_URL`.
+It first verifies the full canonical migration history, then invokes the same
+issuer and exits without starting Manager. It must run from the directory
+containing the matching `migrations/`. No installer invokes it automatically.
+A successful NOLOGIN creation is not an authentication/cutover operation.
 
 `CheckRuntimeRequiredPrivileges` reuses that policy via SELECT only and checks
 every individual grant, narrow lock-column UPDATE and required sequence USAGE.
@@ -92,8 +96,9 @@ do not replace or weaken it.
 
 ## Verification and remaining release boundary
 
-The existing opt-in two-login PostgreSQL rehearsal now uses the real issuer
-instead of hand-granting its runtime role. It checks each policy bit and
+The existing opt-in two-login PostgreSQL rehearsal now invokes the actual
+`routegate-migrate --create-runtime-role` command instead of hand-granting its
+runtime role, and verifies that it remains NOLOGIN before test authentication. It checks each policy bit and
 refusal when revoked, missing sequence/lock-column grants, read-only preflight,
 refusal to adopt existing roles, rollback on unsafe PUBLIC column ACLs, unknown
 tables and historical schema 175. Real repositories exercise auth seed/UPSERT,
