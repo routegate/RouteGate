@@ -316,7 +316,7 @@ rg_update_apply_management_files() {
   install -m 0755 "$work_dir/bin/routegate-manager" "$manager_bin" || return 1
   rm -rf "$migrations_dir" || return 1
   cp -a "$work_dir/manager/migrations" "$migrations_dir" || return 1
-  rg_update_secure_manager_migrations || return 1
+  rg_update_secure_manager_migrations "$(dirname "$migrations_dir")" || return 1
   install -d -m 0755 "$frontend_dir" || return 1
   # Published Agent bootstrap artifacts live under the frontend root but are
   # not part of the frontend; keep them exactly as rg_update_apply_platform_files does.
@@ -455,7 +455,7 @@ rg_update_restore_management_backup() {
   rm -rf "$migrations_dir" || rollback_rc=1
   install -d -m 0755 "$migrations_parent" || rollback_rc=1
   tar -xzf "$backup_dir/manager-migrations.tar.gz" -C "$migrations_parent" || rollback_rc=1
-  rg_update_secure_manager_migrations || {
+  rg_update_secure_manager_migrations "$migrations_parent" || {
     rg_update_die "cannot protect restored Manager migrations; services remain stopped"
     return 1
   }

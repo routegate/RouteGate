@@ -29,7 +29,7 @@ protect() {
   if [[ $mode == install ]]; then
     secure_manager_migration_tree "$parent"
   else
-    rg_update_secure_manager_migrations
+    rg_update_secure_manager_migrations "$parent"
   fi
 }
 

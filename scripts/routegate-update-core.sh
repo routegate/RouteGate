@@ -52,12 +52,7 @@ rg_update_require_root() {
 # while Manager is stopped. Legacy archives and environment overrides must
 # never return migration ownership to the service identity.
 rg_update_secure_manager_migrations() {
-  local migrations parent unsafe
-  if [[ $# -gt 0 ]]; then
-    parent=$1
-  else
-    parent=$(rg_update_path /opt/routegate-manager) || return 1
-  fi
+  local parent=$1 migrations unsafe
   migrations="$parent/migrations"
   [[ -d "$parent" && ! -L "$parent" && -d "$migrations" && ! -L "$migrations" ]] || return 1
   unsafe=$(find "$migrations" \( ! -type d -a ! -type f \) -print -quit) || return 1
@@ -558,7 +553,7 @@ rg_update_apply_platform_files() {
 
   rm -rf "$migrations_dir" || return 1
   cp -a "$work_dir/manager/migrations" "$migrations_dir" || return 1
-  rg_update_secure_manager_migrations || return 1
+  rg_update_secure_manager_migrations "$(dirname "$migrations_dir")" || return 1
 
   install -d -m 0755 "$frontend_dir" || return 1
   if [[ -e "$bootstrap_dir" || -L "$bootstrap_dir" ]]; then
@@ -722,7 +717,7 @@ rg_update_restore_backup() {
   rm -rf "$migrations_dir" || rollback_rc=1
   install -d -m 0755 "$migrations_parent" || rollback_rc=1
   tar -xzf "$backup_dir/manager-migrations.tar.gz" -C "$migrations_parent" || rollback_rc=1
-  rg_update_secure_manager_migrations || {
+  rg_update_secure_manager_migrations "$migrations_parent" || {
     rg_update_die "cannot protect restored Manager migrations; services remain stopped"
     return 1
   }
