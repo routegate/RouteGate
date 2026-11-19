@@ -82,8 +82,12 @@ func CheckExternalMigrationRuntimeRole(ctx context.Context, pool *pgxpool.Pool) 
 					JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
 					WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f')
 					AND (pg_catalog.has_table_privilege(r.oid,c.oid,'TRUNCATE,TRIGGER,REFERENCES')
+						OR CASE WHEN c.relkind IN ('r','p','v','m','f') THEN
+							pg_catalog.has_any_column_privilege(r.oid,c.oid,'REFERENCES') ELSE false END
 						OR (c.relname='schema_migrations' AND
-							pg_catalog.has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE')))
+							(pg_catalog.has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE')
+							 OR CASE WHEN c.relkind IN ('r','p','v','m','f') THEN
+								pg_catalog.has_any_column_privilege(r.oid,c.oid,'INSERT,UPDATE') ELSE false END)))
 				)
 				OR EXISTS (
 					SELECT 1 FROM pg_catalog.pg_class c

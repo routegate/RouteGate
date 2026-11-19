@@ -83,6 +83,8 @@ not a replacement for the shared excessive-authority guard below.
 The existing `CheckExternalMigrationRuntimeRole` now also incorporates the
 negative ACL policy from #639: reject public-table TRUNCATE/TRIGGER/REFERENCES,
 migration-journal INSERT/UPDATE/DELETE, and public-sequence UPDATE (setval).
+Column-only journal INSERT/UPDATE and table REFERENCES are checked too;
+table-level ACL inspection alone does not see those grants.
 It evaluates effective privileges for every reachable role, including PUBLIC
 and NOINHERIT membership paths, rather than only checking object ownership.
 The existing Manager external startup, dedicated migrator and held-dispatch

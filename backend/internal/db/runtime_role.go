@@ -76,7 +76,8 @@ func ProvisionRuntimeRole(ctx context.Context, pool *pgxpool.Pool, name string) 
 	var unsafe bool
 	if err := tx.QueryRow(ctx, `SELECT has_schema_privilege($1,'public','CREATE')
  OR has_database_privilege($1,current_database(),'CREATE')
- OR has_table_privilege($1,'public.schema_migrations','INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')`, name).Scan(&unsafe); err != nil {
+ OR has_table_privilege($1,'public.schema_migrations','INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')
+ OR has_any_column_privilege($1,'public.schema_migrations','INSERT,UPDATE,REFERENCES')`, name).Scan(&unsafe); err != nil {
 		return err
 	}
 	if unsafe {
@@ -99,7 +100,8 @@ func ProvisionRuntimeRole(ctx context.Context, pool *pgxpool.Pool, name string) 
 		if _, err := tx.Exec(ctx, "LOCK TABLE "+qualified+" IN SHARE MODE"); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `SELECT has_table_privilege($1,$2,'TRUNCATE,TRIGGER,REFERENCES')`, name, qualified).Scan(&unsafe); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT has_table_privilege($1,$2,'TRUNCATE,TRIGGER,REFERENCES')
+ OR has_any_column_privilege($1,$2,'REFERENCES')`, name, qualified).Scan(&unsafe); err != nil {
 			return err
 		}
 		if unsafe {

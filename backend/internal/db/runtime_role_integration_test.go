@@ -177,6 +177,13 @@ func rehearseRuntimePolicy170(t *testing.T, ctx context.Context, owner, runtime 
 	if _, err = owner.Exec(ctx, `REVOKE UPDATE(actor) ON public.vpn_credential_revocation_events FROM PUBLIC`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = owner.Exec(ctx, `GRANT INSERT(version) ON public.schema_migrations TO PUBLIC`); err != nil {
+		t.Fatal(err)
+	}
+	refused("PUBLIC migration-journal column write")
+	if _, err = owner.Exec(ctx, `REVOKE INSERT(version) ON public.schema_migrations FROM PUBLIC`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = owner.Exec(ctx, `INSERT INTO public.schema_migrations(version) VALUES ('000175_credential_removal_dispatch_stages')`); err != nil {
 		t.Fatal(err)
 	}

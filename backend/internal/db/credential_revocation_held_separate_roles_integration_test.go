@@ -143,14 +143,14 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	// Historical #639 refused dangerous ACLs during provisioning. The shared
 	// runtime guard must also reject them after restore or later grants.
 	for _, grantee := range []string{runtime, "PUBLIC"} {
-		for _, privilege := range []string{"TRUNCATE", "TRIGGER", "REFERENCES"} {
+		for _, privilege := range []string{"TRUNCATE", "TRIGGER", "REFERENCES", "REFERENCES(operation_id)"} {
 			if _, err = ownerPool.Exec(ctx, "GRANT "+privilege+" ON public.vpn_credential_revocation_events TO "+grantee); err != nil { t.Fatal(err) }
 			if err = CheckExternalMigrationRuntimeRole(ctx, login); !errors.Is(err, ErrUnsafeExternalMigrationRuntimeRole) { t.Fatalf("accepted %s via %s: %v", privilege, grantee, err) }
 			if err = CheckHeldDispatchRuntimeIsolation(ctx, login); !errors.Is(err, ErrUnsafeHeldDispatchRuntimeRole) { t.Fatalf("held dispatch accepted %s via %s: %v", privilege, grantee, err) }
 			if _, err = ownerPool.Exec(ctx, "REVOKE "+privilege+" ON public.vpn_credential_revocation_events FROM "+grantee); err != nil { t.Fatal(err) }
 		}
 	}
-	for _, privilege := range []string{"INSERT", "UPDATE", "DELETE"} {
+	for _, privilege := range []string{"INSERT", "UPDATE", "DELETE", "INSERT(version)", "UPDATE(version)"} {
 		if _, err = ownerPool.Exec(ctx, "GRANT "+privilege+" ON public.schema_migrations TO "+runtime); err != nil { t.Fatal(err) }
 		if err = CheckExternalMigrationRuntimeRole(ctx, login); !errors.Is(err, ErrUnsafeExternalMigrationRuntimeRole) { t.Fatalf("accepted migration ledger %s: %v", privilege, err) }
 		if _, err = ownerPool.Exec(ctx, "REVOKE "+privilege+" ON public.schema_migrations FROM "+runtime); err != nil { t.Fatal(err) }
