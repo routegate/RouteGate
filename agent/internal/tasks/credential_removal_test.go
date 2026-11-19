@@ -19,6 +19,7 @@ const removalUUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 type removalAdapter struct {
 	VPNCoreAdapter
 	generation                              RuntimeGeneration
+	observationHook                         func() error
 	restarts, validations                   int
 	validationHook, restartHook, healthHook func() error
 }
@@ -27,6 +28,11 @@ func (a *removalAdapter) Descriptor() platform.VPNCoreAdapterDescriptor {
 	return platform.VPNCoreAdapterDescriptor{Core: "sing-box", Protocol: "vless"}
 }
 func (a *removalAdapter) ObserveGeneration(context.Context, string) (RuntimeGeneration, error) {
+	if a.observationHook != nil {
+		if err := a.observationHook(); err != nil {
+			return RuntimeGeneration{}, err
+		}
+	}
 	return a.generation, nil
 }
 func (a *removalAdapter) IsEnabled(context.Context) (ServiceResult, error) {
@@ -109,8 +115,8 @@ func TestCredentialRemovalRejectsOlderServiceGeneration(t *testing.T) {
 	e, task, adapter, original := removalExecutorFixture(t)
 	adapter.restartHook = func() error {
 		adapter.generation = RuntimeGeneration{
-			InvocationID: strings.Repeat("b", 32),
-			PID: 200,
+			InvocationID:     strings.Repeat("b", 32),
+			PID:              200,
 			StartedMonotonic: "999", // Before baseline start at 1000.
 		}
 		return nil
@@ -413,5 +419,30 @@ func TestCredentialRemovalRejectsNonRegularFilesWithoutBlocking(t *testing.T) {
 	}
 	if _, err := readRemovalFile(filepath.Dir(path), 1024, false); err == nil {
 		t.Fatal("accepted directory")
+	}
+}
+
+func TestCredentialRemovalWaitsForReadinessBeforeNewGeneration(t *testing.T) {
+	e, task, a, _ := removalExecutorFixture(t)
+	ready := false
+	a.observationHook = func() error {
+		if a.restarts > 0 && !ready {
+			return errors.New("process is still starting")
+		}
+		return nil
+	}
+	a.healthHook = func() error {
+		if a.restarts > 0 {
+			ready = true
+		}
+		return nil
+	}
+	report, err := e.Execute(context.Background(), task)
+	if err != nil || report.State != "succeeded" || a.restarts != 1 {
+		t.Fatal("readiness race rejected valid restart", report, err)
+	}
+	replay, err := e.Execute(context.Background(), task)
+	if err != nil || replay != report || a.restarts != 1 {
+		t.Fatal("result replay restarted runtime", err)
 	}
 }

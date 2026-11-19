@@ -234,18 +234,20 @@ func (e CredentialRemovalExecutor) Execute(ctx context.Context, task ConfigTask)
 	if _, err = e.adapter.Restart(ctx); err != nil {
 		return fail("restart_failed")
 	}
-	after, err := observer.ObserveGeneration(ctx, e.activePath)
-	// An InvocationID change without a strictly newer systemd start
-	// cannot prove a restart. Use the same rule for saved success replay.
-	if err != nil || !validRemovalGenerationTransition(before, after) {
-		return fail("restart_not_verified")
-	}
+	// Type=simple restart completion precedes application readiness. Wait
+	// for the existing bounded health check before verifying the new process.
 	if _, err = e.adapter.IsEnabled(ctx); err != nil {
 		return fail("runtime_not_enabled")
 	}
 	listener, err := e.adapter.CheckHealth(ctx, e.activePath)
 	if err != nil || listener.Port != port {
 		return fail("listener_not_verified")
+	}
+	after, err := observer.ObserveGeneration(ctx, e.activePath)
+	// An InvocationID change without a strictly newer systemd start
+	// cannot prove a restart. Use the same rule for saved success replay.
+	if err != nil || !validRemovalGenerationTransition(before, after) {
+		return fail("restart_not_verified")
 	}
 	active, err := readRemovalFile(e.activePath, removalMaxConfigBytes, false)
 	_, _, activeHash, hashErr := canonicalRemovalJSON(active)
