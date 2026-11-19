@@ -244,6 +244,7 @@ rg_update_verify_and_extract_bundle() {
 
   for required in \
     bin/routegate-manager \
+    bin/routegate-migrate \
     bin/routegate-agent \
     frontend/index.html \
     manager/migrations \
@@ -486,6 +487,46 @@ rg_update_control_plane_preflight() {
   done
 }
 
+# Capture absence explicitly so restoring a legacy installation removes the new
+# migrator. A declared-present file must never silently become an absent file.
+rg_update_backup_migrator() {
+  local backup_dir=$1 binary
+  binary=$(rg_update_path /usr/local/bin/routegate-migrate) || return 1
+  if [[ -e "$binary" || -L "$binary" ]]; then
+    [[ -f "$binary" && ! -L "$binary" && -s "$binary" ]] || return 1
+    cp -p "$binary" "$backup_dir/routegate-migrate" || return 1
+    printf 'present\n' >"$backup_dir/migrator.state" || return 1
+  else
+    printf 'absent\n' >"$backup_dir/migrator.state" || return 1
+  fi
+}
+
+rg_update_validate_migrator_backup() {
+  local backup_dir=$1 state=absent
+  if [[ -e "$backup_dir/migrator.state" || -L "$backup_dir/migrator.state" ]]; then
+    [[ -f "$backup_dir/migrator.state" && ! -L "$backup_dir/migrator.state" ]] || return 1
+    state=$(cat "$backup_dir/migrator.state") || return 1
+  fi
+  case "$state" in
+    present) [[ -f "$backup_dir/routegate-migrate" && ! -L "$backup_dir/routegate-migrate" && -s "$backup_dir/routegate-migrate" ]] ;;
+    absent) [[ ! -e "$backup_dir/routegate-migrate" && ! -L "$backup_dir/routegate-migrate" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+rg_update_restore_migrator() {
+  local backup_dir=$1 binary
+  rg_update_validate_migrator_backup "$backup_dir" || return 1
+  binary=$(rg_update_path /usr/local/bin/routegate-migrate) || return 1
+  [[ ! -L "$binary" ]] || return 1
+  if [[ -f "$backup_dir/routegate-migrate" ]]; then
+    install -m 0755 "$backup_dir/routegate-migrate" "$binary" || return 1
+  else
+    # Old backups predate this binary; do not leave a newer migration executable.
+    rm -f -- "$binary" || return 1
+  fi
+}
+
 rg_update_create_backup() {
   local backup_dir=$1
   local db_url=$2
@@ -516,6 +557,7 @@ rg_update_create_backup() {
   manager_env=$(rg_update_path /etc/routegate/manager.env) || return 1
 
   cp -a "$manager_bin" "$backup_dir/routegate-manager" || return 1
+  rg_update_backup_migrator "$backup_dir" || return 1
   cp -a "$agent_bin" "$backup_dir/routegate-agent" || return 1
   cp -a "$manager_unit" "$backup_dir/routegate-manager.service" || return 1
   cp -a "$agent_unit" "$backup_dir/routegate-agent.service" || return 1
@@ -549,6 +591,7 @@ rg_update_apply_platform_files() {
   systemctl stop "$RG_UPDATE_AGENT_SERVICE" || return 1
   systemctl stop "$RG_UPDATE_MANAGER_SERVICE" || return 1
   install -m 0755 "$work_dir/bin/routegate-manager" "$manager_bin" || return 1
+  install -m 0755 "$work_dir/bin/routegate-migrate" "$(rg_update_path /usr/local/bin/routegate-migrate)" || return 1
   install -m 0755 "$work_dir/bin/routegate-agent" "$agent_bin" || return 1
 
   rm -rf "$migrations_dir" || return 1
@@ -687,6 +730,10 @@ rg_update_restore_backup() {
     return 1
   }
 
+  rg_update_validate_migrator_backup "$backup_dir" || {
+    rg_update_die "migrator backup is incomplete or unsafe"
+    return 1
+  }
   RG_UPDATE_DB_RESTORE_RC=0
   if [[ "$restore_database" == "1" ]]; then
     if [[ -z "$db_url" || ! -s "$backup_dir/routegate.pgdump" ]]; then
@@ -711,6 +758,10 @@ rg_update_restore_backup() {
     fi
   fi
 
+  rg_update_restore_migrator "$backup_dir" || {
+    rg_update_die "cannot restore matching migrator; services remain stopped"
+    return 1
+  }
   install -m 0755 "$backup_dir/routegate-manager" "$manager_bin" || rollback_rc=1
   install -m 0755 "$backup_dir/routegate-agent" "$agent_bin" || rollback_rc=1
 

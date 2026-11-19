@@ -652,6 +652,7 @@ collect_routegate_conflicts() {
   local path
   for path in \
     /usr/local/bin/routegate-manager \
+    /usr/local/bin/routegate-migrate \
     /usr/local/bin/routegate-agent \
 	/usr/local/bin/hysteria \
     /usr/local/bin/mtg \
@@ -1123,6 +1124,7 @@ extract_bundle() {
   local required
   for required in \
     bin/routegate-manager \
+    bin/routegate-migrate \
     bin/routegate-agent \
     manager/migrations \
     frontend/index.html \
@@ -1203,6 +1205,7 @@ install_files() {
   install -d -m 0700 "$ROUTEGATE_STATE_DIR"
 
   install -m 0755 "$source_dir/bin/routegate-manager" /usr/local/bin/routegate-manager
+  install -m 0755 "$source_dir/bin/routegate-migrate" /usr/local/bin/routegate-migrate
   install -m 0755 "$source_dir/bin/routegate-agent" /usr/local/bin/routegate-agent
   install -m 0755 "$source_dir/tools/routegate-recovery" /usr/local/sbin/routegate-recovery
 

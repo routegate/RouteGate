@@ -103,6 +103,7 @@ make_work_dir() {
   local work=$1
   mkdir -p "$work/bin" "$work/manager/migrations" "$work/frontend" "$work/systemd"
   printf 'manager-new\n' >"$work/bin/routegate-manager"
+  printf 'migrator-new\n' >"$work/bin/routegate-migrate"
   printf 'agent-new\n' >"$work/bin/routegate-agent"
   printf 'migration-new\n' >"$work/manager/migrations/000134_new.up.sql"
   printf 'frontend-new\n' >"$work/frontend/index.html"
@@ -188,6 +189,8 @@ test_management_round_trip() {
   rg_update_apply_role_files management "$work"
 
   assert_file_content "$root/usr/local/bin/routegate-manager" manager-new
+  assert_file_content "$root/usr/local/bin/routegate-migrate" migrator-new
+  assert_file_content "$backup/migrator.state" absent
   assert_file_content "$root/var/www/routegate/index.html" frontend-new
   [[ ! -e "$root/usr/local/bin/routegate-agent" ]] || fail "Management update created an Agent binary"
 
@@ -213,6 +216,12 @@ test_management_round_trip() {
   assert_file_content "$root/var/www/routegate/index.html" frontend-old
   assert_file_content "$root/etc/systemd/system/routegate-manager.service" manager-unit-old
   assert_eq "$RG_UPDATE_DB_RESTORE_RC" 0 "Management database restore result"
+  [[ ! -e "$root/usr/local/bin/routegate-migrate" ]] || fail "legacy rollback retained newer migrator"
+  # Backups made by previous versions have neither state nor binary.
+  rm "$backup/migrator.state"
+  printf 'newer\n' >"$root/usr/local/bin/routegate-migrate"
+  rg_update_restore_role_backup management "$backup" "$db_url" 0
+  [[ ! -e "$root/usr/local/bin/routegate-migrate" ]] || fail "old-format rollback retained migrator"
 
   RG_UPDATE_ROOT=""
 }
@@ -230,6 +239,7 @@ test_vpn_round_trip() {
   assert_file_content "$root/usr/local/bin/routegate-agent" agent-new
   assert_file_content "$root/etc/systemd/system/routegate-agent.service" agent-unit-new
   [[ ! -e "$root/usr/local/bin/routegate-manager" ]] || fail "VPN update created a Manager binary"
+  [[ ! -e "$root/usr/local/bin/routegate-migrate" ]] || fail "VPN update created a migrator"
 
   rg_update_restore_role_backup vpn "$backup"
   assert_file_content "$root/usr/local/bin/routegate-agent" agent-old

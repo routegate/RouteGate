@@ -42,6 +42,7 @@ make_stage() {
     "$stage/metadata" \
     "$stage/tools"
   printf 'manager-new\n' >"$stage/bin/routegate-manager"
+  printf 'migrator-new\n' >"$stage/bin/routegate-migrate"
   printf 'agent-new\n' >"$stage/bin/routegate-agent"
   printf 'frontend-new\n' >"$stage/frontend/index.html"
   printf 'SELECT 1;\n' >"$stage/manager/migrations/000134_distinct_tcp_listener_ports.up.sql"
@@ -225,6 +226,7 @@ test_platform_apply_preserves_bootstrap_artifacts() {
   RG_UPDATE_MANAGER_OWNER="routegate:routegate"
 
   rg_update_apply_platform_files "$stage"
+  assert_file_content "$fake_root/usr/local/bin/routegate-migrate" "migrator-new"
 
   assert_file_content "$fake_root/var/www/routegate/index.html" "frontend-new"
   assert_file_content "$fake_root/var/www/routegate/bootstrap/previous-commit/routegate-production-like-linux-amd64.tar.gz" "previous-bundle"
@@ -246,7 +248,10 @@ test_backup_restore_round_trip() {
   RG_UPDATE_ROOT="$fake_root"
   RG_UPDATE_MANAGER_OWNER="routegate:routegate"
 
+  printf "migrator-old\n" >"$fake_root/usr/local/bin/routegate-migrate"
   rg_update_create_backup "$backup" "postgres://example/test"
+  assert_file_content "$backup/migrator.state" present
+  printf "migrator-new\n" >"$fake_root/usr/local/bin/routegate-migrate"
   [[ -s "$backup/routegate.pgdump" ]] || fail "database backup was not created"
 
   mutate_fake_host "$fake_root"
@@ -273,6 +278,19 @@ test_backup_restore_round_trip() {
   assert_file_content "$fake_root/etc/systemd/system/routegate-agent.service" "agent-unit-old"
   assert_file_content "$fake_root/etc/routegate/manager.env" "ROUTEGATE_DATABASE_URL=test"
   assert_eq "$RG_UPDATE_DB_RESTORE_RC" "0" "database restore result"
+  assert_file_content "$fake_root/usr/local/bin/routegate-migrate" migrator-old
+  rm "$backup/routegate-migrate"
+  (
+    pg_restore() { fail "database touched after loss of saved migrator"; }
+    rg_update_wait_manager() { fail "Manager restarted with incomplete backup"; }
+    if rg_update_restore_backup "$backup" "postgres://example/test" 1 >/dev/null 2>&1; then
+      fail "restore accepted missing declared-present migrator"
+    fi
+  )
+  ln -s "$fake_root/usr/local/bin/routegate-migrate" "$backup/routegate-migrate"
+  if rg_update_validate_migrator_backup "$backup"; then
+    fail "restore accepted symlink migrator"
+  fi
 
   PATH=$old_path
   RG_UPDATE_ROOT=""

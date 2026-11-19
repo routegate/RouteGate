@@ -13,8 +13,8 @@ import (
 	"github.com/ikaevus/routegate/backend/internal/db"
 )
 
-// Explicit opt-in, source-only one-shot migrator. It is deliberately NOT
-// installed or invoked by install.sh or the Manager systemd unit.
+// Explicit opt-in one-shot migrator, shipped with the matching Manager and SQL.
+// Installation does not invoke it or enable external migration mode.
 func main() {
 	// Adapt #639's explicit role-provisioning command here, alongside the
 	// existing privileged migrator, rather than adding another Manager DDL path.

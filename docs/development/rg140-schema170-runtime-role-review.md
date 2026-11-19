@@ -134,5 +134,23 @@ The reused disposable root/nobody test exercises actual kernel permission
 denials, safe reading, legacy archive restoration and unsafe links. Existing
 updater tests cover stop/protection failure and subsequent successful restore.
 This establishes filesystem ownership, not a live database role cutover.
-Database-owner separation, migrator packaging and the installer/update/restore
-credential lifecycle remain open; full CI evidence is recorded in PR #812.
+Database-owner separation and the installer/update/restore credential lifecycle
+remain open; full CI evidence is recorded in PR #812.
+
+
+## Matching migrator delivery and rollback
+
+The release builder now includes the existing `routegate-migrate` command for
+both supported architectures. Bundle validation requires it; installation and
+Management/Hybrid updates install it beside Manager. VPN-only updates do not.
+The same shared backup helpers preserve a present migrator or explicitly record
+its absence. Restore rejects missing declared-present files and links before
+restoring the database. Legacy backups without this entry remove a newer
+migrator, preventing executable/SQL version mixing on rollback.
+
+This delivers the executable only. It does not invoke privileged migration,
+activate LOGIN, change credentials or enable external mode. Existing database
+restore uses `--no-privileges`, so switching Manager to the restricted login
+before implementing verified ACL restoration would break rollback. That remains
+part of the credential-lifecycle release gate, not a reason to weaken startup
+checks. Current delivery validation and CI results are recorded in PR #812.

@@ -262,6 +262,7 @@ rg_update_create_management_backup() {
   manager_env=$(rg_update_path /etc/routegate/manager.env) || return 1
 
   cp -a "$manager_bin" "$backup_dir/routegate-manager" || return 1
+  rg_update_backup_migrator "$backup_dir" || return 1
   cp -a "$manager_unit" "$backup_dir/routegate-manager.service" || return 1
   cp -a "$manager_env" "$backup_dir/manager.env" || return 1
   tar -czf "$backup_dir/manager-migrations.tar.gz" -C "$(dirname "$migrations_dir")" "$(basename "$migrations_dir")" || return 1
@@ -314,6 +315,7 @@ rg_update_apply_management_files() {
 
   systemctl stop "$RG_UPDATE_MANAGER_SERVICE" || return 1
   install -m 0755 "$work_dir/bin/routegate-manager" "$manager_bin" || return 1
+  install -m 0755 "$work_dir/bin/routegate-migrate" "$(rg_update_path /usr/local/bin/routegate-migrate)" || return 1
   rm -rf "$migrations_dir" || return 1
   cp -a "$work_dir/manager/migrations" "$migrations_dir" || return 1
   rg_update_secure_manager_migrations "$(dirname "$migrations_dir")" || return 1
@@ -436,6 +438,10 @@ rg_update_restore_management_backup() {
     rg_update_die "cannot stop services before restoring privileged inputs"
     return 1
   }
+  rg_update_validate_migrator_backup "$backup_dir" || {
+    rg_update_die "migrator backup is incomplete or unsafe"
+    return 1
+  }
   RG_UPDATE_DB_RESTORE_RC=0
   if [[ "$restore_database" == "1" ]]; then
     if [[ -z "$db_url" || ! -s "$backup_dir/routegate.pgdump" ]]; then
@@ -451,6 +457,10 @@ rg_update_restore_management_backup() {
     fi
   fi
 
+  rg_update_restore_migrator "$backup_dir" || {
+    rg_update_die "cannot restore matching migrator; services remain stopped"
+    return 1
+  }
   install -m 0755 "$backup_dir/routegate-manager" "$manager_bin" || rollback_rc=1
   rm -rf "$migrations_dir" || rollback_rc=1
   install -d -m 0755 "$migrations_parent" || rollback_rc=1

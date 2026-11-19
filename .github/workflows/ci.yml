@@ -482,6 +482,7 @@ jobs:
           test -s install-grafana.sh
           tar -tzf routegate-ci-test-linux-amd64.tar.gz > bundle-files.txt
           grep -Fxq './bin/routegate-manager' bundle-files.txt
+          grep -Fxq './bin/routegate-migrate' bundle-files.txt
           grep -Fxq './bin/routegate-agent' bundle-files.txt
           grep -Fxq './frontend/index.html' bundle-files.txt
           grep -Fq './manager/migrations/' bundle-files.txt
