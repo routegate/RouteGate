@@ -1,39 +1,62 @@
 # RG-140 — schema-170 ordinary runtime privilege review
 
-Status: **review required; no runtime grants or role cutover authorized**.
+Status: **schema-170 grant policy implemented; production role cutover pending**.
 
-This document is a review input for the canonical PR #812, not an
-implementation of the historical #639/#652 schema-175 grant policy. It
-separates the **public table inventory** (attested by
-`TestRG140Schema170PublicTableInventory` in disposable PostgreSQL) from
-an explicit **least-privilege** DML decision. A table existing does **not**
-mean the ordinary Manager should receive INSERT, UPDATE, or DELETE.
+#639's new-role issuer and #652's required-grant check are adapted in
+`backend/internal/db/runtime_role.go` and `runtime_required_privileges.go`.
+`runtime_role_policy.go` is the single 74-table operation-level inventory,
+shared by both implementations and the existing PostgreSQL catalog test.
+The old schema-175 blanket four-operation policy is not copied. No schema
+migration, new dispatcher, runtime identity, installer cutover or protected
+SQL executor is introduced by this prerequisite.
 
-## Source reconciliation
+## Source reconciliation and operation evidence
 
-- Canonical migration chain: `backend/migrations/*.up.sql`, through 170.
-- Current catalog: `canonicalSchema170PublicTables` in
-  `backend/internal/db/runtime_role_catalog170_integration_test.go`.
-- Historical #639 `runtimeTables`: 76 schema-175 identities, all granted
-  SELECT/INSERT/UPDATE/DELETE; **not suitable as-is** for schema 170.
-- Intersection: 63 identities. Canonical-only: 11. Historical-only: 13.
-  These are **names**, not a statement that every operation is needed.
+The reviewed baseline is canonical migrations through 170 and current
+non-test repositories. SELECT is explicit for each catalog relation. INSERT,
+UPDATE and DELETE are separately listed; an UPSERT needs both INSERT and
+UPDATE, and SECURITY INVOKER triggers use the caller's privileges.
 
-### Canonical-only tables: privileges pending operation-level review
+| Current source | Policy consequence |
+| --- | --- |
+| `auth/repository.go`, `auth/security.go`, `setup/handler.go`, `users/handler.go` | Auth/bootstrap INSERT and UPSERT, session UPDATE; no user DELETE. Existing RBAC SHARE locks also require UPDATE on `user_roles` and `role_permissions`. |
+| `agents/*repository*.go`, `configs/*repository*.go`, `transfers/service.go`, migrations 155/157 | Job INSERT/UPDATE; config history DELETE; config-apply triggers update profiles/protocols. Immutable platform update history gets no DELETE. |
+| `vpnaccounts`, `routingprofiles`, `nodegroups`, `connections` repositories | Exact account/device/preference UPSERT and assignment/delete operations; notes need UPDATE for UPSERT; presence is replace-by-delete/insert. |
+| `delivery` and `observability` repositories | Delivery/telemetry/health UPSERT; notification and alert-transition appends; no blanket DELETE on those histories. |
+| `maintenance/database_provider.go` | DELETE for the existing bounded retention targets, including auth sessions, heartbeats, audit/events and traffic. |
+| `traffic/repository.go`, migration 111 | Checkpoint INSERT/UPDATE and locking; event INSERT/DELETE; the daily rollup trigger requires INSERT/UPDATE/DELETE on `traffic_usage_daily`. |
+| `revocations/service.go`, `removal_dispatch_actor.go`, migration 170 | Strong routing/RBAC table locks require table UPDATE, including the otherwise read-only `managed_routing_rule_sets`; row locks require UPDATE on servers/agents/accounts/preparations. |
+| `revocations/removal_job_binding.go`, `removal_dispatch_approval.go`, `removal_dispatch_stage.go`, migrations 161/168–170 | Binding/authorization/stage INSERT only; revocation preparation INSERT/UPDATE; audit-event INSERT is required by the existing invoker trigger. No event/approval/stage UPDATE or DELETE. |
+| `recoveryauth`, `recoveryobserve`, migrations 163–165 | Challenge/nonce INSERT/UPDATE and trigger-created event/attempt INSERT. Attempts and reservations only receive UPDATE(id) for FOR SHARE / FOR KEY SHARE; their immutable-row triggers remain intact. |
+| `recoveryenroll/prepare.go`, migration 167 | Preparation INSERT and trigger event INSERT; no UPDATE or DELETE. This does not mount the dormant enrollment endpoint or authorize runtime mutation. |
+| migrations 162/166 and current readers | No ordinary INSERT on reservations or pre-dispatch checkpoints/events: current production code does not create them. Existing state remains readable and fenced. |
 
-| Migration | Relation | Proposed initial stance | Required evidence before granting writes |
-| --- | --- | --- | --- |
-| 160 | `traffic_report_checkpoints` | No new grants | Identify exact traffic ingestion queries and the caller |
-| 162 | `vpn_runtime_recovery_reservations` | No new grants | Reservation lifecycle and authenticated writer |
-| 163 | `vpn_runtime_recovery_challenges` | No new grants | Challenge issuer/consumer transactions |
-| 163 | `vpn_runtime_recovery_challenge_events` | No new grants | Append-only event writer and tamper controls |
-| 164 | `vpn_runtime_recovery_attempts` | No new grants | Attempt creation, outcome transition and audit |
-| 165 | `vpn_runtime_recovery_observation_nonces` | No new grants | Nonce issuer/consumer and replay protection |
-| 165 | `vpn_runtime_recovery_observation_nonce_events` | No new grants | Immutable event writer |
-| 166 | `vpn_runtime_pre_dispatch_checkpoints` | No new grants | Pre-dispatch checkpoint writer and locks |
-| 166 | `vpn_runtime_pre_dispatch_checkpoint_events` | No new grants | Immutable checkpoint audit |
-| 167 | `vpn_runtime_recovery_enrollment_preparations` | No new grants | Enrollment preparation and approval boundary |
-| 167 | `vpn_runtime_recovery_enrollment_preparation_events` | No new grants | Immutable enrollment audit |
+These are table-operation minima for the current code, with two narrow
+row-lock column grants, not a claim that every writable application column
+has its own SQL authorization boundary. Existing domain guards remain in
+force. Strong table locks cannot be replaced by read-only privileges; see
+[PostgreSQL 16 LOCK privileges](https://www.postgresql.org/docs/16/sql-lock.html).
+
+## Issuance and startup behavior
+
+`ProvisionRuntimeRole` creates only a new NOLOGIN role, transactionally; it
+refuses existing roles, noncanonical schema head, missing/unexpected public
+relations (including view replacements), unsafe PUBLIC privileges, and PUBLIC
+DML exceeding the explicit policy. It does not repair shared ACLs, rotate
+passwords, enable LOGIN or assign memberships. Only owned sequences of
+insertable tables receive USAGE; no sequence UPDATE or default privileges.
+The trusted deployment layer still has to separate credentials and explicitly
+provision authentication. The issuer is a source API, not an automatically
+invoked installation step.
+
+`CheckRuntimeRequiredPrivileges` reuses that policy via SELECT only and checks
+every individual grant, narrow lock-column UPDATE and required sequence USAGE.
+The Manager's existing opt-in external mode runs it after the shared authority
+guard and exact migration-history check, before workers/HTTP startup. The
+existing dedicated migrator also runs it after migration. Restored history
+without restored ACLs now stops startup; neither path grants missing access.
+Legacy startup migration mode is unchanged. This is a minimum-grant check,
+not a replacement for the shared excessive-authority guard below.
 
 ### Historical-only identities — do not carry forward
 
@@ -51,11 +74,6 @@ mean the ordinary Manager should receive INSERT, UPDATE, or DELETE.
 `runtime_recovery_retention_evidence`,
 `runtime_recovery_terminal_evidence`.
 
-The 63 common identities still require an **operation-level** review;
-the historical four-bit grant is not evidence of least privilege.
-In particular, tables holding human approval, dispatch staging, secrets,
-or immutable audit events must not automatically acquire ordinary writes.
-
 ## Enforced dangerous-privilege boundary (19 November 2026)
 
 The existing `CheckExternalMigrationRuntimeRole` now also incorporates the
@@ -69,27 +87,23 @@ checks reuse this one guard; no second validator or grant issuer was added.
 The existing two-login PostgreSQL rehearsal checks direct and PUBLIC table
 ACLs, journal writes, allowed sequence USAGE/SELECT versus forbidden UPDATE,
 non-owner NOINHERIT escalation, and recovery after grants are revoked.
-This closes an actual excess-authority gap; it does not establish the minimum
-per-table DML policy or provision separate production credentials. #652's
-required-grant check and schema-170 grant issuance remain to be adapted.
+This shared guard is retained; grant provisioning and required-grant checks
+do not replace or weaken it.
 
-## Required checks before implementing a runtime role
+## Verification and remaining release boundary
 
-1. Trace real SQL read/write operations and their trust boundary per relation.
-   Record SELECT/INSERT/UPDATE/DELETE individually, with evidence and
-   whether a narrowly privileged function or separate coordinator is needed.
-2. Review sequence USAGE/SELECT separately from table DML. Never grant
-   sequence UPDATE/setval, schema CREATE, table TRUNCATE/TRIGGER, or default
-   privileges to the ordinary Manager without a separately approved design.
-3. Reuse **one** canonical allowlist for both the privileged installer-side
-   grant issuer and the runtime-side required-privilege checker. Reject
-   unknown public relations rather than silently granting them.
-4. Use isolated PostgreSQL owner and LOGIN sessions to prove both allowed
-   operations and negative cases (revoked grant, role membership, PUBLIC ACL,
-   owned objects, schema access, unexpected future tables).
-5. Re-run the exact-HEAD Backend CI and independent Agent/Manager traffic
-   contract before proposing a merge. Do not touch production credentials.
+The existing opt-in two-login PostgreSQL rehearsal now uses the real issuer
+instead of hand-granting its runtime role. It checks each policy bit and
+refusal when revoked, missing sequence/lock-column grants, read-only preflight,
+refusal to adopt existing roles, rollback on unsafe PUBLIC column ACLs, unknown
+tables and historical schema 175. Real repositories exercise auth seed/UPSERT,
+revocation preparation/cancellation with trigger audit, traffic checkpoint and
+rollup, then retention. Forbidden journal/approval/held-state writes remain
+SQL permission failures. This extends the existing fixture and CI step.
 
-**Release gate:** no schema 171, protected held-dispatch executor, Agent task
-delivery, merge to `main`, VPS changes, or history cleanup on the strength
-of this inventory alone. RG-140 and v0.2.0 remain **NO-GO**.
+Local compilation and URL-separation test passed. Exact-head PostgreSQL and
+full CI results are recorded in PR #812; this document alone does not attest
+release readiness. The installer/update/restore credential separation and
+complete production held-delivery/terminal path remain release blockers.
+No schema 171, VPS changes, merge, role cutover or source-history cleanup is
+authorized by these checks. RG-140 and v0.2.0 remain **NO-GO**.

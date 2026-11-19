@@ -68,6 +68,9 @@ func (a *App) Start(ctx context.Context) error {
 		if err := db.RequireAppliedMigrations(ctx, pool, "migrations"); err != nil {
 			return err
 		}
+		if err := db.CheckRuntimeRequiredPrivileges(ctx, pool); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("invalid RouteGate database migration mode")
 	}

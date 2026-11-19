@@ -22,7 +22,7 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	if os.Getenv("ROUTEGATE_TEST_HELD_ROLE_REHEARSAL")!="1" {
 		t.Skip("two-login PostgreSQL role rehearsal is opt-in")
 	}
-	ctx,ownerPool,done:=setupAppliedSettingsTest(t)
+	ctx,ownerPool,preparation,_,done:=removalPreparationFixture(t)
 	defer done()
 
 	var database string
@@ -40,7 +40,7 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	var preexistingSchema,preexistingRoles int
 	if err:=ownerPool.QueryRow(ctx,`SELECT
 		(SELECT count(*) FROM pg_namespace WHERE nspname='routegate_dispatch'),
-		(SELECT count(*) FROM pg_roles WHERE rolname IN($1,$2,'rg140_test_acl_holder'))`,owner,runtime).
+		(SELECT count(*) FROM pg_roles WHERE rolname IN($1,$2,'rg140_test_acl_holder','rg140_test_policy_rejected'))`,owner,runtime).
 		Scan(&preexistingSchema,&preexistingRoles);err!=nil || preexistingSchema!=0 || preexistingRoles!=0 {
 		t.Fatal("role rehearsal will not overwrite a pre-existing schema or role",err)
 	}
@@ -55,6 +55,7 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 		}
 		if rolesCreated {
 			_,_=ownerPool.Exec(cleanup,`REVOKE rg140_test_dispatch_owner FROM rg140_test_manager_runtime`)
+			_,_=ownerPool.Exec(cleanup,`DROP OWNED BY rg140_test_manager_runtime`)
 			_,_=ownerPool.Exec(cleanup,`DROP ROLE IF EXISTS rg140_test_manager_runtime`)
 			_,_=ownerPool.Exec(cleanup,`DROP ROLE IF EXISTS rg140_test_dispatch_owner`)
 		}
@@ -62,10 +63,11 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	var secret [24]byte
 	if _,err:=rand.Read(secret[:]);err!=nil {t.Fatal(err)}
 	password:=hex.EncodeToString(secret[:])
+	if err:=ProvisionRuntimeRole(ctx,ownerPool,runtime);err!=nil { t.Fatal("provision canonical runtime policy",err) }
+	rolesCreated=true
 	for _,statement:=range []string{
 		`CREATE ROLE rg140_test_dispatch_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,
-		fmt.Sprintf(`CREATE ROLE rg140_test_manager_runtime LOGIN PASSWORD '%s'
-			NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS`,password),
+		fmt.Sprintf(`ALTER ROLE rg140_test_manager_runtime LOGIN PASSWORD '%s'`,password),
 	} {
 		if _,err:=ownerPool.Exec(ctx,statement);err!=nil{
 			t.Fatal("cannot provision disposable CI roles",err)
@@ -75,10 +77,7 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	// Schema was verified absent above; mark it as ours before DDL so a
 	// partial multi-statement setup failure still removes any created objects.
 	schemaCreated=true
-	if _,err:=ownerPool.Exec(ctx,`GRANT CONNECT ON DATABASE routegate_ci TO rg140_test_manager_runtime;
-		GRANT USAGE ON SCHEMA public TO rg140_test_manager_runtime;
-		GRANT SELECT ON public.schema_migrations TO rg140_test_manager_runtime;
-		CREATE SCHEMA routegate_dispatch AUTHORIZATION rg140_test_dispatch_owner;
+	if _,err:=ownerPool.Exec(ctx,`CREATE SCHEMA routegate_dispatch AUTHORIZATION rg140_test_dispatch_owner;
 		REVOKE ALL ON SCHEMA routegate_dispatch FROM PUBLIC;
 		CREATE TABLE routegate_dispatch.held_removals (id bigint PRIMARY KEY);
 		ALTER TABLE routegate_dispatch.held_removals OWNER TO rg140_test_dispatch_owner;
@@ -118,6 +117,7 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	if err=CheckExternalMigrationRuntimeRole(ctx,ownerPool);!errors.Is(err,ErrUnsafeExternalMigrationRuntimeRole) {
 		t.Fatal("external runtime accepted privileged disposable database owner",err)
 	}
+	rehearseRuntimePolicy170(t,ctx,ownerPool,login,preparation)
 	for _,statement:=range []string{
 		`SELECT count(*) FROM routegate_dispatch.held_removals`,
 		`INSERT INTO routegate_dispatch.held_removals(id) VALUES(1)`,

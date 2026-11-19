@@ -54,6 +54,7 @@ func run(parent context.Context,logger *slog.Logger) error {
 	if err=db.CheckExternalMigrationRuntimeRole(ctx,runtime);err!=nil {return err}
 	if err=db.CheckHeldDispatchRuntimeIsolation(ctx,runtime);err!=nil {return err}
 	if err=db.RequireAppliedMigrations(ctx,runtime,"migrations");err!=nil {return err}
+	if err=db.CheckRuntimeRequiredPrivileges(ctx,runtime);err!=nil {return err}
 	if err=ctx.Err();err!=nil {return err}
 	logger.Info("dedicated migration complete; runtime schema verified")
 	return nil
