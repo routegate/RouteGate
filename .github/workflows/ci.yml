@@ -376,6 +376,7 @@ jobs:
             scripts/routegate-update-role.sh \
             scripts/routegate-update-transaction.sh \
             scripts/routegate-update-verified.sh \
+            scripts/test-manager-migration-ownership.sh \
             scripts/test-manager-only-ops-recovery.sh \
             scripts/test-agent-installer.sh \
             scripts/test-attestation-verifier-runtime.sh \
@@ -426,6 +427,7 @@ jobs:
 
       - name: Run installer and host-operation unit tests
         run: |
+          sudo bash scripts/test-manager-migration-ownership.sh
           sudo bash scripts/test-manager-only-ops-recovery.sh
           bash scripts/test-agent-installer.sh
           scripts/test-clean-vps-installer.sh

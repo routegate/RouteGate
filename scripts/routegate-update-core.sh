@@ -48,6 +48,29 @@ rg_update_require_root() {
   [[ ${EUID:-$(id -u)} -eq 0 ]] || rg_update_die "host update operations must run as root"
 }
 
+# Shared by installation, update and restore. Call only for a trusted tree
+# while Manager is stopped. Legacy archives and environment overrides must
+# never return migration ownership to the service identity.
+rg_update_secure_manager_migrations() {
+  local migrations parent unsafe
+  if [[ $# -gt 0 ]]; then
+    parent=$1
+  else
+    parent=$(rg_update_path /opt/routegate-manager) || return 1
+  fi
+  migrations="$parent/migrations"
+  [[ -d "$parent" && ! -L "$parent" && -d "$migrations" && ! -L "$migrations" ]] || return 1
+  unsafe=$(find "$migrations" \( ! -type d -a ! -type f \) -print -quit) || return 1
+  [[ -z "$unsafe" ]] || return 1
+  unsafe=$(find "$migrations" -type f -links +1 -print -quit) || return 1
+  [[ -z "$unsafe" ]] || return 1
+  chown root:root "$parent" || return 1
+  chmod 0755 "$parent" || return 1
+  chown -R root:root "$migrations" || return 1
+  find "$migrations" -type d -exec chmod 0755 {} + || return 1
+  find "$migrations" -type f -exec chmod 0644 {} + || return 1
+}
+
 rg_update_require_commands() {
   local command_name
   for command_name in "$@"; do
@@ -535,7 +558,7 @@ rg_update_apply_platform_files() {
 
   rm -rf "$migrations_dir" || return 1
   cp -a "$work_dir/manager/migrations" "$migrations_dir" || return 1
-  chown -R "$RG_UPDATE_MANAGER_OWNER" "$(dirname "$migrations_dir")" || return 1
+  rg_update_secure_manager_migrations || return 1
 
   install -d -m 0755 "$frontend_dir" || return 1
   if [[ -e "$bootstrap_dir" || -L "$bootstrap_dir" ]]; then
@@ -664,7 +687,10 @@ rg_update_restore_backup() {
   migrations_parent=$(dirname "$migrations_dir")
   frontend_parent=$(dirname "$frontend_dir")
 
-  systemctl stop "$RG_UPDATE_AGENT_SERVICE" "$RG_UPDATE_MANAGER_SERVICE" >/dev/null 2>&1 || true
+  systemctl stop "$RG_UPDATE_AGENT_SERVICE" "$RG_UPDATE_MANAGER_SERVICE" >/dev/null 2>&1 || {
+    rg_update_die "cannot stop services before restoring privileged inputs"
+    return 1
+  }
 
   RG_UPDATE_DB_RESTORE_RC=0
   if [[ "$restore_database" == "1" ]]; then
@@ -696,7 +722,10 @@ rg_update_restore_backup() {
   rm -rf "$migrations_dir" || rollback_rc=1
   install -d -m 0755 "$migrations_parent" || rollback_rc=1
   tar -xzf "$backup_dir/manager-migrations.tar.gz" -C "$migrations_parent" || rollback_rc=1
-  chown -R "$RG_UPDATE_MANAGER_OWNER" "$migrations_parent" || rollback_rc=1
+  rg_update_secure_manager_migrations || {
+    rg_update_die "cannot protect restored Manager migrations; services remain stopped"
+    return 1
+  }
 
   rm -rf "$frontend_dir" || rollback_rc=1
   install -d -m 0755 "$frontend_parent" || rollback_rc=1

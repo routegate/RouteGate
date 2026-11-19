@@ -1169,18 +1169,34 @@ extract_bundle() {
   fi
 }
 
+# Load only the core helper from the verified, extracted release. A subshell
+# keeps updater configuration separate from installer state; ownership policy
+# itself has one implementation for installation, update and recovery.
+secure_manager_migration_tree() (
+  local parent=$1
+  local library="$ROUTEGATE_WORK_DIR/extracted/tools/routegate-update-core.sh"
+  [[ -f "$library" && ! -L "$library" ]] || return 1
+  # shellcheck source=scripts/routegate-update-core.sh
+  source "$library"
+  rg_update_secure_manager_migrations "$parent"
+)
+
 install_files() {
   local source_dir="$ROUTEGATE_WORK_DIR/extracted"
   log "Installing RouteGate binaries, migrations, frontend, and service definitions."
 
   systemctl stop routegate-agent.service routegate-manager.service >/dev/null 2>&1 || true
+  # Missing units are normal on a clean host; an active Manager is not.
+  if systemctl is-active --quiet routegate-manager.service; then
+    die "Cannot stop Manager before installing protected migrations."
+  fi
 
   if ! id routegate >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/routegate-manager --create-home --shell /usr/sbin/nologin routegate
   fi
 
   install -d -m 0755 /etc/routegate
-  install -d -m 0755 -o routegate -g routegate /opt/routegate-manager
+  install -d -m 0755 -o root -g root /opt/routegate-manager
   install -d -m 0755 /var/www/routegate
   install -d -m 0700 /var/lib/routegate-agent
 	install -d -m 0700 /var/lib/routegate-agent/configs /var/lib/routegate-agent/backups /var/lib/routegate-agent/wireguard-configs /var/lib/routegate-agent/wireguard-backups /var/lib/routegate-agent/hysteria2-configs /var/lib/routegate-agent/hysteria2-backups /var/lib/routegate-agent/mtproto-configs /var/lib/routegate-agent/mtproto-backups
@@ -1192,7 +1208,7 @@ install_files() {
 
   rm -rf /opt/routegate-manager/migrations
   cp -a "$source_dir/manager/migrations" /opt/routegate-manager/migrations
-  chown -R routegate:routegate /opt/routegate-manager
+  secure_manager_migration_tree /opt/routegate-manager || die "Cannot protect Manager migrations."
 
   find /var/www/routegate -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   cp -a "$source_dir/frontend/." /var/www/routegate/

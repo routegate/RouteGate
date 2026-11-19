@@ -114,3 +114,25 @@ release readiness. The installer/update/restore credential separation and
 complete production held-delivery/terminal path remain release blockers.
 No schema 171, VPS changes, merge, role cutover or source-history cleanup is
 authorized by these checks. RG-140 and v0.2.0 remain **NO-GO**.
+
+## Migration-file ownership prerequisite
+
+The historical #639/#652 ownership protection is adapted into the existing
+`rg_update_secure_manager_migrations` helper. The installer loads that same
+helper from its verified extracted bundle in a subshell; platform and
+Management-only apply/restore paths call it directly. There is no second
+ownership implementation. The Manager directory and migration tree become
+root-owned (directories 0755, SQL files 0644), including after restoring an
+archive with legacy runtime ownership. Symlinks, special entries and hardlinked
+files are refused before ownership changes. Environment owner overrides cannot
+return these privileged inputs to the service account.
+
+Restore stops before file/database changes if services cannot be stopped, and
+never starts Manager if protecting the restored migrations fails. The clean
+installer tolerates missing units but rejects an active Manager after stop.
+The reused disposable root/nobody test exercises actual kernel permission
+denials, safe reading, legacy archive restoration and unsafe links. Existing
+updater tests cover stop/protection failure and subsequent successful restore.
+This establishes filesystem ownership, not a live database role cutover.
+Database-owner separation, migrator packaging and the installer/update/restore
+credential lifecycle remain open; full CI evidence is recorded in PR #812.

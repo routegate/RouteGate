@@ -316,7 +316,7 @@ rg_update_apply_management_files() {
   install -m 0755 "$work_dir/bin/routegate-manager" "$manager_bin" || return 1
   rm -rf "$migrations_dir" || return 1
   cp -a "$work_dir/manager/migrations" "$migrations_dir" || return 1
-  chown -R "$RG_UPDATE_MANAGER_OWNER" "$(dirname "$migrations_dir")" || return 1
+  rg_update_secure_manager_migrations || return 1
   install -d -m 0755 "$frontend_dir" || return 1
   # Published Agent bootstrap artifacts live under the frontend root but are
   # not part of the frontend; keep them exactly as rg_update_apply_platform_files does.
@@ -432,7 +432,10 @@ rg_update_restore_management_backup() {
   migrations_parent=$(dirname "$migrations_dir")
   frontend_parent=$(dirname "$frontend_dir")
 
-  systemctl stop "$RG_UPDATE_MANAGER_SERVICE" >/dev/null 2>&1 || true
+  systemctl stop "$RG_UPDATE_MANAGER_SERVICE" >/dev/null 2>&1 || {
+    rg_update_die "cannot stop services before restoring privileged inputs"
+    return 1
+  }
   RG_UPDATE_DB_RESTORE_RC=0
   if [[ "$restore_database" == "1" ]]; then
     if [[ -z "$db_url" || ! -s "$backup_dir/routegate.pgdump" ]]; then
@@ -452,7 +455,10 @@ rg_update_restore_management_backup() {
   rm -rf "$migrations_dir" || rollback_rc=1
   install -d -m 0755 "$migrations_parent" || rollback_rc=1
   tar -xzf "$backup_dir/manager-migrations.tar.gz" -C "$migrations_parent" || rollback_rc=1
-  chown -R "$RG_UPDATE_MANAGER_OWNER" "$migrations_parent" || rollback_rc=1
+  rg_update_secure_manager_migrations || {
+    rg_update_die "cannot protect restored Manager migrations; services remain stopped"
+    return 1
+  }
   rm -rf "$frontend_dir" || rollback_rc=1
   install -d -m 0755 "$frontend_parent" || rollback_rc=1
   tar -xzf "$backup_dir/frontend.tar.gz" -C "$frontend_parent" || rollback_rc=1

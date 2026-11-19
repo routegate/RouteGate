@@ -250,6 +250,19 @@ test_backup_restore_round_trip() {
   [[ -s "$backup/routegate.pgdump" ]] || fail "database backup was not created"
 
   mutate_fake_host "$fake_root"
+  export RG_TEST_SYSTEMCTL_FAIL_ACTION=stop
+  if rg_update_restore_backup "$backup" "postgres://example/test" 1 >/dev/null 2>&1; then
+    fail "rollback continued after service stop failure"
+  fi
+  unset RG_TEST_SYSTEMCTL_FAIL_ACTION
+  assert_file_content "$fake_root/usr/local/bin/routegate-manager" "manager-mutated"
+  (
+    rg_update_secure_manager_migrations() { return 1; }
+    rg_update_wait_manager() { fail "Manager restarted after migration protection failure"; }
+    if rg_update_restore_backup "$backup" "postgres://example/test" 1 >/dev/null 2>&1; then
+      fail "rollback accepted unprotected migrations"
+    fi
+  )
   rg_update_restore_backup "$backup" "postgres://example/test" 1
 
   assert_file_content "$fake_root/usr/local/bin/routegate-manager" "manager-old"

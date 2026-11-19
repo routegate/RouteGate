@@ -191,6 +191,22 @@ test_management_round_trip() {
   assert_file_content "$root/var/www/routegate/index.html" frontend-new
   [[ ! -e "$root/usr/local/bin/routegate-agent" ]] || fail "Management update created an Agent binary"
 
+  export RG_TEST_SYSTEMCTL_FAIL_ACTION=stop
+  if rg_update_restore_role_backup management "$backup" "$db_url" 1 >/dev/null 2>&1; then
+    fail "Management restore continued after stop failure"
+  fi
+  unset RG_TEST_SYSTEMCTL_FAIL_ACTION
+  assert_file_content "$root/usr/local/bin/routegate-manager" manager-new
+  (
+    rg_update_secure_manager_migrations() { return 1; }
+    systemctl() {
+      [[ ${1:-} != start ]] || fail "Management restarted with unprotected migrations"
+      command systemctl "$@"
+    }
+    if rg_update_restore_role_backup management "$backup" "$db_url" 1 >/dev/null 2>&1; then
+      fail "Management restore accepted unprotected migrations"
+    fi
+  )
   rg_update_restore_role_backup management "$backup" "$db_url" 1
   assert_file_content "$root/usr/local/bin/routegate-manager" manager-old
   assert_file_content "$root/opt/routegate-manager/migrations/000133_old.up.sql" migration-old
