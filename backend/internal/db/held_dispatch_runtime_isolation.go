@@ -74,7 +74,24 @@ func CheckExternalMigrationRuntimeRole(ctx context.Context, pool *pgxpool.Pool) 
 			SELECT 1 FROM pg_roles r
 			WHERE pg_has_role(session_user, r.oid, 'MEMBER')
 			AND (
-				r.rolsuper OR r.rolcreaterole OR r.rolcreatedb
+				-- Adapt #639's dangerous ACL refusals to the shared guard.
+				-- Check every reachable role, including NOINHERIT SET ROLE
+				-- paths; effective privileges also include PUBLIC grants.
+				EXISTS (
+					SELECT 1 FROM pg_catalog.pg_class c
+					JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+					WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f')
+					AND (pg_catalog.has_table_privilege(r.oid,c.oid,'TRUNCATE,TRIGGER,REFERENCES')
+						OR (c.relname='schema_migrations' AND
+							pg_catalog.has_table_privilege(r.oid,c.oid,'INSERT,UPDATE,DELETE')))
+				)
+				OR EXISTS (
+					SELECT 1 FROM pg_catalog.pg_class c
+					JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+					WHERE n.nspname='public' AND c.relkind='S'
+					AND pg_catalog.has_sequence_privilege(r.oid,c.oid,'UPDATE')
+				)
+				OR r.rolsuper OR r.rolcreaterole OR r.rolcreatedb
 				OR r.rolreplication OR r.rolbypassrls
 				OR r.oid IN (
 					SELECT datdba FROM pg_database WHERE datname = current_database()

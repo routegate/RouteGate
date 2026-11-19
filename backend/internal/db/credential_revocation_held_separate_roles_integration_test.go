@@ -40,7 +40,7 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	var preexistingSchema,preexistingRoles int
 	if err:=ownerPool.QueryRow(ctx,`SELECT
 		(SELECT count(*) FROM pg_namespace WHERE nspname='routegate_dispatch'),
-		(SELECT count(*) FROM pg_roles WHERE rolname IN($1,$2))`,owner,runtime).
+		(SELECT count(*) FROM pg_roles WHERE rolname IN($1,$2,'rg140_test_acl_holder'))`,owner,runtime).
 		Scan(&preexistingSchema,&preexistingRoles);err!=nil || preexistingSchema!=0 || preexistingRoles!=0 {
 		t.Fatal("role rehearsal will not overwrite a pre-existing schema or role",err)
 	}
@@ -130,6 +130,40 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 			t.Fatalf("runtime role unexpectedly accessed protected dispatch authority: %q: %v",statement,err)
 		}
 	}
+	// Historical #639 refused dangerous ACLs during provisioning. The shared
+	// runtime guard must also reject them after restore or later grants.
+	for _, grantee := range []string{runtime, "PUBLIC"} {
+		for _, privilege := range []string{"TRUNCATE", "TRIGGER", "REFERENCES"} {
+			if _, err = ownerPool.Exec(ctx, "GRANT "+privilege+" ON public.vpn_credential_revocation_events TO "+grantee); err != nil { t.Fatal(err) }
+			if err = CheckExternalMigrationRuntimeRole(ctx, login); !errors.Is(err, ErrUnsafeExternalMigrationRuntimeRole) { t.Fatalf("accepted %s via %s: %v", privilege, grantee, err) }
+			if err = CheckHeldDispatchRuntimeIsolation(ctx, login); !errors.Is(err, ErrUnsafeHeldDispatchRuntimeRole) { t.Fatalf("held dispatch accepted %s via %s: %v", privilege, grantee, err) }
+			if _, err = ownerPool.Exec(ctx, "REVOKE "+privilege+" ON public.vpn_credential_revocation_events FROM "+grantee); err != nil { t.Fatal(err) }
+		}
+	}
+	for _, privilege := range []string{"INSERT", "UPDATE", "DELETE"} {
+		if _, err = ownerPool.Exec(ctx, "GRANT "+privilege+" ON public.schema_migrations TO "+runtime); err != nil { t.Fatal(err) }
+		if err = CheckExternalMigrationRuntimeRole(ctx, login); !errors.Is(err, ErrUnsafeExternalMigrationRuntimeRole) { t.Fatalf("accepted migration ledger %s: %v", privilege, err) }
+		if _, err = ownerPool.Exec(ctx, "REVOKE "+privilege+" ON public.schema_migrations FROM "+runtime); err != nil { t.Fatal(err) }
+	}
+	if _, err = ownerPool.Exec(ctx, `CREATE SEQUENCE public.rg140_test_acl_sequence`); err != nil { t.Fatal(err) }
+	defer func() { _, _ = ownerPool.Exec(context.Background(), `DROP SEQUENCE public.rg140_test_acl_sequence`) }()
+	if _, err = ownerPool.Exec(ctx, `GRANT USAGE, SELECT ON SEQUENCE public.rg140_test_acl_sequence TO rg140_test_manager_runtime`); err != nil { t.Fatal(err) }
+	if err = CheckExternalMigrationRuntimeRole(ctx, login); err != nil { t.Fatal("safe sequence privileges rejected", err) }
+	if _, err = ownerPool.Exec(ctx, `GRANT UPDATE ON SEQUENCE public.rg140_test_acl_sequence TO rg140_test_manager_runtime`); err != nil { t.Fatal(err) }
+	if err = CheckExternalMigrationRuntimeRole(ctx, login); !errors.Is(err, ErrUnsafeExternalMigrationRuntimeRole) { t.Fatal("accepted sequence setval authority", err) }
+	if _, err = ownerPool.Exec(ctx, `REVOKE UPDATE ON SEQUENCE public.rg140_test_acl_sequence FROM rg140_test_manager_runtime`); err != nil { t.Fatal(err) }
+	// A NOINHERIT, non-owner helper still permits SET ROLE to its ACLs.
+	if _, err = ownerPool.Exec(ctx, `CREATE ROLE rg140_test_acl_holder NOLOGIN NOINHERIT;
+		GRANT TRUNCATE ON public.vpn_credential_revocation_events TO rg140_test_acl_holder;
+		GRANT rg140_test_acl_holder TO rg140_test_manager_runtime`); err != nil { t.Fatal(err) }
+	defer func() {
+		_, _ = ownerPool.Exec(context.Background(), `REVOKE rg140_test_acl_holder FROM rg140_test_manager_runtime;
+			DROP OWNED BY rg140_test_acl_holder; DROP ROLE rg140_test_acl_holder`)
+	}()
+	if err = CheckExternalMigrationRuntimeRole(ctx, login); !errors.Is(err, ErrUnsafeExternalMigrationRuntimeRole) { t.Fatal("accepted dangerous ACL through NOINHERIT membership", err) }
+	if _, err = ownerPool.Exec(ctx, `REVOKE rg140_test_acl_holder FROM rg140_test_manager_runtime`); err != nil { t.Fatal(err) }
+	if err = CheckExternalMigrationRuntimeRole(ctx, login); err != nil { t.Fatal("safe runtime did not recover after ACL revocation", err) }
+
 	// NOINHERIT does not prevent SET ROLE after role membership is granted.
 	// The guard must detect even a membership that currently has no USAGE.
 	if _,err=ownerPool.Exec(ctx,`GRANT rg140_test_dispatch_owner TO rg140_test_manager_runtime`);err!=nil {

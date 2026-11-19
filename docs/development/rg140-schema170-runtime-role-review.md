@@ -56,6 +56,23 @@ the historical four-bit grant is not evidence of least privilege.
 In particular, tables holding human approval, dispatch staging, secrets,
 or immutable audit events must not automatically acquire ordinary writes.
 
+## Enforced dangerous-privilege boundary (19 November 2026)
+
+The existing `CheckExternalMigrationRuntimeRole` now also incorporates the
+negative ACL policy from #639: reject public-table TRUNCATE/TRIGGER/REFERENCES,
+migration-journal INSERT/UPDATE/DELETE, and public-sequence UPDATE (setval).
+It evaluates effective privileges for every reachable role, including PUBLIC
+and NOINHERIT membership paths, rather than only checking object ownership.
+The existing Manager external startup, dedicated migrator and held-dispatch
+checks reuse this one guard; no second validator or grant issuer was added.
+
+The existing two-login PostgreSQL rehearsal checks direct and PUBLIC table
+ACLs, journal writes, allowed sequence USAGE/SELECT versus forbidden UPDATE,
+non-owner NOINHERIT escalation, and recovery after grants are revoked.
+This closes an actual excess-authority gap; it does not establish the minimum
+per-table DML policy or provision separate production credentials. #652's
+required-grant check and schema-170 grant issuance remain to be adapted.
+
 ## Required checks before implementing a runtime role
 
 1. Trace real SQL read/write operations and their trust boundary per relation.
