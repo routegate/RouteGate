@@ -176,6 +176,36 @@ test_manager_env_is_data() {
   RG_UPDATE_ROOT=""
 }
 
+test_runtime_verifier_invocation() {
+  local root="$TMP_DIR/runtime-verifier" file binary
+  mkdir -p "$root/etc/routegate" "$root/usr/local/bin" "$root/opt/routegate-manager"
+  file="$root/etc/routegate/manager.env"
+  binary="$root/usr/local/bin/routegate-migrate"
+  cat >"$binary" <<'EOF_RUNTIME_CHECK'
+#!/bin/bash
+[[ $# == 1 && $1 == --check-runtime ]] || exit 2
+[[ ${ROUTEGATE_DATABASE_URL:-} == postgres://runtime/test ]] || exit 3
+[[ -z ${ROUTEGATE_MIGRATOR_DATABASE_URL:-} && -z ${PGPASSWORD:-} ]] || exit 4
+[[ $PWD == */opt/routegate-manager ]] || exit 5
+exit 23
+EOF_RUNTIME_CHECK
+  chmod 0755 "$binary"
+  printf '  ROUTEGATE_DATABASE_MIGRATION_MODE=external\nROUTEGATE_DATABASE_URL="postgres://runtime/test"\n' >"$file"
+  (
+    export ROUTEGATE_MIGRATOR_DATABASE_URL=owner-secret PGPASSWORD=owner-secret
+    RG_UPDATE_ROOT=$root
+    local rc=0
+    rg_update_verify_restored_runtime "$file" || rc=$?
+    assert_eq "$rc" 23 "external verifier invoked with isolated environment"
+    printf 'ROUTEGATE_DATABASE_MIGRATION_MODE=startup\n' >>"$file"
+    if rg_update_verify_restored_runtime "$file"; then
+      fail "duplicate external/startup assignment bypassed verification"
+    fi
+    printf 'ROUTEGATE_DATABASE_URL=test\n' >"$file"
+    rg_update_verify_restored_runtime "$file" || fail "legacy startup restore rejected"
+  )
+}
+
 test_management_round_trip() {
   local root="$TMP_DIR/management-root"
   local work="$TMP_DIR/management-work"
@@ -346,6 +376,7 @@ PATH="$STUB_DIR:$PATH"
 test_role_inference
 test_marker_policy
 test_manager_env_is_data
+test_runtime_verifier_invocation
 test_management_round_trip
 test_management_apply_preserves_bootstrap
 test_vpn_round_trip

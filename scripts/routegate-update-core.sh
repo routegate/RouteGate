@@ -489,10 +489,16 @@ rg_update_control_plane_preflight() {
 
 # Read environment entries as data, never as shell code.
 rg_update_read_environment_value() {
-  local file=$1 key=$2 value=$3 line found=0
+  local file=$1 key=$2 value=$3 line name found=0
   [[ -f "$file" && ! -L "$file" ]] || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" == "$key="* ]]; then
+    # EnvironmentFile permits whitespace around the assignment name. Do not
+    # mistake an external-mode entry for an absent key and skip verification.
+    [[ "$line" == *=* ]] || continue
+    name=${line%%=*}
+    name="${name#"${name%%[!$' \t']*}"}"
+    name="${name%"${name##*[!$' \t']}"}"
+    if [[ "$name" == "$key" ]]; then
       ((found == 0)) || return 1
       found=1
       value=${line#*=}
