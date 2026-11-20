@@ -194,6 +194,9 @@ EOF_RUNTIME_CHECK
   (
     export ROUTEGATE_MIGRATOR_DATABASE_URL=owner-secret PGPASSWORD=owner-secret
     RG_UPDATE_ROOT=$root
+    if rg_update_read_administrative_database_url >/dev/null; then
+      fail "external backup fell back to runtime credentials without owner file"
+    fi
     local rc=0
     rg_update_verify_restored_runtime "$file" || rc=$?
     assert_eq "$rc" 23 "external verifier invoked with isolated environment"
@@ -203,6 +206,7 @@ EOF_RUNTIME_CHECK
     fi
     printf 'ROUTEGATE_DATABASE_URL=test\n' >"$file"
     rg_update_verify_restored_runtime "$file" || fail "legacy startup restore rejected"
+    assert_eq "$(rg_update_read_administrative_database_url)" test "legacy administrative login preserved"
   )
 }
 

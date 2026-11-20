@@ -21,6 +21,7 @@ func main() {
 	// existing privileged migrator, rather than adding another Manager DDL path.
 	runtimeRole := flag.String("create-runtime-role", "", "create a new NOLOGIN runtime role on the fully migrated canonical schema, then exit")
 	checkOnly := flag.Bool("check-runtime", false, "verify runtime isolation, migration history and required grants without changing the database")
+	checkConnections := flag.Bool("check-connections", false, "verify both independent database identities and runtime grants without applying migrations")
 	flag.Parse()
 	requested := false
 	flag.Visit(func(f *flag.Flag) {
@@ -28,7 +29,7 @@ func main() {
 			requested = true
 		}
 	})
-	if flag.NArg() != 0 || (requested && (*runtimeRole == "" || *checkOnly)) {
+	if flag.NArg() != 0 || (requested && (*runtimeRole == "" || *checkOnly || *checkConnections)) || (*checkOnly && *checkConnections) {
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -36,7 +37,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	var err error
-	if *checkOnly {
+	if *checkConnections {
+		err = runMode(ctx, logger, false)
+	} else if *checkOnly {
 		err = checkRuntime(ctx)
 	} else if requested {
 		err = createRuntimeRole(ctx, logger, *runtimeRole)
@@ -72,6 +75,10 @@ func createRuntimeRole(ctx context.Context, logger *slog.Logger, name string) er
 }
 
 func run(ctx context.Context, logger *slog.Logger) error {
+	return runMode(ctx, logger, true)
+}
+
+func runMode(ctx context.Context, logger *slog.Logger, apply bool) error {
 	migratorURL := os.Getenv("ROUTEGATE_MIGRATOR_DATABASE_URL")
 	runtimeURL := os.Getenv("ROUTEGATE_DATABASE_URL")
 	if err := db.ValidateDedicatedMigrationURLs(migratorURL, runtimeURL); err != nil {
@@ -114,13 +121,15 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err = db.CheckHeldDispatchRuntimeIsolation(ctx, runtime); err != nil {
 		return err
 	}
-	if err = db.Migrate(ctx, owner, "migrations", logger); err != nil {
-		return err
+	if apply {
+		if err = db.Migrate(ctx, owner, "migrations", logger); err != nil {
+			return err
+		}
 	}
 	if err = verifyRuntime(ctx, runtime); err != nil {
 		return err
 	}
-	logger.Info("dedicated migration complete; runtime schema verified")
+	logger.Info("database verification complete", "migrations_applied", apply)
 	return nil
 }
 

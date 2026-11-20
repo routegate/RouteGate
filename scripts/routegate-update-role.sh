@@ -199,6 +199,31 @@ rg_update_read_manager_database_url() {
   printf '%s\n' "$value"
 }
 
+# Administrative operations must not reuse a restricted Manager login.
+rg_update_read_administrative_database_url() (
+  local manager_env mode runtime_url owner_env owner_url binary directory
+  manager_env=$(rg_update_path /etc/routegate/manager.env) || return 1
+  mode=$(rg_update_read_environment_value "$manager_env" ROUTEGATE_DATABASE_MIGRATION_MODE startup) || return 1
+  runtime_url=$(rg_update_read_manager_database_url) || return 1
+  case "$mode" in
+    startup) printf '%s\n' "$runtime_url"; return 0 ;;
+    external) ;;
+    *) return 1 ;;
+  esac
+  owner_env=$(rg_update_path /etc/routegate/migrator.env) || return 1
+  [[ -f "$owner_env" && ! -L "$owner_env" ]] || return 1
+  [[ $(stat -c '%u:%a' "$owner_env") == 0:600 ]] || return 1
+  owner_url=$(rg_update_read_environment_value "$owner_env" ROUTEGATE_MIGRATOR_DATABASE_URL "") || return 1
+  [[ -n "$owner_url" ]] || return 1
+  binary=$(rg_update_path /usr/local/bin/routegate-migrate) || return 1
+  directory=$(rg_update_path /opt/routegate-manager) || return 1
+  [[ -f "$binary" && ! -L "$binary" && -x "$binary" ]] || return 1
+  cd "$directory" || return 1
+  env -i PATH=/usr/bin:/bin ROUTEGATE_DATABASE_URL="$runtime_url" \
+    ROUTEGATE_MIGRATOR_DATABASE_URL="$owner_url" "$binary" --check-connections >&2 || return 1
+  printf '%s\n' "$owner_url"
+)
+
 rg_update_write_role_backup_meta() {
   local backup_dir=$1 role=$2
   cat >"$backup_dir/role.meta" <<EOF_ROLE_META

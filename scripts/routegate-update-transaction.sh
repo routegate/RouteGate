@@ -533,7 +533,7 @@ main() {
   validate_dispatch_candidate "$ROLE" "$WORK_DIR"
 
   if rg_update_role_has_management "$ROLE"; then
-    DB_URL=$(rg_update_read_manager_database_url)
+    DB_URL=$(rg_update_read_administrative_database_url)
   fi
 
   STAGE=backup
