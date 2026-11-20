@@ -452,6 +452,7 @@ rg_update_restore_management_backup() {
       RG_UPDATE_DB_RESTORE_RC=$restore_rc
     fi
     if ((RG_UPDATE_DB_RESTORE_RC != 0)); then
+      rollback_rc=1
       printf '%s WARNING: Management database restore failed (exit %d); continuing file rollback\n' \
         "$RG_UPDATE_LOG_PREFIX" "$RG_UPDATE_DB_RESTORE_RC" >&2
     fi

@@ -217,6 +217,20 @@ test_management_round_trip() {
   assert_file_content "$root/etc/systemd/system/routegate-manager.service" manager-unit-old
   assert_eq "$RG_UPDATE_DB_RESTORE_RC" 0 "Management database restore result"
   [[ ! -e "$root/usr/local/bin/routegate-migrate" ]] || fail "legacy rollback retained newer migrator"
+  # A successful file rollback must not hide a failed database restoration.
+  export RG_TEST_PG_RESTORE_FAIL=1
+  if rg_update_restore_role_backup management "$backup" "$db_url" 1 >/dev/null 2>&1; then
+    fail "Management rollback reported success after pg_restore failure"
+  fi
+  unset RG_TEST_PG_RESTORE_FAIL
+  assert_eq "$RG_UPDATE_DB_RESTORE_RC" 75 "Management pg_restore failure preserved"
+  assert_file_content "$root/usr/local/bin/routegate-manager" manager-old
+  mv "$backup/routegate.pgdump" "$backup/saved.pgdump"
+  if rg_update_restore_role_backup management "$backup" "$db_url" 1 >/dev/null 2>&1; then
+    fail "Management rollback reported success without requested database backup"
+  fi
+  assert_eq "$RG_UPDATE_DB_RESTORE_RC" 1 "Management missing database backup"
+  mv "$backup/saved.pgdump" "$backup/routegate.pgdump"
   # Backups made by previous versions have neither state nor binary.
   rm "$backup/migrator.state"
   printf 'newer\n' >"$root/usr/local/bin/routegate-migrate"
