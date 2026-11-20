@@ -730,6 +730,19 @@ rg_update_wait_agent() {
   rg_update_die "agent did not become active within ${attempts}s"
 }
 
+# Restore the security boundary recorded in the same backup as Manager's mode.
+rg_update_restore_database() {
+  local backup_dir=$1 db_url=$2 mode
+  local -a options=(--single-transaction --clean --if-exists)
+  mode=$(rg_update_read_environment_value "$backup_dir/manager.env" ROUTEGATE_DATABASE_MIGRATION_MODE startup) || return 1
+  case "$mode" in
+    startup) options+=(--no-owner --no-privileges) ;;
+    external) ;; # Preserve recorded owners and ACLs; never grant blanket DML.
+    *) rg_update_die "unknown migration mode in database backup"; return 1 ;;
+  esac
+  pg_restore "${options[@]}" --exit-on-error --dbname="$db_url" "$backup_dir/routegate.pgdump"
+}
+
 rg_update_restore_backup() {
   local backup_dir=$1
   local db_url=$2
@@ -784,15 +797,7 @@ rg_update_restore_backup() {
       printf '%s WARNING: database restore requested but database backup is unavailable\n' "$RG_UPDATE_LOG_PREFIX" >&2
     else
       # Keep the pre-restore database intact if any restore command fails.
-      pg_restore \
-        --single-transaction \
-        --clean \
-        --if-exists \
-        --no-owner \
-        --no-privileges \
-        --exit-on-error \
-        --dbname="$db_url" \
-        "$backup_dir/routegate.pgdump" >/dev/null || restore_rc=$?
+      rg_update_restore_database "$backup_dir" "$db_url" >/dev/null || restore_rc=$?
       RG_UPDATE_DB_RESTORE_RC=$restore_rc
       if ((RG_UPDATE_DB_RESTORE_RC != 0)); then
         rollback_rc=1

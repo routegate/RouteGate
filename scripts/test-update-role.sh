@@ -176,6 +176,30 @@ test_manager_env_is_data() {
   RG_UPDATE_ROOT=""
 }
 
+test_database_restore_security_options() (
+  local backup="$TMP_DIR/restore-options" expected=external
+  mkdir -p "$backup"
+  pg_restore() {
+    local IFS=" "
+    [[ " $* " == *" --single-transaction "* ]] || fail "non-atomic restore"
+    if [[ "$expected" == external ]]; then
+      [[ " $* " != *" --no-privileges "* && " $* " != *" --no-owner "* ]] || fail "external restore discarded owners or ACLs"
+    else
+      [[ " $* " == *" --no-privileges "* && " $* " == *" --no-owner "* ]] || fail "legacy restore contract changed"
+    fi
+  }
+  printf 'ROUTEGATE_DATABASE_MIGRATION_MODE=external\n' >"$backup/manager.env"
+  rg_update_restore_database "$backup" postgres://owner/test || fail "external restore failed"
+  expected=startup
+  printf 'ROUTEGATE_DATABASE_URL=test\n' >"$backup/manager.env"
+  rg_update_restore_database "$backup" postgres://owner/test || fail "legacy restore failed"
+  printf 'ROUTEGATE_DATABASE_MIGRATION_MODE=unknown\n' >"$backup/manager.env"
+  pg_restore() { fail "unknown backup mode reached database"; }
+  if rg_update_restore_database "$backup" postgres://owner/test >/dev/null 2>&1; then
+    fail "unknown mode accepted"
+  fi
+)
+
 test_runtime_verifier_invocation() {
   local root="$TMP_DIR/runtime-verifier" file binary
   mkdir -p "$root/etc/routegate" "$root/usr/local/bin" "$root/opt/routegate-manager"
@@ -380,6 +404,7 @@ PATH="$STUB_DIR:$PATH"
 test_role_inference
 test_marker_policy
 test_manager_env_is_data
+test_database_restore_security_options
 test_runtime_verifier_invocation
 test_management_round_trip
 test_management_apply_preserves_bootstrap
