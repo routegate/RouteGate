@@ -192,32 +192,10 @@ rg_update_role_preflight() {
 }
 
 rg_update_read_manager_database_url() {
-  local env_file line value=""
+  local env_file value
   env_file=$(rg_update_path /etc/routegate/manager.env) || return 1
-  [[ -f "$env_file" && ! -L "$env_file" ]] || {
-    rg_update_die "Manager environment is unavailable"
-    return 1
-  }
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      ROUTEGATE_DATABASE_URL=*)
-        [[ -z "$value" ]] || {
-          rg_update_die "Manager environment contains duplicate database URL entries"
-          return 1
-        }
-        value=${line#ROUTEGATE_DATABASE_URL=}
-        if [[ "$value" == \"*\" && "$value" == *\" ]]; then
-          value=${value:1:${#value}-2}
-        fi
-        ;;
-    esac
-  done <"$env_file"
-
-  [[ -n "$value" && "$value" != *$'\n'* && "$value" != *$'\r'* ]] || {
-    rg_update_die "Manager database URL is missing or invalid"
-    return 1
-  }
+  value=$(rg_update_read_environment_value "$env_file" ROUTEGATE_DATABASE_URL "") || return 1
+  [[ -n "$value" ]] || return 1
   printf '%s\n' "$value"
 }
 
@@ -474,7 +452,11 @@ rg_update_restore_management_backup() {
   install -d -m 0755 "$frontend_parent" || rollback_rc=1
   tar -xzf "$backup_dir/frontend.tar.gz" -C "$frontend_parent" || rollback_rc=1
   install -m 0644 "$backup_dir/routegate-manager.service" "$manager_unit" || rollback_rc=1
-  install -m 0600 "$backup_dir/manager.env" "$manager_env" || rollback_rc=1
+  install -m 0600 "$backup_dir/manager.env" "$manager_env" || return 1
+  rg_update_verify_restored_runtime "$manager_env" || {
+    rg_update_die "restored runtime verification failed; Manager remains stopped"
+    return 1
+  }
   systemctl daemon-reload || rollback_rc=1
   systemctl start "$RG_UPDATE_MANAGER_SERVICE" >/dev/null 2>&1 || rollback_rc=1
   rg_update_log "Management rollback attempt completed; backup retained at $backup_dir"

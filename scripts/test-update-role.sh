@@ -232,6 +232,16 @@ test_management_round_trip() {
   fi
   assert_eq "$RG_UPDATE_DB_RESTORE_RC" 1 "Management missing database backup"
   mv "$backup/saved.pgdump" "$backup/routegate.pgdump"
+  (
+    rg_update_verify_restored_runtime() { return 1; }
+    systemctl() {
+      [[ ${1:-} != start ]] || fail "Manager started after runtime verification failure"
+      command systemctl "$@"
+    }
+    if rg_update_restore_role_backup management "$backup" "$db_url" 0 >/dev/null 2>&1; then
+      fail "restore ignored runtime verification failure"
+    fi
+  )
   # Backups made by previous versions have neither state nor binary.
   rm "$backup/migrator.state"
   printf 'newer\n' >"$root/usr/local/bin/routegate-migrate"

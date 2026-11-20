@@ -487,6 +487,42 @@ rg_update_control_plane_preflight() {
   done
 }
 
+# Read environment entries as data, never as shell code.
+rg_update_read_environment_value() {
+  local file=$1 key=$2 value=$3 line found=0
+  [[ -f "$file" && ! -L "$file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$key="* ]]; then
+      ((found == 0)) || return 1
+      found=1
+      value=${line#*=}
+      if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+        value=${value:1:${#value}-2}
+      fi
+    fi
+  done <"$file"
+  [[ "$value" != *$'\r'* && "$value" != *$'\n'* ]] || return 1
+  printf '%s\n' "$value"
+}
+
+rg_update_verify_restored_runtime() (
+  local file=$1 mode url binary directory
+  mode=$(rg_update_read_environment_value "$file" ROUTEGATE_DATABASE_MIGRATION_MODE startup) || return 1
+  case "$mode" in
+    startup) return 0 ;;
+    external) ;;
+    *) return 1 ;;
+  esac
+  url=$(rg_update_read_environment_value "$file" ROUTEGATE_DATABASE_URL "") || return 1
+  [[ -n "$url" ]] || return 1
+  binary=$(rg_update_path /usr/local/bin/routegate-migrate) || return 1
+  directory=$(rg_update_path /opt/routegate-manager) || return 1
+  [[ -f "$binary" && ! -L "$binary" && -x "$binary" ]] || return 1
+  cd "$directory" || return 1
+  # Do not inherit migration-owner or ambient PostgreSQL credentials.
+  env -i PATH=/usr/bin:/bin ROUTEGATE_DATABASE_URL="$url" "$binary" --check-runtime
+)
+
 # Capture absence explicitly so restoring a legacy installation removes the new
 # migrator. A declared-present file must never silently become an absent file.
 rg_update_backup_migrator() {
@@ -781,7 +817,11 @@ rg_update_restore_backup() {
 
   install -m 0644 "$backup_dir/routegate-manager.service" "$manager_unit" || rollback_rc=1
   install -m 0644 "$backup_dir/routegate-agent.service" "$agent_unit" || rollback_rc=1
-  install -m 0600 "$backup_dir/manager.env" "$manager_env" || rollback_rc=1
+  install -m 0600 "$backup_dir/manager.env" "$manager_env" || return 1
+  rg_update_verify_restored_runtime "$manager_env" || {
+    rg_update_die "restored runtime verification failed; Manager remains stopped"
+    return 1
+  }
 
   systemctl daemon-reload || rollback_rc=1
   if ! rg_update_wait_manager 45; then
