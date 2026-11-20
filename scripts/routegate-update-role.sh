@@ -447,7 +447,7 @@ rg_update_restore_management_backup() {
     if [[ -z "$db_url" || ! -s "$backup_dir/routegate.pgdump" ]]; then
       RG_UPDATE_DB_RESTORE_RC=1
     else
-      pg_restore --clean --if-exists --no-owner --no-privileges --exit-on-error \
+      pg_restore --single-transaction --clean --if-exists --no-owner --no-privileges --exit-on-error \
         --dbname="$db_url" "$backup_dir/routegate.pgdump" >/dev/null || restore_rc=$?
       RG_UPDATE_DB_RESTORE_RC=$restore_rc
     fi

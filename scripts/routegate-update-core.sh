@@ -741,7 +741,9 @@ rg_update_restore_backup() {
       rollback_rc=1
       printf '%s WARNING: database restore requested but database backup is unavailable\n' "$RG_UPDATE_LOG_PREFIX" >&2
     else
+      # Keep the pre-restore database intact if any restore command fails.
       pg_restore \
+        --single-transaction \
         --clean \
         --if-exists \
         --no-owner \

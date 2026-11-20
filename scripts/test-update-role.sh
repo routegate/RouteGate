@@ -69,6 +69,7 @@ EOF_PG_DUMP
   cat >"$stub_dir/pg_restore" <<'EOF_PG_RESTORE'
 #!/usr/bin/env bash
 set -euo pipefail
+[[ " $* " == *" --single-transaction "* ]] || { echo "non-atomic database restore" >&2; exit 76; }
 [[ ${RG_TEST_PG_RESTORE_FAIL:-0} != 1 ]] || exit 75
 exit 0
 EOF_PG_RESTORE
