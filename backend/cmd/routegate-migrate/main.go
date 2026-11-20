@@ -22,6 +22,7 @@ func main() {
 	runtimeRole := flag.String("create-runtime-role", "", "create a new NOLOGIN runtime role on the fully migrated canonical schema, then exit")
 	checkOnly := flag.Bool("check-runtime", false, "verify runtime isolation, migration history and required grants without changing the database")
 	checkConnections := flag.Bool("check-connections", false, "verify both independent database identities and runtime grants without applying migrations")
+	initialize := flag.Bool("initialize-schema", false, "apply canonical schema using only the explicit database owner connection, before runtime provisioning")
 	flag.Parse()
 	requested := false
 	flag.Visit(func(f *flag.Flag) {
@@ -29,7 +30,7 @@ func main() {
 			requested = true
 		}
 	})
-	if flag.NArg() != 0 || (requested && (*runtimeRole == "" || *checkOnly || *checkConnections)) || (*checkOnly && *checkConnections) {
+	if (*initialize && (requested || *checkOnly || *checkConnections)) || flag.NArg() != 0 || (requested && (*runtimeRole == "" || *checkOnly || *checkConnections)) || (*checkOnly && *checkConnections) {
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -37,7 +38,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	var err error
-	if *checkConnections {
+	if *initialize {
+		err = initializeSchema(ctx, logger)
+	} else if *checkConnections {
 		err = runMode(ctx, logger, false)
 	} else if *checkOnly {
 		err = checkRuntime(ctx)
@@ -163,4 +166,32 @@ func verifyRuntime(ctx context.Context, runtime *pgxpool.Pool) error {
 		return err
 	}
 	return ctx.Err()
+}
+
+// initializeSchema is an explicit administrative installation step. It never
+// starts Manager, enables LOGIN, adopts a runtime role or changes its grants.
+func initializeSchema(ctx context.Context, logger *slog.Logger) error {
+	url := os.Getenv("ROUTEGATE_MIGRATOR_DATABASE_URL")
+	if url == "" {
+		return errors.New("ROUTEGATE_MIGRATOR_DATABASE_URL is required for schema initialization")
+	}
+	if os.Getenv("ROUTEGATE_DATABASE_URL") != "" {
+		return errors.New("schema initialization requires an owner-only environment without ROUTEGATE_DATABASE_URL")
+	}
+	owner, err := db.Connect(ctx, url, logger)
+	if err != nil {
+		return err
+	}
+	defer owner.Close()
+	var ownsDatabase bool
+	if err = owner.QueryRow(ctx, `SELECT session_user=current_user AND pg_get_userbyid(datdba)=session_user FROM pg_database WHERE datname=current_database()`).Scan(&ownsDatabase); err != nil {
+		return err
+	}
+	if !ownsDatabase {
+		return errors.New("schema initialization requires the direct database owner login")
+	}
+	if err = db.Migrate(ctx, owner, "migrations", logger); err != nil {
+		return err
+	}
+	return db.RequireAppliedMigrations(ctx, owner, "migrations")
 }
