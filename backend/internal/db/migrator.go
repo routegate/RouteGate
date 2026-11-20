@@ -35,6 +35,33 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, logg
 		return fmt.Errorf("create schema_migrations table: %w", err)
 	}
 
+	// Refuse foreign history before applying any pending migration. This also
+	// protects resumed installations from mixing experimental schema branches.
+	known := make(map[string]bool, len(files))
+	for _, file := range files {
+		known[strings.TrimSuffix(filepath.Base(file), ".up.sql")] = true
+	}
+	rows, err := pool.Query(ctx, `SELECT version FROM public.schema_migrations`)
+	if err != nil {
+		return fmt.Errorf("read migration history: %w", err)
+	}
+	for rows.Next() {
+		var version string
+		if err := rows.Scan(&version); err != nil {
+			rows.Close()
+			return err
+		}
+		if !known[version] {
+			rows.Close()
+			return fmt.Errorf("refuse unknown applied migration %s", version)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return fmt.Errorf("read migration history: %w", err)
+	}
+
 	for _, file := range files {
 		version := strings.TrimSuffix(filepath.Base(file), ".up.sql")
 

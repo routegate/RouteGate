@@ -564,3 +564,46 @@ func copyMigrationsBefore(t *testing.T, sourceDir, stopBefore string) string {
 	}
 	return destination
 }
+
+// A foreign ledger entry must stop a resumed migration before pending SQL.
+func TestMigrationsRefuseForeignHistoryBeforePendingSQL(t *testing.T) {
+	ctx, pool, done := setupAppliedSettingsTest(t)
+	defer done()
+	dir := t.TempDir()
+	files, err := filepath.Glob("../../migrations/*.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, filepath.Base(file)), content, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO public.schema_migrations(version) VALUES ('000175_foreign_branch')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "000171_resume_canary.up.sql"), []byte("CREATE TABLE public.resume_canary(id integer);"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool, dir, slog.Default()); err == nil {
+		t.Fatal("foreign history accepted")
+	}
+	var absent bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.resume_canary') IS NULL`).Scan(&absent); err != nil || !absent {
+		t.Fatalf("pending SQL ran before history refusal: %v", err)
+	}
+	// Removing only the foreign entry permits the same legitimate upgrade.
+	if _, err := pool.Exec(ctx, `DELETE FROM public.schema_migrations WHERE version='000175_foreign_branch'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool, dir, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.resume_canary') IS NULL`).Scan(&absent); err != nil || absent {
+		t.Fatalf("legitimate pending migration did not run: %v", err)
+	}
+}
