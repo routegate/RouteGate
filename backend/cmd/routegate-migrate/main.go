@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/ikaevus/routegate/backend/internal/db"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Explicit opt-in one-shot migrator, shipped with the matching Manager and SQL.
@@ -19,6 +20,7 @@ func main() {
 	// Adapt #639's explicit role-provisioning command here, alongside the
 	// existing privileged migrator, rather than adding another Manager DDL path.
 	runtimeRole := flag.String("create-runtime-role", "", "create a new NOLOGIN runtime role on the fully migrated canonical schema, then exit")
+	checkOnly := flag.Bool("check-runtime", false, "verify runtime isolation, migration history and required grants without changing the database")
 	flag.Parse()
 	requested := false
 	flag.Visit(func(f *flag.Flag) {
@@ -26,7 +28,7 @@ func main() {
 			requested = true
 		}
 	})
-	if flag.NArg() != 0 || (requested && *runtimeRole == "") {
+	if flag.NArg() != 0 || (requested && (*runtimeRole == "" || *checkOnly)) {
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -34,7 +36,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	var err error
-	if requested {
+	if *checkOnly {
+		err = checkRuntime(ctx)
+	} else if requested {
 		err = createRuntimeRole(ctx, logger, *runtimeRole)
 	} else {
 		err = run(ctx, logger)
@@ -113,23 +117,41 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err = db.Migrate(ctx, owner, "migrations", logger); err != nil {
 		return err
 	}
-	// Recheck the same runtime authority boundary after privileged DDL.
-	// A new migration must not silently grant Manager owner privileges.
-	if err = db.CheckExternalMigrationRuntimeRole(ctx, runtime); err != nil {
-		return err
-	}
-	if err = db.CheckHeldDispatchRuntimeIsolation(ctx, runtime); err != nil {
-		return err
-	}
-	if err = db.RequireAppliedMigrations(ctx, runtime, "migrations"); err != nil {
-		return err
-	}
-	if err = db.CheckRuntimeRequiredPrivileges(ctx, runtime); err != nil {
-		return err
-	}
-	if err = ctx.Err(); err != nil {
+	if err = verifyRuntime(ctx, runtime); err != nil {
 		return err
 	}
 	logger.Info("dedicated migration complete; runtime schema verified")
 	return nil
+}
+
+// checkRuntime uses only the runtime login. It cannot apply DDL, create roles,
+// repair grants or consume owner credentials during rollback validation.
+func checkRuntime(ctx context.Context) error {
+	runtimeURL := os.Getenv("ROUTEGATE_DATABASE_URL")
+	if runtimeURL == "" {
+		return errors.New("ROUTEGATE_DATABASE_URL is required for runtime verification")
+	}
+	runtime, err := db.Connect(ctx, runtimeURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	return verifyRuntime(ctx, runtime)
+}
+
+func verifyRuntime(ctx context.Context, runtime *pgxpool.Pool) error {
+	// Shared with the post-DDL check; verification never repairs authority.
+	if err := db.CheckExternalMigrationRuntimeRole(ctx, runtime); err != nil {
+		return err
+	}
+	if err := db.CheckHeldDispatchRuntimeIsolation(ctx, runtime); err != nil {
+		return err
+	}
+	if err := db.RequireAppliedMigrations(ctx, runtime, "migrations"); err != nil {
+		return err
+	}
+	if err := db.CheckRuntimeRequiredPrivileges(ctx, runtime); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
