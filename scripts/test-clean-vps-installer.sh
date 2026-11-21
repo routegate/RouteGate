@@ -33,8 +33,51 @@ test_atomic_secret_persistence() (
   [[ $(find "$TEST_TMP" -name 'atomic-secrets.*' | wc -l) == 0 ]] || return 1
   load_or_create_secrets
   [[ "$ROUTEGATE_MONITORING_TOKEN" =~ ^[a-f0-9]{64}$ ]] || return 1
-  [[ $(head -n2 "$ROUTEGATE_SECRETS_FILE") == "$original" ]] || return 1
+  [[ $(sed '/^MONITORING_TOKEN=/d' "$ROUTEGATE_SECRETS_FILE") == "$original" ]] || return 1
   [[ $(stat -c '%a' "$ROUTEGATE_SECRETS_FILE") == 600 ]]
+)
+
+test_runtime_login_installation() (
+  ROUTEGATE_DB_PASSWORD=$(printf 'a%.0s' {1..64})
+  ROUTEGATE_RUNTIME_DB_PASSWORD=$(printf 'b%.0s' {1..64})
+  ROUTEGATE_MIGRATOR_ENV="$TEST_TMP/owner.env"
+  # Isolated fixture: later tests retain the original global path.
+  # shellcheck disable=SC2030
+  ROUTEGATE_MANAGER_ENV="$TEST_TMP/runtime.env"
+  ROUTEGATE_INSTALL_PROMETHEUS=0
+  local fixture_exists=0 verify_rc=0 created="$TEST_TMP/role-created"
+  cd() { [[ $1 == /opt/routegate-manager ]]; }
+  runuser() {
+    if [[ ${!#} == --runtime-password-stdin ]]; then
+      local password
+      read -r password
+      [[ "$password" == "$ROUTEGATE_RUNTIME_DB_PASSWORD" ]] || return 1
+      touch "$created"
+    else
+      printf '%s\n' "$fixture_exists"
+    fi
+  }
+  env() {
+    [[ $1 == -i && ${!#} == --check-connections ]] || return 1
+    return "$verify_rc"
+  }
+  prepare_manager_runtime_login || return 1
+  [[ -f "$created" && $(stat -c '%a' "$ROUTEGATE_MIGRATOR_ENV") == 600 ]] || return 1
+  write_manager_environment "$ROUTEGATE_DB_PASSWORD" test-admin
+  grep -q 'ROUTEGATE_DATABASE_MIGRATION_MODE="external"' "$ROUTEGATE_MANAGER_ENV" || return 1
+  grep -q "postgres://routegate_runtime:${ROUTEGATE_RUNTIME_DB_PASSWORD}@" "$ROUTEGATE_MANAGER_ENV" || return 1
+  if grep -q "$ROUTEGATE_DB_PASSWORD" "$ROUTEGATE_MANAGER_ENV"; then return 1; fi
+  rm "$created"
+  fixture_exists=1
+  prepare_manager_runtime_login || return 1
+  [[ ! -e "$created" ]] || return 1
+  verify_rc=1
+  if prepare_manager_runtime_login; then return 1; fi
+  [[ ! -e "$created" ]] || return 1
+  ROUTEGATE_RUNTIME_DB_PASSWORD=""
+  prepare_manager_runtime_login || return 1
+  write_manager_environment "$ROUTEGATE_DB_PASSWORD" test-admin
+  grep -q 'ROUTEGATE_DATABASE_MIGRATION_MODE="startup"' "$ROUTEGATE_MANAGER_ENV"
 )
 
 TESTS_RUN=0
@@ -294,6 +337,8 @@ test_success_output() {
 }
 
 test_manager_environment_public_url() {
+  # The preceding fixture changed this only inside its subshell.
+  # shellcheck disable=SC2031
   local original_manager_env="$ROUTEGATE_MANAGER_ENV"
   ROUTEGATE_MANAGER_ENV="$TEST_TMP/manager.env"
   ROUTEGATE_DOMAIN="us.routegate.org"
@@ -570,6 +615,8 @@ test_schema_initialization_invocation() (
 )
 
 printf 'TAP version 13\n'
+assert_true "runtime login initialization and resume preserve credential separation" test_runtime_login_installation
+
 assert_true "secret publication preserves credentials on failure and resume" test_atomic_secret_persistence
 
 assert_true "resume refuses missing secrets without regeneration" test_missing_resume_secrets
