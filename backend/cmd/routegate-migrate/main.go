@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/ikaevus/routegate/backend/internal/db"
@@ -23,6 +24,7 @@ func main() {
 	checkOnly := flag.Bool("check-runtime", false, "verify runtime isolation, migration history and required grants without changing the database")
 	checkConnections := flag.Bool("check-connections", false, "verify both independent database identities and runtime grants without applying migrations")
 	initialize := flag.Bool("initialize-schema", false, "apply canonical schema using only the explicit database owner connection, before runtime provisioning")
+	passwordStdin := flag.Bool("runtime-password-stdin", false, "with --create-runtime-role only: read a preserved 64-character hex password from stdin and atomically enable LOGIN")
 	flag.Parse()
 	requested := false
 	flag.Visit(func(f *flag.Flag) {
@@ -30,7 +32,7 @@ func main() {
 			requested = true
 		}
 	})
-	if (*initialize && (requested || *checkOnly || *checkConnections)) || flag.NArg() != 0 || (requested && (*runtimeRole == "" || *checkOnly || *checkConnections)) || (*checkOnly && *checkConnections) {
+	if (*passwordStdin && !requested) || (*initialize && (requested || *checkOnly || *checkConnections)) || flag.NArg() != 0 || (requested && (*runtimeRole == "" || *checkOnly || *checkConnections)) || (*checkOnly && *checkConnections) {
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -45,7 +47,18 @@ func main() {
 	} else if *checkOnly {
 		err = checkRuntime(ctx)
 	} else if requested {
-		err = createRuntimeRole(ctx, logger, *runtimeRole)
+		var password string
+		if *passwordStdin {
+			var input []byte
+			input, err = io.ReadAll(io.LimitReader(os.Stdin, 66))
+			password = strings.TrimSuffix(string(input), "\n")
+			if err == nil && len(password) != 64 {
+				err = errors.New("runtime password stdin requires exactly 64 hex characters")
+			}
+		}
+		if err == nil {
+			err = createRuntimeRole(ctx, logger, *runtimeRole, password)
+		}
 	} else {
 		err = run(ctx, logger)
 	}
@@ -55,8 +68,8 @@ func main() {
 	}
 }
 
-func createRuntimeRole(ctx context.Context, logger *slog.Logger, name string) error {
-	// No runtime password, role adoption, LOGIN activation or ACL repair. This
+func createRuntimeRole(ctx context.Context, logger *slog.Logger, name, password string) error {
+	// No role adoption, credential rotation or ACL repair. This
 	// owner connection is explicit and is never placed in the Manager service.
 	migratorURL := os.Getenv("ROUTEGATE_MIGRATOR_DATABASE_URL")
 	if migratorURL == "" {
@@ -70,10 +83,15 @@ func createRuntimeRole(ctx context.Context, logger *slog.Logger, name string) er
 	if err = db.RequireAppliedMigrations(ctx, owner, "migrations"); err != nil {
 		return err
 	}
-	if err = db.ProvisionRuntimeRole(ctx, owner, name); err != nil {
+	if password == "" {
+		err = db.ProvisionRuntimeRole(ctx, owner, name)
+	} else {
+		err = db.ProvisionRuntimeLogin(ctx, owner, name, password)
+	}
+	if err != nil {
 		return err
 	}
-	logger.Info("created NOLOGIN runtime role; authentication is not enabled")
+	logger.Info("created runtime role", "login_enabled", password != "")
 	return nil
 }
 

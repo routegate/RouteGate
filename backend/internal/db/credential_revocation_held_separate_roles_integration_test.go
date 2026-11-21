@@ -5,9 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
+ "strings"
 	"testing"
 	"time"
 
@@ -61,7 +61,7 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 			_,_=ownerPool.Exec(cleanup,`DROP ROLE IF EXISTS rg140_test_dispatch_owner`)
 		}
 	}()
-	var secret [24]byte
+	var secret [32]byte
 	if _,err:=rand.Read(secret[:]);err!=nil {t.Fatal(err)}
 	password:=hex.EncodeToString(secret[:])
 	rolesCreated=true
@@ -75,9 +75,15 @@ func TestCredentialRemovalHeldDispatchSeparateRolesRehearsal(t *testing.T) {
 	if err:=ownerPool.QueryRow(ctx,`SELECT rolcanlogin FROM pg_roles WHERE rolname=$1`,runtime).Scan(&canLogin);err!=nil || canLogin {
 		t.Fatal("provisioning must create only a NOLOGIN role",err)
 	}
+	// Recreate this disposable fixture through the atomic authentication path.
+	if _, err := ownerPool.Exec(ctx, `DROP OWNED BY rg140_test_manager_runtime; DROP ROLE rg140_test_manager_runtime`); err != nil { t.Fatal(err) }
+	command = exec.CommandContext(ctx, "go", "run", "./cmd/routegate-migrate", "--create-runtime-role", runtime, "--runtime-password-stdin")
+	command.Dir = "../.."
+	command.Env = append(os.Environ(), "ROUTEGATE_MIGRATOR_DATABASE_URL="+os.Getenv("ROUTEGATE_TEST_DATABASE_URL"))
+	command.Stdin = strings.NewReader(password+"\n")
+	if err := command.Run(); err != nil { t.Fatal("atomic runtime login provisioning failed", err) }
 	for _,statement:=range []string{
 		`CREATE ROLE rg140_test_dispatch_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`,
-		fmt.Sprintf(`ALTER ROLE rg140_test_manager_runtime LOGIN PASSWORD '%s'`,password),
 	} {
 		if _,err:=ownerPool.Exec(ctx,statement);err!=nil{
 			t.Fatal("cannot provision disposable CI roles",err)

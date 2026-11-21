@@ -18,6 +18,20 @@ var runtimeRoleName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 // A separate trusted installer must provision authentication and enable LOGIN.
 // This is the ordinary application role, NOT a scoped dispatch executor.
 func ProvisionRuntimeRole(ctx context.Context, pool *pgxpool.Pool, name string) error {
+	return provisionRuntimeRole(ctx, pool, name, "")
+}
+
+// ProvisionRuntimeLogin creates a new role, grants and authentication in one
+// transaction. Existing roles are refused, including after an ambiguous commit.
+// The installer must preserve the password before invoking this operation.
+func ProvisionRuntimeLogin(ctx context.Context, pool *pgxpool.Pool, name, password string) error {
+	if !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(password) {
+		return fmt.Errorf("runtime password must be 32 random bytes encoded as lowercase hex")
+	}
+	return provisionRuntimeRole(ctx, pool, name, password)
+}
+
+func provisionRuntimeRole(ctx context.Context, pool *pgxpool.Pool, name, password string) error {
 	if !runtimeRoleName.MatchString(name) || strings.HasPrefix(name, "pg_") {
 		return fmt.Errorf("invalid runtime role name")
 	}
@@ -193,6 +207,16 @@ func ProvisionRuntimeRole(ctx context.Context, pool *pgxpool.Pool, name string) 
 		}
 		if _, err := tx.Exec(ctx, "GRANT USAGE ON SEQUENCE "+sequence.name+" TO "+ident); err != nil {
 			return err
+		}
+	}
+	if password != "" {
+		if _, err := tx.Exec(ctx, "SET LOCAL password_encryption = 'scram-sha-256'"); err != nil {
+			return err
+		}
+		// password is strictly validated hex; never return SQL error details
+		// from a statement containing authentication material.
+		if _, err := tx.Exec(ctx, "ALTER ROLE "+ident+" LOGIN PASSWORD '"+password+"'"); err != nil {
+			return fmt.Errorf("cannot initialize runtime authentication")
 		}
 	}
 	return tx.Commit(ctx)
