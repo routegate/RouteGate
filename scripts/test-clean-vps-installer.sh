@@ -7,6 +7,15 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=install.sh
 source "$ROOT_DIR/install.sh"
 
+test_missing_resume_secrets() (
+  ROUTEGATE_RESUME_INSTALL=1
+  ROUTEGATE_SECRETS_FILE="$TEST_TMP/missing-secrets"
+  die() { return 1; }
+  openssl() { touch "$TEST_TMP/unexpected-generation"; return 1; }
+  if load_or_create_secrets; then return 1; fi
+  [[ ! -e "$ROUTEGATE_SECRETS_FILE" && ! -e "$TEST_TMP/unexpected-generation" ]]
+)
+
 TESTS_RUN=0
 TESTS_FAILED=0
 TEST_TMP=$(mktemp -d /tmp/routegate-installer-tests.XXXXXX)
@@ -540,6 +549,8 @@ test_schema_initialization_invocation() (
 )
 
 printf 'TAP version 13\n'
+assert_true "resume refuses missing secrets without regeneration" test_missing_resume_secrets
+
 assert_true "schema initialization isolates owner environment and propagates failure" test_schema_initialization_invocation
 test_apt_repository_trust_preflight
 test_existing_install_precedes_repository_preflight

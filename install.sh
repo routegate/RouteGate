@@ -885,6 +885,12 @@ initialize_install_state() {
 }
 
 load_or_create_secrets() {
+  # Never replace preserved credentials when resuming a partial installation.
+  # A missing journal cannot establish which credentials were already applied.
+  if [[ "$ROUTEGATE_RESUME_INSTALL" == "1" && ! -r "$ROUTEGATE_SECRETS_FILE" ]]; then
+    die "Cannot resume without preserved installer secrets; restore secrets.env from a trusted backup before retrying."
+    return 1
+  fi
   if [[ -r "$ROUTEGATE_SECRETS_FILE" ]]; then
     ROUTEGATE_DB_PASSWORD=$(sed -n 's/^DB_PASSWORD=//p' "$ROUTEGATE_SECRETS_FILE" | head -n1)
     ROUTEGATE_ADMIN_PASSWORD=$(sed -n 's/^ADMIN_PASSWORD=//p' "$ROUTEGATE_SECRETS_FILE" | head -n1)
@@ -1815,13 +1821,13 @@ main() {
   validate_dns
   confirm_installation
   initialize_install_state
+  load_or_create_secrets
   set_install_stage dependencies
   install_dependencies
   set_install_stage bundle
   prepare_bundle
   set_install_stage platform_files
   install_files
-  load_or_create_secrets
 
   set_install_stage postgresql
   configure_postgresql "$ROUTEGATE_DB_PASSWORD"
