@@ -109,3 +109,137 @@ No production migrations, Agent restarts, token rotations, FI tests or
 Manager updates are approved by this document. The first PR improves
 only the warnings/status UX; follow-on backend work requires review
 and isolated end-to-end validation.
+
+## Forward-port checkpoint (2026-11-12, draft only)
+
+The v0.2.0 reconciliation carries dormant implementation slices in draft
+PRs [#742](https://github.com/routegate/RouteGate/pull/742),
+[#743](https://github.com/routegate/RouteGate/pull/743),
+[#744](https://github.com/routegate/RouteGate/pull/744) and
+[#745](https://github.com/routegate/RouteGate/pull/745).
+They do **not** establish an operational credential-revocation lifecycle.
+The public Agent and Manager have no enabled credential-removal route.
+
+### Experimental fencing and durable result delivery
+
+The Agent's `experimental_runtime_mutation_fencing` option is deliberately
+disabled in normal configuration and is not part of the installer. An Agent
+which explicitly opts in negotiates the Manager's persisted
+`runtimeMutationFencingV1` capability before executing fenced mutations.
+The Manager then preserves uncertain jobs rather than marking them failed
+by elapsed time alone. An existing local runtime-mutation state keeps the
+protection active across restarts and configuration changes.
+
+Under a private, exclusive runtime state lock, the Agent saves its successful
+completion envelope **before** the first HTTP delivery attempt. The bounded,
+fsynced receipt is bound to the Manager URL, Agent and server identities,
+job ID and exact mutation-intent digest. The receipt may include sensitive
+operation output and must never be logged or exposed to the browser. HTTP
+500→404 is **not** positive result acceptance. The Agent may retransmit the
+exact saved report without re-executing the runtime handler, but it cannot
+use that historical result to unlock the fence or certify current VPN
+configuration or terminated sessions.
+
+These drafts provide no authenticated operator reconciliation, no verified
+current-runtime observation, no complete scoped credential removal dispatcher
+and no detached-worker handoff. After an uncertain outcome, **do not delete
+the local state, reset the database job, or force-restart a runtime to
+work around the fence**. The supported recovery protocol is still to be
+designed, independently reviewed and tested.
+
+Only isolated disposable host / PostgreSQL / HTTP-fixture tests are
+authorized at this stage. Successful CI is not permission to activate
+this experiment on US/FI/NL/RU, merge into `main`, publish v0.2.0 or
+claim that a cached VPN credential has been revoked.
+
+### Manager historical-result verification (seventh implementation slice)
+
+`POST /api/v1/agent/tasks/{job_id}/result/verify` is an authenticated, read-only
+observation endpoint for Agents with persisted `runtimeMutationFencingV1`.
+It accepts the original bounded success envelope and compares its structured
+payload with the stored successful config/service/install/maintenance job.
+It requires the current Agent token and matching Agent/server ownership, an
+empty stored error, and exactly one eligible job. It neither rewrites the result
+nor updates job timestamps or lifecycle state. Unsupported task kinds, unknown
+jobs and foreign identities cannot yield positive evidence. Responses are
+`Cache-Control: no-store` and contain no stored report or credentials.
+
+The response binds schema version, verified flag, task/Agent/server IDs and a
+SHA-256 digest of the exact submitted envelope bytes. Payload comparison uses
+PostgreSQL JSONB equality (object order and equivalent numeric formatting do not
+matter), with `json.RawMessage` preserving numeric values during verification.
+Omitted/null payload follows the existing completion contract's empty object.
+This does not repair old payloads rounded by legacy completion decoding: if a
+stored value differs from the Agent's durable envelope, verification fails
+closed rather than guessing that they were equivalent.
+
+When durable result delivery fails, Agent can use this observation to recognize
+that Manager already committed the result before its HTTP response was lost.
+It verifies all response bindings before marking the local receipt acknowledged.
+An older Manager, rejected request, mismatched report, non-success job or missing
+evidence leaves the receipt unacknowledged. No runtime handler is retried.
+
+This closes the lost-response delivery ambiguity only. It does **not** authorize
+clearing the local mutation marker, assert current runtime health, confirm VPN
+credential revocation or terminate existing sessions. The fence remains held
+logically after restart until a future authenticated reconciliation operation
+checks fresh runtime evidence and explicitly authorizes recovery. No operator
+unlock route is introduced here; the experimental mutation mode remains off.
+
+Tests cover the Agent's rejection of identity/digest/schema mismatches and prove
+that verified replay retains the fence. PostgreSQL tests exercise actual Manager
+completion and verification handlers: initial commit, duplicate completion 404,
+successful historical readback, unchanged result/timestamps, payload mismatch,
+large exact integers, non-success state, foreign token and legacy capability.
+
+### Runtime checkpoints before recovery authorization (eighth implementation slice)
+
+Historical result acceptance alone is insufficient for recovering a legacy
+mutation fence: older success envelopes do not identify the runtime process
+that was running after the operation. A later hash of a file plus an active
+listener cannot reconstruct that missing fact. Old receipts stay deliverable
+but cannot produce recovery observations.
+
+The experimental heartbeat gate now records an optional `runtimeWitness` in
+the same atomic private receipt as its success envelope. This first scope is
+sing-box/VLESS service **restart**, or config apply selecting exactly one
+sing-box/VLESS adapter with service control enabled. Shared sing-box inbounds
+remain part of the same measured config; this is not account-specific traffic
+or revocation evidence. Other operations/adapters and multi-runtime applies
+retain the previous conservative behavior and have no recovery checkpoint.
+
+While holding the mutation lock, Agent brackets both pre-operation and
+post-operation observations with the locally configured adapter's systemd
+generation/source checks and active config reads. These reuse the removal
+executor's /proc executable/config-source binding, versioned runtime digest,
+enablement and listener checks. A checkpoint requires a new systemd InvocationID
+after execution. Config apply must match the task's sing-box candidate hash;
+service restart must retain its pre-operation config hash. The checkpoint stores
+both process generations and the final hash/listener port, never a config or
+command output. Failure to establish supported-scope evidence retains intent
+and suppresses a terminal result. The first scope requires a healthy observable
+baseline; repairing an already-unobservable runtime is not covered.
+
+`ObserveRuntimeRecovery` is an internal read-only evidence collector, with no
+HTTP, task-dispatch or operator command exposure. It acquires the same lock,
+requires an acknowledged result receipt and matching local Manager/Agent/server
+identity, then checks that the current file, process generation and listener
+still match the saved checkpoint. Changed durable state during observation,
+concurrent removal, malformed/missing proof or an old receipt fails closed. It
+returns bounded task/identity/state digests and runtime measurements. It never
+clears a marker, rewrites a receipt, restarts a service or restores credentials.
+The initial capture is only a local observation; only the verified before/after
+pair is eligible to be persisted as a recovery checkpoint.
+
+An observation is **not an authorization or a freshness token**. The next
+Manager operation must authenticate explicit operator approval, reserve the
+node, bind the exact task/receipt/observation and a fresh challenge, and require
+Agent re-observation under the lock at commit. A crash-safe audited release
+protocol is still missing. Nothing in this slice permits manual file deletion,
+automatic unlock, production activation or credential-removal dispatch.
+
+Tests cover before/after checkpoint persistence, missing restart and changed
+config rejection, old/unacknowledged receipts, identity mismatch, concurrent
+locks and evidence changes during health checks. The disposable systemd/Reality
+test also saves a witness from a real service restart, observes the exact process,
+then proves another real restart invalidates it while the fence remains intact.

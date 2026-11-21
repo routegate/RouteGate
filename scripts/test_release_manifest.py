@@ -41,11 +41,14 @@ class ReleaseManifestTests(unittest.TestCase):
         metadata_version=VERSION,
         unsafe=False,
         omit_tool=None,
+        omit_migrator=False,
     ):
         stage = self.root / f"stage-{arch}"
         for directory in ("bin", "frontend", "metadata", "manager/migrations", "tools"):
             (stage / directory).mkdir(parents=True, exist_ok=True)
         (stage / "bin/routegate-manager").write_text("manager", encoding="utf-8")
+        if not omit_migrator:
+            (stage / "bin/routegate-migrate").write_text("migrator", encoding="utf-8")
         (stage / "bin/routegate-agent").write_text("agent", encoding="utf-8")
         (stage / "frontend/index.html").write_text("html", encoding="utf-8")
         (stage / f"manager/migrations/{MIGRATION}.up.sql").write_text(
@@ -104,6 +107,13 @@ class ReleaseManifestTests(unittest.TestCase):
         self.assertEqual(
             [item["arch"] for item in payload["artifacts"]], ["amd64", "arm64"]
         )
+
+    def test_rejects_missing_migrator(self):
+        self.make_bundle(omit_migrator=True)
+        self.write_checksums()
+        path = self.build()
+        with self.assertRaisesRegex(release_manifest.ManifestError, "bin/routegate-migrate"):
+            release_manifest.verify_manifest(path, self.dist)
 
     def test_verify_target_does_not_require_unselected_bundle_file(self):
         amd64 = self.make_bundle("amd64")

@@ -21,7 +21,7 @@ func (r *SchemaVersionRepository) AppliedSchemaVersion(ctx context.Context) (str
 	var version string
 	err := r.pool.QueryRow(ctx, `
 		SELECT version
-		FROM schema_migrations
+		FROM public.schema_migrations
 		ORDER BY version DESC
 		LIMIT 1
 	`).Scan(&version)

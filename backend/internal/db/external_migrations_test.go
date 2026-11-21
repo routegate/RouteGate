@@ -1,0 +1,104 @@
+package db
+
+import (
+	"context"
+	"log/slog"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func TestExternalMigrationURLSeparation(t *testing.T) {
+	const migrator="postgres://rg_migrator:test@127.0.0.1:5432/routegate_ci?sslmode=disable"
+	const runtime="postgres://rg_runtime:test@127.0.0.1:5432/routegate_ci?sslmode=disable"
+	if err:=ValidateDedicatedMigrationURLs(migrator,runtime);err!=nil {
+		t.Fatal("distinct connections to same disposable database refused",err)
+	}
+	for _,tc:=range []struct{name string;migrator,runtime string}{
+		{"missing_migrator","",runtime},
+		{"missing_runtime",migrator,""},
+		{"same_role",migrator,migrator},
+		{"other_database",migrator,"postgres://rg_runtime:test@127.0.0.1:5432/other_db?sslmode=disable"},
+		{"other_port",migrator,"postgres://rg_runtime:test@127.0.0.1:5433/routegate_ci?sslmode=disable"},
+		{"other_host",migrator,"postgres://rg_runtime:test@other.internal:5432/routegate_ci?sslmode=disable"},
+		{"malformed",migrator,"not a database URL"},
+	} {
+		t.Run(tc.name,func(t *testing.T){
+			if err:=ValidateDedicatedMigrationURLs(tc.migrator,tc.runtime);!errors.Is(err,ErrUnseparatedMigrationCredentials){
+				t.Fatal("unsafe external migration connection pair accepted",err)
+			}
+		})
+	}
+}
+
+func TestExternalMigrationReadOnlySchemaPreflight(t *testing.T) {
+	ctx,pool,done:=setupAppliedSettingsTest(t)
+	defer done()
+	// The ordinary migration test pool owns the disposable database: an
+	// external-mode Manager must refuse it even when dispatch SQL is absent.
+	if err:=CheckExternalMigrationRuntimeRole(ctx,pool);!errors.Is(err,ErrUnsafeExternalMigrationRuntimeRole) {
+		t.Fatal("external role preflight accepted ordinary database owner",err)
+	}
+	if err:=RequireAppliedMigrations(ctx,pool,"../../migrations");err!=nil {
+		t.Fatal("fully migrated schema failed read-only inspection",err)
+	}
+	dir:=t.TempDir()
+	if err:=os.WriteFile(filepath.Join(dir,"000171_missing_held_dispatch.up.sql"),
+		[]byte("SELECT 1;"),0600);err!=nil {t.Fatal(err)}
+	if err:=RequireAppliedMigrations(ctx,pool,dir);!errors.Is(err,ErrExternalMigrationIncomplete) ||
+		!strings.Contains(err.Error(),"unapplied 000171_missing_held_dispatch") {
+		t.Fatal("pending migration did not block external-mode runtime",err)
+	}
+	if err:=RequireAppliedMigrations(ctx,pool,t.TempDir());!errors.Is(err,ErrExternalMigrationIncomplete){
+		t.Fatal("empty migration directory unexpectedly permitted",err)
+	}
+}
+
+// PostgreSQL resolves unqualified table names using search_path and may put
+// pg_temp before public. An opt-in external runtime must inspect the real
+// migration ledger even if a connection has a shadowing temporary table.
+func TestExternalMigrationRejectsShadowedLedgerLookup(t *testing.T) {
+	ctx,pool,done:=setupAppliedSettingsTest(t)
+	defer done()
+	cfg:=pool.Config()
+	cfg.MinConns=0
+	cfg.MaxConns=1
+	cfg.AfterConnect=func(ctx context.Context,conn *pgx.Conn) error {
+		if _,err:=conn.Exec(ctx,`CREATE TEMP TABLE schema_migrations (version text)`);err!=nil {
+			return err
+		}
+		_,err:=conn.Exec(ctx,`INSERT INTO schema_migrations(version) VALUES ('forged_temporary_history')`)
+		return err
+	}
+	shadow,err:=pgxpool.NewWithConfig(ctx,cfg)
+	if err!=nil {t.Fatal(err)}
+	defer shadow.Close()
+	var forged string
+	if err=shadow.QueryRow(ctx,`SELECT version FROM schema_migrations`).Scan(&forged);err!=nil || forged!="forged_temporary_history" {
+		t.Fatal("temporary migration ledger did not shadow the search path",err)
+	}
+	if err=RequireAppliedMigrations(ctx,shadow,"../../migrations");err!=nil {
+		t.Fatal("external readiness used shadowed rather than public migration history",err)
+	}
+	// SchemaVersionRepository must read the same public ledger, not the
+	// attacker-controlled pg_temp table on this pooled connection.
+	version,err:=NewSchemaVersionRepository(shadow).AppliedSchemaVersion(ctx)
+	if err!=nil {t.Fatal(err)}
+	if version=="" || version=="forged_temporary_history" {
+		t.Fatalf("applied schema version came from shadowed or empty ledger: %q",version)
+	}
+
+	// The same pooled connection must not redirect migration ledger writes
+	// or the already-applied lookup to the forged pg_temp table either.
+	if err=Migrate(ctx,shadow,"../../migrations",slog.Default());err!=nil {
+		t.Fatal("migrator used shadowed rather than public migration history",err)
+	}
+	if err=RequireAppliedMigrations(ctx,shadow,"../../migrations");err!=nil {
+		t.Fatal("migration ledger changed after shadowed-session rehearsal",err)
+	}
+}

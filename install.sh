@@ -652,6 +652,7 @@ collect_routegate_conflicts() {
   local path
   for path in \
     /usr/local/bin/routegate-manager \
+    /usr/local/bin/routegate-migrate \
     /usr/local/bin/routegate-agent \
 	/usr/local/bin/hysteria \
     /usr/local/bin/mtg \
@@ -1123,6 +1124,7 @@ extract_bundle() {
   local required
   for required in \
     bin/routegate-manager \
+    bin/routegate-migrate \
     bin/routegate-agent \
     manager/migrations \
     frontend/index.html \
@@ -1169,30 +1171,47 @@ extract_bundle() {
   fi
 }
 
+# Load only the core helper from the verified, extracted release. A subshell
+# keeps updater configuration separate from installer state; ownership policy
+# itself has one implementation for installation, update and recovery.
+secure_manager_migration_tree() (
+  local parent=$1
+  local library="$ROUTEGATE_WORK_DIR/extracted/tools/routegate-update-core.sh"
+  [[ -f "$library" && ! -L "$library" ]] || return 1
+  # shellcheck source=scripts/routegate-update-core.sh
+  source "$library"
+  rg_update_secure_manager_migrations "$parent"
+)
+
 install_files() {
   local source_dir="$ROUTEGATE_WORK_DIR/extracted"
   log "Installing RouteGate binaries, migrations, frontend, and service definitions."
 
   systemctl stop routegate-agent.service routegate-manager.service >/dev/null 2>&1 || true
+  # Missing units are normal on a clean host; an active Manager is not.
+  if systemctl is-active --quiet routegate-manager.service; then
+    die "Cannot stop Manager before installing protected migrations."
+  fi
 
   if ! id routegate >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/routegate-manager --create-home --shell /usr/sbin/nologin routegate
   fi
 
   install -d -m 0755 /etc/routegate
-  install -d -m 0755 -o routegate -g routegate /opt/routegate-manager
+  install -d -m 0755 -o root -g root /opt/routegate-manager
   install -d -m 0755 /var/www/routegate
   install -d -m 0700 /var/lib/routegate-agent
 	install -d -m 0700 /var/lib/routegate-agent/configs /var/lib/routegate-agent/backups /var/lib/routegate-agent/wireguard-configs /var/lib/routegate-agent/wireguard-backups /var/lib/routegate-agent/hysteria2-configs /var/lib/routegate-agent/hysteria2-backups /var/lib/routegate-agent/mtproto-configs /var/lib/routegate-agent/mtproto-backups
   install -d -m 0700 "$ROUTEGATE_STATE_DIR"
 
   install -m 0755 "$source_dir/bin/routegate-manager" /usr/local/bin/routegate-manager
+  install -m 0755 "$source_dir/bin/routegate-migrate" /usr/local/bin/routegate-migrate
   install -m 0755 "$source_dir/bin/routegate-agent" /usr/local/bin/routegate-agent
   install -m 0755 "$source_dir/tools/routegate-recovery" /usr/local/sbin/routegate-recovery
 
   rm -rf /opt/routegate-manager/migrations
   cp -a "$source_dir/manager/migrations" /opt/routegate-manager/migrations
-  chown -R routegate:routegate /opt/routegate-manager
+  secure_manager_migration_tree /opt/routegate-manager || die "Cannot protect Manager migrations."
 
   find /var/www/routegate -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   cp -a "$source_dir/frontend/." /var/www/routegate/
@@ -1232,6 +1251,17 @@ SQL
   runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='routegate'" | grep -qx 1 \
     || die "PostgreSQL database verification failed."
 }
+
+# Run the matching administrative binary before Manager can serve requests.
+# Keep inherited runtime credentials out of this owner-only initialization.
+initialize_manager_schema() (
+  local db_password=$1
+  [[ "$db_password" =~ ^[a-f0-9]{64}$ ]] || return 1
+  cd /opt/routegate-manager || return 1
+  env -i PATH=/usr/bin:/bin \
+    ROUTEGATE_MIGRATOR_DATABASE_URL="postgres://routegate:${db_password}@127.0.0.1:5432/routegate?sslmode=disable" \
+    /usr/local/bin/routegate-migrate --initialize-schema
+)
 
 write_manager_environment() {
   local db_password=$1
@@ -1276,7 +1306,7 @@ wait_for_url() {
 }
 
 start_manager() {
-  log "Starting RouteGate Manager and applying database migrations."
+  log "Starting RouteGate Manager after database schema initialization."
   systemctl daemon-reload
   systemctl enable --now routegate-manager >>"$ROUTEGATE_LOG_FILE" 2>&1
   if ! wait_for_url "${ROUTEGATE_LOCAL_API}/api/admin/health" 60 2; then
@@ -1795,6 +1825,9 @@ main() {
 
   set_install_stage postgresql
   configure_postgresql "$ROUTEGATE_DB_PASSWORD"
+  set_install_stage database_schema
+  initialize_manager_schema "$ROUTEGATE_DB_PASSWORD" >>"$ROUTEGATE_LOG_FILE" 2>&1 \
+    || die "Database schema initialization failed; Manager was not started."
   set_install_stage manager
   write_manager_environment "$ROUTEGATE_DB_PASSWORD" "$ROUTEGATE_ADMIN_PASSWORD"
   start_manager

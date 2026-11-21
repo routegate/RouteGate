@@ -86,15 +86,65 @@ class API:
         require(status == expected, f"API {method} returned HTTP {status}; expected {expected}")
         return json.loads(raw) if raw else {}
 
-    def wait_job(self, path, expected="succeeded", timeout=240):
+    def wait_job(self, path, expected="succeeded", timeout=240, phase="unspecified"):
         deadline = time.monotonic() + timeout
+        last_status = "not_observed"
         while time.monotonic() < deadline:
             job = self.call("GET", path)
-            if job["status"] in ("succeeded", "failed"):
-                require(job["status"] == expected, f"Job ended {job['status']}; expected {expected}")
+            status = job.get("status")
+            # Print only a fixed, non-sensitive status label on timeout.
+            # Never include the job payload, response, IDs or credentials.
+            last_status = status if status in ("pending", "queued", "in_progress", "running",
+                                                "succeeded", "failed") else "unrecognized"
+            if status in ("succeeded", "failed"):
+                require(status == expected, f"Job ended {status}; expected {expected}")
                 return job
             time.sleep(1)
-        raise RuntimeError("Agent job exceeded its time budget")
+        # Only allowlisted phase names are emitted; never print journal content.
+        phases = ("witness_before", "witness_unavailable", "witness_ready",
+                  "selected", "validated", "applied", "restart", "healthcheck",
+                  "persistence", "listener", "report")
+        last_phase = "not_observed"
+        try:
+            journal = subprocess.run(
+                ["journalctl", "-u", "routegate-agent.service", "--no-pager",
+                 "--output=cat", "--since=-15min"],
+                capture_output=True, text=True, timeout=8, check=False)
+            if journal.returncode == 0:
+                for line in journal.stdout.splitlines():
+                    if "config apply phase" in line or "runtime mutation preflight" in line:
+                        for phase_name in phases:
+                            if f"phase={phase_name}" in line:
+                                last_phase = phase_name
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        marker = Path("/var/lib/routegate-agent/runtime-mutations/mutation-inflight.json")
+        admission = "intent_present" if marker.exists() else "no_intent_file"
+        # /proc/<pid>/comm contains only a short executable name, never
+        # command-line arguments, environment, URLs, credentials or logs.
+        # Inspect process names only on the disposable CI runner.
+        process_names = set()
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            try:
+                process_names.add((entry / "comm").read_text().strip())
+            except (OSError, UnicodeError):
+                continue
+        package_manager = "running" if process_names.intersection(
+            {"apt-get", "apt", "dpkg", "dpkg-deb", "gpgv"}) else "not_observed"
+        agent = subprocess.run(
+            ["systemctl", "is-active", "--quiet", "routegate-agent.service"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+            check=False)
+        agent_service = "active" if agent.returncode == 0 else "not_active"
+        binary = "present" if Path("/usr/bin/sing-box").is_file() else "absent"
+        source = "present" if Path("/etc/apt/sources.list.d/sagernet.sources").is_file() else "absent"
+        raise RuntimeError(
+            f"Agent job exceeded its time budget (phase={phase}, last_agent_phase={last_phase}, status={last_status}, "
+            f"admission={admission}, package_manager={package_manager}, "
+            f"agent_service={agent_service}, sing_box_binary={binary}, "
+            f"repository_source={source})")
 
 
 def run(*args):
@@ -179,10 +229,36 @@ def exercise(work, manager):
         thread.start()
         stack.callback(origin.shutdown)
 
+        # Capture only a systemd monotonic timestamp; no logs or unit metadata.
+        # A changed timestamp proves the Agent service restarted during install.
+        def agent_activation():
+            result = subprocess.run(
+                ["systemctl", "show", "--value", "--property=ActiveEnterTimestampMonotonic",
+                 "routegate-agent.service"],
+                capture_output=True, text=True, timeout=5, check=False)
+            value = result.stdout.strip()
+            return value if result.returncode == 0 and value.isdecimal() else None
+
+        agent_started_before = agent_activation()
         print("[remote-vpn-e2e] Installing sing-box through the registered Agent.", flush=True)
         install = api.call("POST", base + "/vpn-core/installations",
                            {"operation": "install_sing_box"}, expected=202)
-        api.wait_job(base + "/vpn-core/installations/" + install["job"]["id"], timeout=660)
+        try:
+            api.wait_job(base + "/vpn-core/installations/" + install["job"]["id"], timeout=660, phase="install")
+        except RuntimeError as error:
+            agent_started_after = agent_activation()
+            if agent_started_before is None or agent_started_after is None:
+                restart = "unknown"
+            elif agent_started_before != agent_started_after:
+                restart = "yes"
+            else:
+                restart = "no"
+            raise RuntimeError(f"{error} (agent_restarted={restart})") from None
+        # Successful installation must release durable admission before config apply.
+        install_intent = Path("/var/lib/routegate-agent/runtime-mutations/mutation-inflight.json")
+        require(not install_intent.exists(),
+                "Successful VPN Core installation retained runtime mutation intent")
+        print("[remote-vpn-e2e] sing-box installation completed; admission released.", flush=True)
         api.call("POST", base + "/protocol-settings/recommended", {"serverName": TARGET})
         account = api.call("POST", "/api/v1/vpn-accounts",
                            {"displayName": "Reality E2E", "serverId": server}, expected=201)
@@ -196,7 +272,8 @@ def exercise(work, manager):
             checked = api.call("POST", base + "/config/versions/" + version + "/validate", {})
             require(checked["validationResult"]["valid"], "Manager validation rejected test config")
             submitted = api.call("POST", base + "/config/versions/" + version + "/apply", {}, expected=202)
-            job = api.wait_job(base + "/config/apply-jobs/" + submitted["job"]["id"], expected)
+            print("[remote-vpn-e2e] Awaiting config apply result.", flush=True)
+            job = api.wait_job(base + "/config/apply-jobs/" + submitted["job"]["id"], expected, phase="config_apply")
             return job
 
         render_apply("succeeded")

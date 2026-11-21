@@ -178,6 +178,7 @@ make_bundle() { # name manifest-commit latest-migration
   rm -rf "$stage"
   mkdir -p "$stage"/{bin,frontend/assets,manager/migrations,systemd,metadata,tools}
   printf 'manager-new\n' >"$stage/bin/routegate-manager"
+  printf 'migrator-new\n' >"$stage/bin/routegate-migrate"
   printf 'agent-new\n' >"$stage/bin/routegate-agent"
   printf 'frontend-new\n' >"$stage/frontend/index.html"
   printf 'asset-new\n' >"$stage/frontend/assets/app.js"

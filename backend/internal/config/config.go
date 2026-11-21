@@ -36,6 +36,7 @@ type Config struct {
 	HTTPAddr                  string
 	PublicURL                 string
 	DatabaseURL               string
+	DatabaseMigrationMode     string
 	SecretsKeyFile            string
 	LogLevel                  slog.Level
 	AuthSessionTTL            time.Duration
@@ -56,6 +57,7 @@ func Load() Config {
 		HTTPAddr:                  env("ROUTEGATE_HTTP_ADDR", ":8080"),
 		PublicURL:                 env("ROUTEGATE_PUBLIC_URL", ""),
 		DatabaseURL:               env("ROUTEGATE_DATABASE_URL", "postgres://routegate:routegate_dev_password@localhost:5432/routegate?sslmode=disable"),
+		DatabaseMigrationMode:     env("ROUTEGATE_DATABASE_MIGRATION_MODE", "startup"),
 		SecretsKeyFile:            env("ROUTEGATE_MASTER_KEY_FILE", defaultSecretsKeyFile(environment)),
 		LogLevel:                  parseLogLevel(env("ROUTEGATE_LOG_LEVEL", "info")),
 		AuthSessionTTL:            time.Duration(envInt("ROUTEGATE_AUTH_SESSION_TTL_HOURS", 24)) * time.Hour,

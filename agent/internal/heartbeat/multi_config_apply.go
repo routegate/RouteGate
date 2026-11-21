@@ -33,6 +33,7 @@ func (r *Runner) processConfigApplyTask(ctx context.Context, task tasks.ConfigTa
 		return r.completeConfigApplyFailure(ctx, task, err, nil, "select")
 	}
 
+	r.logger.Info("config apply phase", "phase", "selected")
 	prepared := make([]preparedConfigRuntime, 0, len(adapters))
 	for _, adapter := range adapters {
 		activePath, backupDir := r.adapterStorage(adapter)
@@ -51,6 +52,7 @@ func (r *Runner) processConfigApplyTask(ctx context.Context, task tasks.ConfigTa
 		}
 	}
 
+	r.logger.Info("config apply phase", "phase", "validated")
 	for index := range prepared {
 		applier := tasks.NewApplier(prepared[index].activePath, prepared[index].backupDir)
 		apply, applyErr := applier.Apply(prepared[index].stage.StagedPath, prepared[index].stage.ConfigVersionID)
@@ -61,6 +63,7 @@ func (r *Runner) processConfigApplyTask(ctx context.Context, task tasks.ConfigTa
 		prepared[index].apply = apply
 	}
 
+	r.logger.Info("config apply phase", "phase", "applied")
 	if !r.cfg.ServiceControlEnabled {
 		report := multiConfigApplyReport(prepared, "skipped_service_control_disabled")
 		if err := r.client.CompleteTaskSucceeded(ctx, r.cfg.AgentToken, task.ID, report); err != nil {
@@ -71,6 +74,7 @@ func (r *Runner) processConfigApplyTask(ctx context.Context, task tasks.ConfigTa
 	}
 
 	for index := range prepared {
+		r.logger.Info("config apply phase", "phase", "restart")
 		restart, restartErr := prepared[index].adapter.Restart(ctx)
 		prepared[index].restart = restart
 		if restartErr != nil {
@@ -78,6 +82,7 @@ func (r *Runner) processConfigApplyTask(ctx context.Context, task tasks.ConfigTa
 			return r.completeConfigApplyFailure(ctx, task, fmt.Errorf("restart VPN runtime: %w; rollback=%s", restartErr, rollback), prepared, "restart")
 		}
 
+		r.logger.Info("config apply phase", "phase", "healthcheck")
 		health, healthErr := prepared[index].adapter.IsActive(ctx)
 		prepared[index].health = health
 		if healthErr != nil {
@@ -85,6 +90,7 @@ func (r *Runner) processConfigApplyTask(ctx context.Context, task tasks.ConfigTa
 			return r.completeConfigApplyFailure(ctx, task, fmt.Errorf("VPN runtime active check: %w; rollback=%s", healthErr, rollback), prepared, "healthcheck")
 		}
 
+		r.logger.Info("config apply phase", "phase", "persistence")
 		persistence, persistenceErr := prepared[index].adapter.IsEnabled(ctx)
 		prepared[index].persistence = persistence
 		if persistenceErr != nil {
@@ -92,6 +98,7 @@ func (r *Runner) processConfigApplyTask(ctx context.Context, task tasks.ConfigTa
 			return r.completeConfigApplyFailure(ctx, task, fmt.Errorf("VPN runtime persistence check: %w; rollback=%s", persistenceErr, rollback), prepared, "persistence")
 		}
 
+		r.logger.Info("config apply phase", "phase", "listener")
 		listener, listenerErr := prepared[index].adapter.CheckHealth(ctx, prepared[index].apply.ActivePath)
 		prepared[index].listener = listener
 		if listenerErr != nil {
@@ -100,6 +107,7 @@ func (r *Runner) processConfigApplyTask(ctx context.Context, task tasks.ConfigTa
 		}
 	}
 
+	r.logger.Info("config apply phase", "phase", "report")
 	report := multiConfigApplyReport(prepared, "succeeded")
 	if err := r.client.CompleteTaskSucceeded(ctx, r.cfg.AgentToken, task.ID, report); err != nil {
 		return err

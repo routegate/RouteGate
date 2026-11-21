@@ -101,6 +101,7 @@ make_transaction_bundle() {
     "$stage/systemd" \
     "$stage/metadata"
   printf 'manager-%s\n' "$label" >"$stage/bin/routegate-manager"
+  printf 'migrator-%s\n' "$label" >"$stage/bin/routegate-migrate"
   printf 'agent-%s\n' "$label" >"$stage/bin/routegate-agent"
   printf 'frontend-%s\n' "$label" >"$stage/frontend/index.html"
   printf 'SELECT 1;\n' >"$stage/manager/migrations/${MIGRATION}.up.sql"

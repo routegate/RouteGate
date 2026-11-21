@@ -5,7 +5,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +22,7 @@ func TestMigrationsApplyFromScratchOnPostgreSQL(t *testing.T) {
 		t.Skip("ROUTEGATE_TEST_DATABASE_URL is not set")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -31,6 +33,21 @@ func TestMigrationsApplyFromScratchOnPostgreSQL(t *testing.T) {
 	defer pool.Close()
 
 	resetPublicSchema(t, ctx, pool)
+	// Exercise the shipped administrative entry point on a genuinely empty
+	// schema, then repeat it before checking the shared migration function.
+	for attempt := 0; attempt < 2; attempt++ {
+		command := exec.CommandContext(ctx, "go", "run", "./cmd/routegate-migrate", "--initialize-schema")
+		command.Dir = "../.."
+		for _, value := range os.Environ() {
+			if !strings.HasPrefix(value, "ROUTEGATE_DATABASE_URL=") && !strings.HasPrefix(value, "ROUTEGATE_MIGRATOR_DATABASE_URL=") {
+				command.Env = append(command.Env, value)
+			}
+		}
+		command.Env = append(command.Env, "ROUTEGATE_MIGRATOR_DATABASE_URL="+databaseURL)
+		if err := command.Run(); err != nil {
+			t.Fatalf("initialize schema CLI attempt %d: %v", attempt+1, err)
+		}
+	}
 	if err := Migrate(ctx, pool, "../../migrations", logger); err != nil {
 		t.Fatalf("apply migrations from scratch: %v", err)
 	}
@@ -42,8 +59,8 @@ func TestMigrationsApplyFromScratchOnPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000160_traffic_report_checkpoints" {
-		t.Fatalf("applied schema version = %q, want 000160_traffic_report_checkpoints", version)
+	if version != "000170_credential_removal_dispatch_stages" {
+		t.Fatalf("applied schema version = %q, want 000170_credential_removal_dispatch_stages", version)
 	}
 	assertRawTrafficArchivalPreservesDailyRollup(t, ctx, pool)
 	assertAgentMaintenanceJobContract(t, ctx, pool)
@@ -530,8 +547,8 @@ func TestRuntimeMetricsBackfillMigrationRepairsAppliedSchemaDrift(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read applied schema version: %v", err)
 	}
-	if version != "000160_traffic_report_checkpoints" {
-		t.Fatalf("applied schema version = %q, want 000160_traffic_report_checkpoints", version)
+	if version != "000170_credential_removal_dispatch_stages" {
+		t.Fatalf("applied schema version = %q, want 000170_credential_removal_dispatch_stages", version)
 	}
 }
 
@@ -563,4 +580,47 @@ func copyMigrationsBefore(t *testing.T, sourceDir, stopBefore string) string {
 		}
 	}
 	return destination
+}
+
+// A foreign ledger entry must stop a resumed migration before pending SQL.
+func TestMigrationsRefuseForeignHistoryBeforePendingSQL(t *testing.T) {
+	ctx, pool, done := setupAppliedSettingsTest(t)
+	defer done()
+	dir := t.TempDir()
+	files, err := filepath.Glob("../../migrations/*.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, filepath.Base(file)), content, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO public.schema_migrations(version) VALUES ('000175_foreign_branch')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "000171_resume_canary.up.sql"), []byte("CREATE TABLE public.resume_canary(id integer);"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool, dir, slog.Default()); err == nil {
+		t.Fatal("foreign history accepted")
+	}
+	var absent bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.resume_canary') IS NULL`).Scan(&absent); err != nil || !absent {
+		t.Fatalf("pending SQL ran before history refusal: %v", err)
+	}
+	// Removing only the foreign entry permits the same legitimate upgrade.
+	if _, err := pool.Exec(ctx, `DELETE FROM public.schema_migrations WHERE version='000175_foreign_branch'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool, dir, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.resume_canary') IS NULL`).Scan(&absent); err != nil || absent {
+		t.Fatalf("legitimate pending migration did not run: %v", err)
+	}
 }

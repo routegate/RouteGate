@@ -42,6 +42,8 @@ const DefaultMTGPath = "mtg"
 const DefaultMTProtoServiceName = "routegate-mtproto"
 
 type Config struct {
+	// Disposable-test-only gate; never enabled by the installer or production defaults.
+	ExperimentalRuntimeMutationFencing bool
 	ManagerURL                       string
 	RegistrationToken                string
 	AgentID                          string
@@ -100,6 +102,12 @@ func Load(path string) (Config, error) {
 		key = strings.TrimSpace(key)
 		value = trimYAMLScalar(value)
 		switch key {
+		case "experimental_runtime_mutation_fencing":
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return Config{}, errors.New("invalid experimental_runtime_mutation_fencing")
+			}
+			cfg.ExperimentalRuntimeMutationFencing = parsed
 		case "manager_url":
 			cfg.ManagerURL = value
 		case "registration_token":
@@ -359,6 +367,10 @@ func (c Config) Save(path string) error {
 	mtprotoServiceName := defaultString(c.MTProtoServiceName, DefaultMTProtoServiceName)
 
 	var output strings.Builder
+	// Preserve explicit test opt-in across registration; omit ordinary defaults.
+	if c.ExperimentalRuntimeMutationFencing {
+		fmt.Fprintln(&output, "experimental_runtime_mutation_fencing: true")
+	}
 	fmt.Fprintf(&output, "manager_url: %q\n", c.ManagerURL)
 	if c.RegistrationToken != "" {
 		fmt.Fprintf(&output, "registration_token: %q\n", c.RegistrationToken)

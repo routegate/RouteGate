@@ -521,7 +521,26 @@ test_existing_install_precedes_repository_preflight() {
   assert_true     "completed RouteGate installs are verified before clean-host APT trust checks"     test "$existing_line" -lt "$trust_line"
 }
 
+test_schema_initialization_invocation() (
+  local password
+  printf -v password '%064d' 0
+  cd() { [[ "$1" == /opt/routegate-manager ]]; }
+  env() {
+    [[ "$#" == 5 && "$1" == -i && "$2" == PATH=/usr/bin:/bin &&
+       "$3" == "ROUTEGATE_MIGRATOR_DATABASE_URL=postgres://routegate:${password}@127.0.0.1:5432/routegate?sslmode=disable" &&
+       "$4" == /usr/local/bin/routegate-migrate && "$5" == --initialize-schema ]]
+  }
+  initialize_manager_schema "$password" || return 1
+  env() { return 23; }
+  local rc=0
+  initialize_manager_schema "$password" || rc=$?
+  [[ "$rc" == 23 ]] || return 1
+  env() { return 0; }
+  if initialize_manager_schema invalid; then return 1; fi
+)
+
 printf 'TAP version 13\n'
+assert_true "schema initialization isolates owner environment and propagates failure" test_schema_initialization_invocation
 test_apt_repository_trust_preflight
 test_existing_install_precedes_repository_preflight
 test_validation_helpers

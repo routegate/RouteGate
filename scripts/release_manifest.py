@@ -188,6 +188,7 @@ def verify_bundle(
 ) -> None:
     required_files = {
         "bin/routegate-manager",
+        "bin/routegate-migrate",
         "bin/routegate-agent",
         "frontend/index.html",
         "metadata/manifest.env",
