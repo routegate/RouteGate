@@ -1252,6 +1252,17 @@ SQL
     || die "PostgreSQL database verification failed."
 }
 
+# Run the matching administrative binary before Manager can serve requests.
+# Keep inherited runtime credentials out of this owner-only initialization.
+initialize_manager_schema() (
+  local db_password=$1
+  [[ "$db_password" =~ ^[a-f0-9]{64}$ ]] || return 1
+  cd /opt/routegate-manager || return 1
+  env -i PATH=/usr/bin:/bin \
+    ROUTEGATE_MIGRATOR_DATABASE_URL="postgres://routegate:${db_password}@127.0.0.1:5432/routegate?sslmode=disable" \
+    /usr/local/bin/routegate-migrate --initialize-schema
+)
+
 write_manager_environment() {
   local db_password=$1
   local admin_password=$2
@@ -1295,7 +1306,7 @@ wait_for_url() {
 }
 
 start_manager() {
-  log "Starting RouteGate Manager and applying database migrations."
+  log "Starting RouteGate Manager after database schema initialization."
   systemctl daemon-reload
   systemctl enable --now routegate-manager >>"$ROUTEGATE_LOG_FILE" 2>&1
   if ! wait_for_url "${ROUTEGATE_LOCAL_API}/api/admin/health" 60 2; then
@@ -1814,6 +1825,9 @@ main() {
 
   set_install_stage postgresql
   configure_postgresql "$ROUTEGATE_DB_PASSWORD"
+  set_install_stage database_schema
+  initialize_manager_schema "$ROUTEGATE_DB_PASSWORD" >>"$ROUTEGATE_LOG_FILE" 2>&1 \
+    || die "Database schema initialization failed; Manager was not started."
   set_install_stage manager
   write_manager_environment "$ROUTEGATE_DB_PASSWORD" "$ROUTEGATE_ADMIN_PASSWORD"
   start_manager
