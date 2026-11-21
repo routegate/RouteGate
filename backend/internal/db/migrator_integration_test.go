@@ -5,7 +5,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +22,7 @@ func TestMigrationsApplyFromScratchOnPostgreSQL(t *testing.T) {
 		t.Skip("ROUTEGATE_TEST_DATABASE_URL is not set")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -31,6 +33,21 @@ func TestMigrationsApplyFromScratchOnPostgreSQL(t *testing.T) {
 	defer pool.Close()
 
 	resetPublicSchema(t, ctx, pool)
+	// Exercise the shipped administrative entry point on a genuinely empty
+	// schema, then repeat it before checking the shared migration function.
+	for attempt := 0; attempt < 2; attempt++ {
+		command := exec.CommandContext(ctx, "go", "run", "./cmd/routegate-migrate", "--initialize-schema")
+		command.Dir = "../.."
+		for _, value := range os.Environ() {
+			if !strings.HasPrefix(value, "ROUTEGATE_DATABASE_URL=") && !strings.HasPrefix(value, "ROUTEGATE_MIGRATOR_DATABASE_URL=") {
+				command.Env = append(command.Env, value)
+			}
+		}
+		command.Env = append(command.Env, "ROUTEGATE_MIGRATOR_DATABASE_URL="+databaseURL)
+		if err := command.Run(); err != nil {
+			t.Fatalf("initialize schema CLI attempt %d: %v", attempt+1, err)
+		}
+	}
 	if err := Migrate(ctx, pool, "../../migrations", logger); err != nil {
 		t.Fatalf("apply migrations from scratch: %v", err)
 	}
