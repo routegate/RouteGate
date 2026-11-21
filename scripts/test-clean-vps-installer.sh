@@ -10,9 +10,8 @@ source "$ROOT_DIR/install.sh"
 test_missing_resume_secrets() (
   ROUTEGATE_RESUME_INSTALL=1
   ROUTEGATE_SECRETS_FILE="$TEST_TMP/missing-secrets"
-  die() { return 1; }
   openssl() { touch "$TEST_TMP/unexpected-generation"; return 1; }
-  if load_or_create_secrets; then return 1; fi
+  if (load_or_create_secrets) >/dev/null 2>&1; then return 1; fi
   [[ ! -e "$ROUTEGATE_SECRETS_FILE" && ! -e "$TEST_TMP/unexpected-generation" ]]
 )
 
