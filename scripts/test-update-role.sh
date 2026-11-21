@@ -234,6 +234,77 @@ EOF_RUNTIME_CHECK
   )
 }
 
+test_external_migration_before_start() (
+  local root="$TMP_DIR/external-start" file binary role
+  mkdir -p "$root/etc/routegate" "$root/usr/local/bin" "$root/opt/routegate-manager"
+  RG_UPDATE_ROOT=$root
+  file="$root/etc/routegate/manager.env"
+  binary="$root/usr/local/bin/routegate-migrate"
+  printf 'ROUTEGATE_DATABASE_MIGRATION_MODE=external\nROUTEGATE_DATABASE_URL=postgres://runtime/test\n' >"$file"
+  printf 'ROUTEGATE_MIGRATOR_DATABASE_URL=postgres://owner/test\n' >"$root/etc/routegate/migrator.env"
+  chmod 0600 "$root/etc/routegate/migrator.env"
+  # Unit fixture may run without root; retain the actual mode check.
+  stat() {
+    [[ $1 == -c && $2 == '%u:%a' && $3 == "$root/etc/routegate/migrator.env" ]] || return 1
+    printf '0:%s\n' "$(command stat -c '%a' "$3")"
+  }
+  cat >"$binary" <<'EOF_EXTERNAL_MIGRATE'
+#!/bin/bash
+[[ ${ROUTEGATE_DATABASE_URL:-} == postgres://runtime/test ]] || exit 3
+[[ ${ROUTEGATE_MIGRATOR_DATABASE_URL:-} == postgres://owner/test ]] || exit 4
+[[ -z ${PGPASSWORD:-} ]] || exit 5
+[[ $PWD == */opt/routegate-manager ]] || exit 6
+if [[ $# == 1 && $1 == --check-connections ]]; then
+  echo check >>events
+elif [[ $# == 0 ]]; then
+  echo migrate >>events
+else
+  exit 7
+fi
+[[ ! -f fail-migration ]] || exit 23
+EOF_EXTERNAL_MIGRATE
+  chmod 0755 "$binary"
+  export PGPASSWORD=ambient-secret ROUTEGATE_DATABASE_URL=wrong-runtime ROUTEGATE_MIGRATOR_DATABASE_URL=wrong-owner
+  local events="$root/opt/routegate-manager/events"
+  rg_update_wait_manager() { echo manager >>"$events"; }
+  rg_update_validate_database_schema() { echo schema >>"$events"; }
+  rg_update_wait_agent() { echo agent >>"$events"; }
+  assert_eq "$(rg_update_read_administrative_database_url)" postgres://owner/test "backup uses verified owner"
+  assert_file_content "$events" check
+  for role in management hybrid; do
+    : >"$events"
+    rg_update_start_and_validate_role "$role" postgres://owner/test 170 || fail "$role external start failed"
+    local expected=$'migrate\nmanager\nschema'
+    [[ $role != hybrid ]] || expected+=$'\nagent'
+    assert_file_content "$events" "$expected"
+    : >"$events"
+    touch "$root/opt/routegate-manager/fail-migration"
+    if rg_update_start_and_validate_role "$role" postgres://owner/test 170; then
+      fail "$role started after failed migration"
+    fi
+    assert_file_content "$events" migrate
+    rm "$root/opt/routegate-manager/fail-migration"
+  done
+  : >"$events"
+  chmod 0644 "$root/etc/routegate/migrator.env"
+  if rg_update_start_and_validate_role management postgres://owner/test 170; then
+    fail "unsafe owner credential file accepted"
+  fi
+  assert_file_content "$events" ""
+  printf 'ROUTEGATE_DATABASE_MIGRATION_MODE=unknown\nROUTEGATE_DATABASE_URL=test\n' >"$file"
+  if rg_update_start_and_validate_role management postgres://owner/test 170; then
+    fail "unknown mode started Manager"
+  fi
+  assert_file_content "$events" ""
+  printf 'ROUTEGATE_DATABASE_URL=test\n' >"$file"
+  rg_update_start_and_validate_role management test 170 || fail "legacy start failed"
+  assert_file_content "$events" $'manager\nschema'
+  : >"$events"
+  rm "$file"
+  rg_update_start_and_validate_role vpn || fail "VPN-only start required database"
+  assert_file_content "$events" agent
+)
+
 test_management_round_trip() {
   local root="$TMP_DIR/management-root"
   local work="$TMP_DIR/management-work"
@@ -406,6 +477,7 @@ test_marker_policy
 test_manager_env_is_data
 test_database_restore_security_options
 test_runtime_verifier_invocation
+test_external_migration_before_start
 test_management_round_trip
 test_management_apply_preserves_bootstrap
 test_vpn_round_trip

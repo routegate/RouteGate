@@ -200,7 +200,20 @@ rg_update_read_manager_database_url() {
 }
 
 # Administrative operations must not reuse a restricted Manager login.
-rg_update_read_administrative_database_url() (
+rg_update_read_administrative_database_url() {
+  rg_update_database_administration check
+}
+
+# Share credential validation between pre-backup checks and pre-start migration.
+# The latter uses the newly installed binary/SQL while Manager is still stopped.
+rg_update_database_administration() (
+  local operation=$1
+  local -a arguments=()
+  case "$operation" in
+    check) arguments=(--check-connections) ;;
+    migrate) ;;
+    *) return 1 ;;
+  esac
   local manager_env mode runtime_url owner_env owner_url binary directory
   manager_env=$(rg_update_path /etc/routegate/manager.env) || return 1
   mode=$(rg_update_read_environment_value "$manager_env" ROUTEGATE_DATABASE_MIGRATION_MODE startup) || return 1
@@ -220,7 +233,7 @@ rg_update_read_administrative_database_url() (
   [[ -f "$binary" && ! -L "$binary" && -x "$binary" ]] || return 1
   cd "$directory" || return 1
   env -i PATH=/usr/bin:/bin ROUTEGATE_DATABASE_URL="$runtime_url" \
-    ROUTEGATE_MIGRATOR_DATABASE_URL="$owner_url" "$binary" --check-connections >&2 || return 1
+    ROUTEGATE_MIGRATOR_DATABASE_URL="$owner_url" "$binary" "${arguments[@]}" >&2 || return 1
   printf '%s\n' "$owner_url"
 )
 
@@ -394,6 +407,9 @@ rg_update_start_and_validate_role() {
       rg_update_die "Management validation requires database URL and expected schema"
       return 1
     }
+    # Caller marks the database as potentially mutated before entering here,
+    # so any migration or verification failure follows database rollback.
+    rg_update_database_administration migrate >/dev/null || return 1
     rg_update_wait_manager 45 || return 1
     rg_update_validate_database_schema "$db_url" "$expected_schema" || return 1
   fi

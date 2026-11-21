@@ -15,7 +15,7 @@ import (
 )
 
 // Explicit opt-in one-shot migrator, shipped with the matching Manager and SQL.
-// Installation does not invoke it or enable external migration mode.
+// Installation initializes the schema explicitly; external mode uses separate logins.
 func main() {
 	// Adapt #639's explicit role-provisioning command here, alongside the
 	// existing privileged migrator, rather than adding another Manager DDL path.
