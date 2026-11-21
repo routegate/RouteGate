@@ -200,6 +200,8 @@ test_database_restore_security_options() (
   fi
 )
 
+# Each scenario sets its own ambient credentials in an isolated subshell.
+# shellcheck disable=SC2030
 test_runtime_verifier_invocation() {
   local root="$TMP_DIR/runtime-verifier" file binary
   mkdir -p "$root/etc/routegate" "$root/usr/local/bin" "$root/opt/routegate-manager"
@@ -234,6 +236,8 @@ EOF_RUNTIME_CHECK
   )
 }
 
+# No credentials are inherited from the preceding test scenario.
+# shellcheck disable=SC2031
 test_external_migration_before_start() (
   local root="$TMP_DIR/external-start" file binary role
   mkdir -p "$root/etc/routegate" "$root/usr/local/bin" "$root/opt/routegate-manager"
