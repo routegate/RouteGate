@@ -884,6 +884,25 @@ initialize_install_state() {
   install -d -m 0700 "$ROUTEGATE_STATE_DIR"
 }
 
+# Publish a complete secret set before any database credentials are applied.
+# Failure before rename leaves the previously published file intact.
+persist_installer_secrets() (
+  local temporary
+  umask 077
+  temporary=$(mktemp "${ROUTEGATE_SECRETS_FILE}.XXXXXX") || return 1
+  trap 'rm -f -- "$temporary"' EXIT
+  {
+    printf 'DB_PASSWORD=%s\n' "$ROUTEGATE_DB_PASSWORD" || return 1
+    printf 'ADMIN_PASSWORD=%s\n' "$ROUTEGATE_ADMIN_PASSWORD" || return 1
+    if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
+      printf 'MONITORING_TOKEN=%s\n' "$ROUTEGATE_MONITORING_TOKEN" || return 1
+    fi
+  } >"$temporary" || return 1
+  sync -f "$temporary" || return 1
+  mv -f -- "$temporary" "$ROUTEGATE_SECRETS_FILE" || return 1
+  sync -f "$(dirname "$ROUTEGATE_SECRETS_FILE")" || return 1
+)
+
 load_or_create_secrets() {
   # Never replace preserved credentials when resuming a partial installation.
   # A missing journal cannot establish which credentials were already applied.
@@ -901,7 +920,7 @@ load_or_create_secrets() {
     if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
       if [[ -z "$ROUTEGATE_MONITORING_TOKEN" ]]; then
         ROUTEGATE_MONITORING_TOKEN=$(openssl rand -hex 32)
-        printf 'MONITORING_TOKEN=%s\n' "$ROUTEGATE_MONITORING_TOKEN" >>"$ROUTEGATE_SECRETS_FILE"
+        persist_installer_secrets || die "Cannot persist monitoring credentials."
       fi
       [[ "$ROUTEGATE_MONITORING_TOKEN" =~ ^[a-f0-9]{64}$ ]] \
         || die "Preserved monitoring secret is invalid."
@@ -916,15 +935,7 @@ load_or_create_secrets() {
   if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
     ROUTEGATE_MONITORING_TOKEN=$(openssl rand -hex 32)
   fi
-  install -m 0600 /dev/null "$ROUTEGATE_SECRETS_FILE"
-  cat >"$ROUTEGATE_SECRETS_FILE" <<EOF_SECRETS
-DB_PASSWORD=${ROUTEGATE_DB_PASSWORD}
-ADMIN_PASSWORD=${ROUTEGATE_ADMIN_PASSWORD}
-EOF_SECRETS
-  if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
-    printf 'MONITORING_TOKEN=%s\n' "$ROUTEGATE_MONITORING_TOKEN" >>"$ROUTEGATE_SECRETS_FILE"
-  fi
-  chmod 0600 "$ROUTEGATE_SECRETS_FILE"
+  persist_installer_secrets || die "Cannot persist installer credentials."
 }
 
 public_ipv4_candidates() {

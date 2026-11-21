@@ -15,6 +15,28 @@ test_missing_resume_secrets() (
   [[ ! -e "$ROUTEGATE_SECRETS_FILE" && ! -e "$TEST_TMP/unexpected-generation" ]]
 )
 
+test_atomic_secret_persistence() (
+  ROUTEGATE_SECRETS_FILE="$TEST_TMP/atomic-secrets"
+  ROUTEGATE_INSTALL_PROMETHEUS=0
+  ROUTEGATE_RESUME_INSTALL=0
+  load_or_create_secrets
+  local original
+  original=$(cat "$ROUTEGATE_SECRETS_FILE")
+  [[ $(stat -c '%a' "$ROUTEGATE_SECRETS_FILE") == 600 ]] || return 1
+  ROUTEGATE_RESUME_INSTALL=1
+  load_or_create_secrets
+  [[ $(cat "$ROUTEGATE_SECRETS_FILE") == "$original" ]] || return 1
+  ROUTEGATE_INSTALL_PROMETHEUS=1
+  # Simulate failed publication; existing credentials must remain usable.
+  if (mv() { return 1; }; load_or_create_secrets) >/dev/null 2>&1; then return 1; fi
+  [[ $(cat "$ROUTEGATE_SECRETS_FILE") == "$original" ]] || return 1
+  [[ $(find "$TEST_TMP" -name 'atomic-secrets.*' | wc -l) == 0 ]] || return 1
+  load_or_create_secrets
+  [[ "$ROUTEGATE_MONITORING_TOKEN" =~ ^[a-f0-9]{64}$ ]] || return 1
+  [[ $(head -n2 "$ROUTEGATE_SECRETS_FILE") == "$original" ]] || return 1
+  [[ $(stat -c '%a' "$ROUTEGATE_SECRETS_FILE") == 600 ]]
+)
+
 TESTS_RUN=0
 TESTS_FAILED=0
 TEST_TMP=$(mktemp -d /tmp/routegate-installer-tests.XXXXXX)
@@ -548,6 +570,8 @@ test_schema_initialization_invocation() (
 )
 
 printf 'TAP version 13\n'
+assert_true "secret publication preserves credentials on failure and resume" test_atomic_secret_persistence
+
 assert_true "resume refuses missing secrets without regeneration" test_missing_resume_secrets
 
 assert_true "schema initialization isolates owner environment and propagates failure" test_schema_initialization_invocation
