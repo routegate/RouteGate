@@ -58,3 +58,34 @@ for _ in {1..60}; do
 done
 [[ $healthy == 1 ]] || { cat /tmp/manager.log; exit 1; }
 printf 'Installer database lifecycle passed: fresh roles, resume, wrong-secret refusal, restricted Manager health.\n'
+
+# Exercise the existing updater primitives against this installer-created DB.
+kill "$manager_pid"
+wait "$manager_pid" || true
+trap - EXIT
+# shellcheck source=scripts/routegate-update-core.sh
+source /test/scripts/routegate-update-core.sh
+# shellcheck source=scripts/routegate-update-role.sh
+source /test/scripts/routegate-update-role.sh
+owner_url=$(rg_update_read_administrative_database_url)
+[[ "$owner_url" != "$ROUTEGATE_DATABASE_URL" ]]
+rg_update_database_administration migrate >/dev/null
+backup_dir=$(mktemp -d)
+trap 'rm -rf "$backup_dir"' EXIT
+cp "$ROUTEGATE_MANAGER_ENV" "$backup_dir/manager.env"
+original_name=$(psql "$owner_url" -X -qAt -v ON_ERROR_STOP=1 -c "SELECT display_name FROM users WHERE email='admin@installer.invalid'")
+[[ -n "$original_name" ]]
+pg_dump --format=custom --file="$backup_dir/routegate.pgdump" "$owner_url"
+psql "$owner_url" -X -q -v ON_ERROR_STOP=1 <<'SQL'
+UPDATE users SET display_name='changed-after-backup' WHERE email='admin@installer.invalid';
+REVOKE SELECT ON public.users FROM routegate_runtime;
+SQL
+if rg_update_verify_restored_runtime "$ROUTEGATE_MANAGER_ENV" >/dev/null 2>&1; then
+  printf 'Runtime verification accepted revoked grants.\n' >&2
+  exit 1
+fi
+rg_update_restore_database "$backup_dir" "$owner_url"
+rg_update_verify_restored_runtime "$ROUTEGATE_MANAGER_ENV"
+[[ $(rg_update_read_administrative_database_url) == "$owner_url" ]]
+[[ $(psql "$ROUTEGATE_DATABASE_URL" -X -qAt -v ON_ERROR_STOP=1 -c "SELECT display_name FROM users WHERE email='admin@installer.invalid'") == "$original_name" ]]
+printf 'Installer/update database round trip passed: migration invocation, backup, data and runtime grants restored.\n'
