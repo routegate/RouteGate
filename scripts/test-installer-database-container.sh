@@ -16,6 +16,14 @@ CREATE ROLE routegate LOGIN PASSWORD '${ROUTEGATE_DB_PASSWORD}';
 CREATE DATABASE routegate OWNER routegate;
 REVOKE ALL ON DATABASE routegate FROM PUBLIC;
 SQL
+# Refuse a fixture that accepts a wrong password via TCP (initdb's default
+# localhost trust rules otherwise bypass the role's SCRAM password entirely).
+PGPASSWORD="$ROUTEGATE_DB_PASSWORD" psql -X -h 127.0.0.1 -U routegate -d routegate -w -qAt -c 'SELECT 1' >/dev/null
+if PGPASSWORD=deliberately-wrong psql -X -h 127.0.0.1 -U routegate -d routegate -w -qAt -c 'SELECT 1' >/dev/null 2>&1; then
+  printf 'Disposable PostgreSQL accepts an incorrect TCP password; authentication fixture is invalid.\n' >&2
+  exit 1
+fi
+printf 'Disposable PostgreSQL enforces TCP password authentication.\n'
 initialize_manager_schema "$ROUTEGATE_DB_PASSWORD"
 prepare_manager_runtime_login
 write_manager_environment "$ROUTEGATE_DB_PASSWORD" 'disposable-admin-password-for-ci-only'

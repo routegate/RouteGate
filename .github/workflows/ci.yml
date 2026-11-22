@@ -507,6 +507,7 @@ jobs:
           tar -xzf "$DIST_DIR/routegate-ci-test-linux-amd64.tar.gz" -C "$fixture"
           container=$(docker run -d --rm \
             -e POSTGRES_PASSWORD=disposable-ci-only \
+            -e "POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=trust" \
             -e ROUTEGATE_DISPOSABLE_INSTALLER_TEST=1 \
             -v "$GITHUB_WORKSPACE:/test:ro" \
             -v "$fixture/bin/routegate-migrate:/usr/local/bin/routegate-migrate:ro" \
