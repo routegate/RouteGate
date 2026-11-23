@@ -1,3 +1,5 @@
+import { isTransferReservationError } from '../../entities/vpnAccount/api/vpnAccountTransferApi';
+import { TransferReservationNotice } from './TransferReservationNotice';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -19,6 +21,7 @@ import { getVpnAccountManagementCopy } from './vpnAccountManagementCopy';
 import { accountSections, accountWorkspaceHref, isAccountSection } from './accountWorkspace';
 import './vpnAccountManagement.css';
 import './vpnAccountNotes.css';
+
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() !== '' ? error.message : fallback;
@@ -178,7 +181,10 @@ export function VpnAccountsPage() {
               </label>
               <label className="field">
                 <span>{t('vpnAccounts.serverAssignment')}</span>
-                <select value={serverId} onChange={(event) => setServerId(event.target.value)}>
+                <select value={serverId} disabled={createAccountMutation.isPending} onChange={(event) => {
+                  setServerId(event.target.value);
+                  createAccountMutation.reset();
+                }}>
                   <option value="">{t('vpnAccounts.noServerAssignment')}</option>
                   {(serversQuery.data?.items ?? []).map((server) => (
                     <option value={server.id} key={server.id}>{server.name || server.id}</option>
@@ -186,11 +192,12 @@ export function VpnAccountsPage() {
                 </select>
               </label>
             </div>
-            {createAccountMutation.isError && (
+            {createAccountMutation.isError && (isTransferReservationError(createAccountMutation.error) ?
+              <TransferReservationNotice nodeIds={[serverId]} blocked /> : (
               <div className="form-message form-message-error">
                 {getErrorMessage(createAccountMutation.error, t('vpnAccounts.createError'))}
               </div>
-            )}
+            ))}
             <div className="form-actions">
               <button className="primary-button" type="submit" disabled={!canCreateAccount || createAccountMutation.isPending}>
                 {createAccountMutation.isPending ? t('vpnAccounts.creating') : t('vpnAccounts.createAction')}

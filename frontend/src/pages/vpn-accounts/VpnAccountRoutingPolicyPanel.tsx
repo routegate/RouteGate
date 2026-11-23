@@ -1,3 +1,4 @@
+import { transferReservationsKey } from '../../entities/vpnAccount/api/vpnAccountTransferApi';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -21,6 +22,8 @@ import { Section } from '../../shared/ui/Section';
 import './vpnAccountRoutingPolicy.css';
 import { getAccountTransfer, startAccountTransfer } from '../../entities/vpnAccount/api/vpnAccountTransferApi';
 import { AccountTransferPanel } from './AccountTransferPanel';
+import { isTransferReservationError } from '../../entities/vpnAccount/api/vpnAccountTransferApi';
+import { TransferReservationNotice } from './TransferReservationNotice';
 import { accountTransferError } from './accountTransferMessages';
 
 function selectionStatusLabel(status: 'selected' | 'current' | 'no_eligible_candidates' | 'node_group_required' | 'cooldown'): string {
@@ -162,6 +165,7 @@ export function VpnAccountRoutingPolicyPanel({ accountId, active = true }: { acc
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['vpn-account-routing-policy', accountId] }),
       queryClient.invalidateQueries({ queryKey: ['vpn-account-transfer', accountId] }),
+      queryClient.invalidateQueries({ queryKey: transferReservationsKey }),
       queryClient.invalidateQueries({ queryKey: ['vpn-account-client-connection', accountId] }),
       queryClient.invalidateQueries({ queryKey: ['vpn-accounts'] }),
       queryClient.invalidateQueries({ queryKey: ['vpn-account', accountId] }),
@@ -295,7 +299,9 @@ export function VpnAccountRoutingPolicyPanel({ accountId, active = true }: { acc
             <button className="small-button" type="submit" disabled={editingDisabled || serverId === (accountQuery.data?.serverId ?? '')}>{transferQuery.data?.requiresTransfer ? copy.prepareTransfer : copy.saveNode}</button>
           </div>
           {nodeMessage && <div className="form-message form-message-success">{nodeMessage}</div>}
-          {nodeError && <div className="form-message form-message-error">{nodeError}</div>}
+          {nodeError && (isTransferReservationError(nodeMutation.error) ?
+            <TransferReservationNotice nodeIds={[serverId, accountQuery.data?.serverId ?? '']} blocked /> :
+            <div className="form-message form-message-error">{nodeError}</div>)}
           {nodeConfigChanged && (
             <div className="form-message vpn-account-config-notice">
               <span>{copy.configNotice}</span>

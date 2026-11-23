@@ -44,6 +44,49 @@ func (h *Handler) Latest(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"transfer": tr, "requiresTransfer": requires})
 }
+
+// Reservations lists the transfers currently holding nodes, for operator guidance.
+func (h *Handler) Reservations(w http.ResponseWriter, r *http.Request) {
+	type reservation struct {
+		AccountID   string   `json:"accountId"`
+		AccountName string   `json:"accountName"`
+		SourceName  string   `json:"sourceName"`
+		TargetName  string   `json:"targetName"`
+		State       string   `json:"state"`
+		NodeIDs     []string `json:"nodeIds"`
+		NodeNames   []string `json:"nodeNames"`
+	}
+	rows, err := h.service.pool.Query(r.Context(), `
+		SELECT a.id::text, a.display_name, source.name, target.name, t.state,
+		       array_agg(n.server_id::text ORDER BY n.server_id),
+		       array_agg(held.name ORDER BY n.server_id)
+		FROM vpn_account_transfer_nodes n
+		JOIN servers held ON held.id = n.server_id
+		JOIN vpn_account_transfers t ON t.id = n.transfer_id
+		JOIN vpn_accounts a ON a.id = t.vpn_account_id
+		JOIN servers source ON source.id = t.source_server_id
+		JOIN servers target ON target.id = t.target_server_id
+		GROUP BY t.id, a.id, source.id, target.id
+		ORDER BY t.created_at, t.id`)
+	if err != nil {
+		h.failure(w, err)
+		return
+	}
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (reservation, error) {
+		var item reservation
+		err := row.Scan(&item.AccountID, &item.AccountName, &item.SourceName, &item.TargetName, &item.State, &item.NodeIDs, &item.NodeNames)
+		return item, err
+	})
+	if err != nil {
+		h.failure(w, err)
+		return
+	}
+	if items == nil {
+		items = []reservation{}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		TargetServerID string `json:"targetServerId"`
@@ -94,6 +137,8 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 func (h *Handler) failure(w http.ResponseWriter, err error) {
 	var p *pgconn.PgError
 	switch {
+	case errors.Is(err, errNodeReserved):
+		httpx.WriteJSON(w, http.StatusConflict, httpx.Error("node_reserved_for_transfer", "A node is reserved by an active account transfer."))
 	case errors.Is(err, ErrGuard):
 		httpx.WriteJSON(w, http.StatusConflict, httpx.Error("transfer_blocked", err.Error()))
 	case errors.As(err, &p) && (p.Code == "P0140" || p.Code == "23505"):

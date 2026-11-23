@@ -1,3 +1,5 @@
+import { isTransferReservationError } from '../../entities/vpnAccount/api/vpnAccountTransferApi';
+import { TransferReservationNotice } from './TransferReservationNotice';
 import { useState } from 'react';
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -154,6 +156,7 @@ function protocolIsReady(protocol: ClientProtocol, settings: ProtocolSettingsRes
       return settings.reality.enabled && settings.vless.port >= 1 && settings.vless.port <= 65535;
   }
 }
+
 
 function mutationErrorDetail(error: unknown, copy: ReturnType<typeof getCopy>): string {
   const detail = error instanceof Error ? error.message.trim() : typeof error === 'string' ? error.trim() : '';
@@ -451,11 +454,12 @@ export function VpnAccountProtocolPreferencePanel({ accountId, active, draft, on
             )}
             {changed && <div className="form-message">{copy.desired}: {enabledProtocols.map((protocol) => protocolLabel(protocol, copy)).join(' · ') || '—'}</div>}
             {saveMutation.isPending && stageText && <div className="form-message" role="status">{stageText}</div>}
-            {saveMutation.isError && (
+            {saveMutation.isError && (isTransferReservationError(saveMutation.error) ?
+              <TransferReservationNotice nodeIds={[assignedServerId]} blocked /> : (
               <div className="form-message form-message-error">
                 {copy.saveError}{errorDetail && <div>{copy.errorDetail}: {errorDetail}</div>}
               </div>
-            )}
+            ))}
             {saved && <div className="form-message" role="status">{copy.saved}</div>}
 
             <div className="form-actions">

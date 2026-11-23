@@ -1,3 +1,4 @@
+import { transferReservationsKey } from '../../entities/vpnAccount/api/vpnAccountTransferApi';
 import { useState } from 'react';
 import { accountTransferError, accountTransferErrorIdentity } from './accountTransferMessages';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -23,6 +24,7 @@ export function AccountTransferPanel({ accountId, transfer, serverNames }: { acc
       setConfirmed(false);
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['vpn-account-transfer', accountId] }),
+        qc.invalidateQueries({ queryKey: transferReservationsKey }),
         qc.invalidateQueries({ queryKey: ['vpn-account', accountId] }),
         qc.invalidateQueries({ queryKey: ['vpn-account-routing-policy', accountId] }),
         qc.invalidateQueries({ queryKey: ['vpn-account-client-connection', accountId] }),

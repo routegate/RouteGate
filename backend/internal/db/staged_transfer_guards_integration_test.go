@@ -2,6 +2,11 @@ package db
 
 import (
 	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -74,6 +79,33 @@ func TestStagedTransferConcurrentStartAndPreCutoverCancellation(t *testing.T) {
 	if a.err != nil || b.err != nil || a.tr.ID != b.tr.ID {
 		t.Fatalf("concurrent start not idempotent: %v %v", a.err, b.err)
 	}
+	reservations := func() []struct {
+		AccountID string   `json:"accountId"`
+		NodeIDs   []string `json:"nodeIds"`
+	} {
+		t.Helper()
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/account-transfer-reservations", nil).WithContext(ctx)
+		transfers.NewHandler(slog.Default(), pool).Reservations(response, request)
+		var result struct {
+			Items []struct {
+				AccountID string   `json:"accountId"`
+				NodeIDs   []string `json:"nodeIds"`
+			} `json:"items"`
+		}
+		if response.Code != http.StatusOK {
+			t.Fatalf("reservation status %d: %s", response.Code, response.Body.String())
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result.Items
+	}
+	items := reservations()
+	if len(items) != 1 || items[0].AccountID != account || len(items[0].NodeIDs) != 2 ||
+		!slices.Contains(items[0].NodeIDs, source) || !slices.Contains(items[0].NodeIDs, target) {
+		t.Fatalf("unexpected active reservations: %+v", items)
+	}
 	var jobs int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM config_apply_jobs WHERE server_id=$1::uuid`, target).Scan(&jobs); err != nil || jobs != 1 {
 		t.Fatal("duplicate target task")
@@ -102,6 +134,9 @@ func TestStagedTransferConcurrentStartAndPreCutoverCancellation(t *testing.T) {
 	}
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM vpn_account_transfer_nodes`).Scan(&locks); err != nil || locks != 0 {
 		t.Fatal("terminal operation retained node locks")
+	}
+	if items := reservations(); items == nil || len(items) != 0 {
+		t.Fatalf("expected empty reservation list after cancellation: %+v", items)
 	}
 	if _, err = svc.Start(ctx, account, target, "operator"); err != nil {
 		t.Fatalf("cannot stage to an empty cleaned node: %v", err)

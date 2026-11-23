@@ -6,6 +6,8 @@ import { AnalyticsPage } from '../pages/analytics/AnalyticsPage';
 import { ServersPage } from '../pages/servers/ServersPage';
 import { ServerDetailsPage } from '../pages/servers/ServerDetailsPage';
 import { ProtocolSettingsPage } from '../pages/protocol-settings/ProtocolSettingsPage';
+import { transferReservationsKey } from '../entities/vpnAccount/api/vpnAccountTransferApi';
+import { TransferReservationNotice } from '../pages/vpn-accounts/TransferReservationNotice';
 import { VpnAccountsPage } from '../pages/vpn-accounts/VpnAccountsPage';
 import { RoutingProfilesPage } from '../pages/routing-profiles/RoutingProfilesPage';
 import { NodeGroupsPage } from '../pages/node-groups/NodeGroupsPage';
@@ -431,6 +433,7 @@ function AdminShell({ isLoggingOut, onLogout, user, sessionNotice }: AdminShellP
 
         <main className="main admin-main">
           {sessionNotice}
+          <TransferReservationNotice />
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
@@ -491,6 +494,7 @@ export function App() {
       setAuthTokenState(null);
       queryClient.removeQueries({ queryKey: ['admin-session'] });
       queryClient.removeQueries({ queryKey: ['me'] });
+      queryClient.removeQueries({ queryKey: transferReservationsKey });
       navigate('/login', { replace: true });
     },
   });
@@ -504,6 +508,7 @@ export function App() {
     setAuthTokenState(null);
     queryClient.removeQueries({ queryKey: ['admin-session'] });
     queryClient.removeQueries({ queryKey: ['me'] });
+    queryClient.removeQueries({ queryKey: transferReservationsKey });
   }, [queryClient, sessionIsUnauthorized]);
 
   const handleLogin = () => {

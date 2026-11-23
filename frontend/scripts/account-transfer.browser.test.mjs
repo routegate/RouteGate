@@ -171,3 +171,50 @@ for (const width of [390, 1440]) test(`account deletion is blocked until an RG-1
     await page.close();
   }
 });
+
+test('a transfer on a different account explains a blocked create and links to its routing', async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 960 } });
+  const blocker = {
+    accountId: 'canary', accountName: 'fi-test', sourceName: 'FI', targetName: 'US',
+    nodeIds: ['fi', 'us'], nodeNames: ['FI', 'US'], state: 'client_refresh_pending',
+  };
+  let reservations = [blocker];
+  await page.addInitScript(() => {
+    localStorage.setItem('routegate.locale', 'en');
+    localStorage.setItem('routegate.auth.token', 'fixture');
+  });
+  await page.route(url => url.pathname.startsWith('/api/'), route => {
+    const path = new URL(route.request().url()).pathname;
+    const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    if (path === '/api/admin/health') return json({ status: 'ok' });
+    if (path === '/api/admin/me') return json({ user: { id: 'admin', roles: ['super_admin'] } });
+    if (path === '/api/v1/servers') return json({ items: [{ id: 'fi', name: 'FI' }, { id: 'us', name: 'US' }] });
+    if (path === '/api/v1/account-transfer-reservations') return json({ items: reservations });
+    if (path === '/api/v1/vpn-accounts' && route.request().method() === 'POST') {
+      return json({ status: 'node_reserved_for_transfer', message: 'This node is reserved.' }, 409);
+    }
+    if (path === '/api/v1/vpn-accounts') return json({ items: [], total: 0, page: 1, pageSize: 50, totalPages: 1 });
+    return json({}, 404);
+  });
+  try {
+    await page.goto(`${origin}/vpn-accounts?create=1&server=us`);
+    const banner = page.getByRole('status').filter({ has: page.getByRole('link', { name: 'fi-test' }) });
+    await banner.waitFor();
+    await banner.getByText('Verify clients and finish the transfer', { exact: false }).waitFor();
+    const create = page.locator('.vpn-account-create-form');
+    await create.locator('input').first().fill('Another account');
+    await create.getByRole('button', { name: 'Create VPN account', exact: true }).click();
+    const explanation = create.getByRole('alert');
+    await explanation.getByRole('link', { name: 'fi-test' }).waitFor();
+    assert.equal(await explanation.getByRole('link', { name: 'fi-test' }).getAttribute('href'), '/vpn-accounts/canary/routing');
+    assert.ok((await explanation.textContent()).includes('Reserved FI, US'));
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2));
+
+    reservations = [];
+    await page.reload();
+    await create.waitFor();
+    assert.equal(await page.getByRole('link', { name: 'fi-test' }).count(), 0);
+  } finally {
+    await page.close();
+  }
+});
