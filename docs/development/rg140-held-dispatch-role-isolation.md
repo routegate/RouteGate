@@ -2,6 +2,38 @@
 
 Status: **security prerequisite / NO-GO for executable dispatch**, November 2026.
 
+## Current integration checkpoint — 23 November 2026
+
+Fresh installs now provision separate migration-owner and Manager runtime
+logins, and installer/update/restore database round trips pass CI 3108 at
+`815918cb`. Older deployment descriptions below are historical rationale;
+legacy installations retain their original startup mode until explicit cutover.
+
+The #695 issuance transaction (`0161fb3b`) is adapted in
+`revocations/removal_dispatch_issue.go`, reusing canonical live-human
+`lockRemovalDispatchActor` checks, signature verification and server-first
+serialization. It creates one immutable receipt, exact held version/job and
+counter increment atomically; retries read the same receipt. No production
+route calls it, and canonical migration history remains 170.
+
+Historical issuance SQL is held only in
+`backend/internal/db/testdata/held_dispatch/issuance.{up,down}.sql`. The existing
+opt-in disposable PostgreSQL role rehearsal exercises the writer with this
+fixture, a real restricted runtime login and the canonical grant provisioner.
+It covers forged signature, missing stage, runtime SQL/issuance denial,
+rollback after the final write, concurrent issue, exact receipt readback,
+revoked-human replay refusal, generic Agent poll denial and retained history.
+The poll assertion uses the actual Agent token hash, correcting the old test's
+server-ID argument. This is a source integration milestone, not deployment
+support or a completed revocation operation.
+
+Do not install the fixture SQL on an existing system. Activating a private
+schema while serving with a legacy owner login correctly fails the startup
+isolation guard. Production activation still requires supported credential
+cutover, independently authenticated operator signing/coordinator isolation,
+and the existing scoped claim/result and terminal transitions. Do not provide
+owner credentials or a signing key to ordinary Manager to bypass these gates.
+
 ## Concrete current boundary
 
 The standard `install.sh` PostgreSQL setup creates a login `routegate`,
