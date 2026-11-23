@@ -24,7 +24,9 @@ import (
 
 // Opt-in only: uses a disposable CI VM, one temporary systemd unit and loopback.
 // Never point this test at an installed RouteGate service or a production node.
-func TestCredentialRemovalSystemdRealityTraffic(t *testing.T) {
+// RunCredentialRemovalSystemdRealityFixture shares the existing real-traffic
+// fixture with the external HTTP client test without an import cycle.
+func RunCredentialRemovalSystemdRealityFixture(t *testing.T, executeViaHTTP func(*testing.T, context.Context, ConfigTask, CredentialRemovalExecutor) (CredentialRemovalReport, error)) {
 	binary := os.Getenv("ROUTEGATE_TEST_SING_BOX")
 	if os.Getenv("ROUTEGATE_TEST_REMOVAL_SYSTEMD") != "1" || binary == "" {
 		t.Skip("requires disposable systemd runner and pinned sing-box")
@@ -119,12 +121,12 @@ func TestCredentialRemovalSystemdRealityTraffic(t *testing.T) {
 	}
 	inbound["users"] = users[1:]
 	bindRemovalCandidate(t, &task, object)
-	report, err := e.Execute(ctx, task)
+	report, err := executeViaHTTP(t, ctx, task, e)
 	if err != nil {
 		t.Fatal(report, err)
 	}
 	t.Log("executor measured new systemd invocation, exact active digest and listener")
-	replay, err := e.Execute(ctx, task)
+	replay, err := executeViaHTTP(t, ctx, task, e)
 	if err != nil || replay != report {
 		t.Fatal("lost-ack replay", replay, err)
 	}
@@ -152,7 +154,7 @@ func TestCredentialRemovalSystemdRealityTraffic(t *testing.T) {
 	task.CredentialRemoval.VLESSUUID = users[1].(map[string]any)["uuid"].(string)
 	inbound["users"] = []any{}
 	bindRemovalCandidate(t, &task, object)
-	report, err = e.Execute(ctx, task)
+	report, err = executeViaHTTP(t, ctx, task, e)
 	if err != nil {
 		t.Fatal(report, err)
 	}

@@ -1,0 +1,84 @@
+package tasks_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/ikaevus/routegate/agent/internal/client"
+	"github.com/ikaevus/routegate/agent/internal/tasks"
+)
+
+// Opt-in only: uses a disposable CI VM, a temporary systemd unit and loopback.
+// The HTTP peer is a fixture. Production Manager dispatch remains disabled.
+func TestCredentialRemovalSystemdRealityTraffic(t *testing.T) {
+	tasks.RunCredentialRemovalSystemdRealityFixture(t, executeRemovalViaHTTP)
+}
+
+func executeRemovalViaHTTP(t *testing.T, ctx context.Context, task tasks.ConfigTask, executor tasks.CredentialRemovalExecutor) (tasks.CredentialRemovalReport, error) {
+	t.Helper()
+	const token = "isolated-removal-agent"
+	var zero tasks.CredentialRemovalReport
+	const removalPath = "/api/v1/agent/credential-removals/"
+	deadline := time.Now().Add(30 * time.Second).UTC()
+	task.DeliveryExpiresAt = &deadline
+	resultPath := removalPath + task.ID + "/result"
+	received := make(chan tasks.CredentialRemovalReport, 1)
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == removalPath+"claim":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				Task *tasks.ConfigTask `json:"task"`
+			}{Task: &task})
+		case r.Method == http.MethodPost && r.URL.Path == resultPath:
+			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8192))
+			var report tasks.CredentialRemovalReport
+			decoder := json.NewDecoder(bytes.NewReader(body))
+			decoder.DisallowUnknownFields()
+			if err != nil || decoder.Decode(&report) != nil || decoder.Decode(new(any)) != io.EOF ||
+				report.State != "succeeded" || bytes.Contains(body, []byte(task.CredentialRemoval.VLESSUUID)) {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			select {
+			case received <- report:
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				w.WriteHeader(http.StatusConflict)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer peer.Close()
+
+	agent := client.New(peer.URL)
+	report, err := agent.ProcessHeldRemoval(ctx, token, executor)
+	if err != nil {
+		return zero, err
+	}
+	if report == nil {
+		return zero, errors.New("Agent did not receive the isolated removal task")
+	}
+	select {
+	case got := <-received:
+		if got != *report {
+			return zero, errors.New("Agent result changed during HTTP delivery")
+		}
+	default:
+		return zero, errors.New("isolated HTTP peer did not receive the result")
+	}
+	t.Log("Agent fetched scoped removal via authenticated HTTP and returned exact credential-free evidence")
+	return *report, nil
+}
