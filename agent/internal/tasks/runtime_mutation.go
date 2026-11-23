@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 )
@@ -90,6 +91,10 @@ func BeginRuntimeMutation(dir, taskID, kind string) (*RuntimeMutation, error) {
 			_ = lease.Close()
 			return nil, ErrRuntimeMutationBlocked
 		}
+	}
+	if !runtimeRecoveryStateAbsent(dir) {
+		_ = lease.Close()
+		return nil, ErrRuntimeMutationBlocked
 	}
 	lease.marker, _ = json.Marshal(struct {
 		SchemaVersion int    `json:"schemaVersion"`
@@ -203,4 +208,22 @@ func lockRuntimeMutation(dir string) (*os.File, error) {
 		return nil, err
 	}
 	return file, nil
+}
+
+// Called only while holding the shared runtime lock. Retained legacy recovery
+// and offline enrollment/journal artifacts are not permission for a mutation.
+// Inspect names, not contents: malformed files, directories and symlinks block
+// just like valid records. Ordinary removal receipts remain independently checked.
+func runtimeRecoveryStateAbsent(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "recovery-") || strings.HasPrefix(name, "enrollment-") || strings.HasPrefix(name, "event-") {
+			return false
+		}
+	}
+	return true
 }

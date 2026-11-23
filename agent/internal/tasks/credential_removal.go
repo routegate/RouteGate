@@ -120,7 +120,7 @@ func (e CredentialRemovalExecutor) execute(ctx context.Context, task ConfigTask,
 	}
 	// Check before receipt replay too: an interrupted legacy operation can
 	// invalidate a previously successful removal's evidence.
-	if !runtimeMarkerAbsent(filepath.Join(e.receiptDir, "mutation-inflight.json")) || !runtimeMarkerAbsent(filepath.Join(e.receiptDir, runtimeResultFile)) {
+	if !runtimeMarkerAbsent(filepath.Join(e.receiptDir, "mutation-inflight.json")) || !runtimeMarkerAbsent(filepath.Join(e.receiptDir, runtimeResultFile)) || !runtimeRecoveryStateAbsent(e.receiptDir) {
 		report.State = "recovery_required"
 		return deny("runtime_recovery_required")
 	}
