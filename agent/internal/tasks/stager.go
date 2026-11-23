@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -17,6 +18,7 @@ const (
 )
 
 type ConfigTask struct {
+	DeliveryExpiresAt *time.Time                `json:"deliveryExpiresAt,omitempty"`
 	ID                string                    `json:"id"`
 	Kind              string                    `json:"kind,omitempty"`
 	ServerID          string                    `json:"serverId"`
