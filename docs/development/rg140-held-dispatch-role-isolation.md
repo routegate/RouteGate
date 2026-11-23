@@ -34,6 +34,34 @@ cutover, independently authenticated operator signing/coordinator isolation,
 and the existing scoped claim/result and terminal transitions. Do not provide
 owner credentials or a signing key to ordinary Manager to bypass these gates.
 
+## Scoped Agent exchange integration
+
+The #696–697 Manager exchange is adapted to the canonical issuance fixture.
+`ClaimHeldRemoval` rechecks the Agent bearer after acquiring the existing
+server-first lock, binds the original credential generation, requires fresh
+negotiated capabilities and revalidates the original human session/permissions
+through the same SQL gate as issuance. An immutable claim pins its first
+expiry; retries cannot extend it. `AcceptHeldRemovalResult` requires a prior
+claim and exact, bounded success evidence. Identical repeats are accepted;
+conflicts are rejected. Late evidence remains recordable after delivery expires.
+Neither call activates the config, changes account status or releases the node.
+
+The adapted HTTP handlers mount only when explicitly supplied an isolated
+transport. Production router and Agent Runner do not enable them yet. The
+ordinary task DTO remains unchanged; the shared Manager removal request type
+has one definition, exposed only in the authenticated Agent envelope. SQL for
+claims/results stays in the existing opt-in `testdata/held_dispatch` fixture,
+not production migrations. The independent Agent-side contract remains intact.
+
+The PostgreSQL/HTTP fixture uses real Agent bearer format with **no human auth
+context** on requests. It checks capability gating, another Agent, original
+operator permission revocation, bounded request size, no-claim refusal,
+non-extending redelivery, expired delivery, late/idempotent results, conflicting
+evidence and reservation/history retention. Ordinary runtime login cannot read
+the protected exchange. This is transport integration, not real VPN execution
+or release acceptance; Agent deadline enforcement and terminal transitions
+remain required before production mounting.
+
 ## Concrete current boundary
 
 The standard `install.sh` PostgreSQL setup creates a login `routegate`,

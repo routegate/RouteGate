@@ -91,8 +91,12 @@ func TestCredentialRemovalIndependentSignedIntentIsReadOnly(t *testing.T) {
 }
 
 func signedRemovalFixture(t *testing.T) (dispatchGateFixture, revocations.RemovalDispatchAuthority, revocations.RemovalDispatchDecision, ed25519.PrivateKey) {
+	return signedRemovalFixtureWithToken(t, "")
+}
+
+func signedRemovalFixtureWithToken(t *testing.T, tokenHash string) (dispatchGateFixture, revocations.RemovalDispatchAuthority, revocations.RemovalDispatchDecision, ed25519.PrivateKey) {
 	t.Helper()
-	f := newDispatchGateFixture(t)
+	f := newDispatchGateFixtureWithToken(t, tokenHash)
 	pinned, err := f.svc.InspectPreparedRemovalIntegrity(f.ctx, f.operation)
 	if err != nil {
 		t.Fatal(err)

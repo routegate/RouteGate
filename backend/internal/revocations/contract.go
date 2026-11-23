@@ -10,6 +10,8 @@ import (
 	"io"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/ikaevus/routegate/backend/internal/agents"
 )
 
 const TaskKindCredentialRemoval = "vless_credential_removal_v1"
@@ -20,16 +22,7 @@ var ErrCredentialRemoval = errors.New("credential removal safety check failed")
 // CredentialRemovalRequest is delivered only by a separately authorized,
 // reserved Manager operation. VLESSUUID is secret-bearing request material;
 // neither the request nor the task may be logged or echoed in a response.
-type CredentialRemovalRequest struct {
-	SchemaVersion                    int    `json:"schemaVersion"`
-	OperationID                      string `json:"operationId"`
-	AccountID                        string `json:"accountId"`
-	BaselineVersionID                string `json:"baselineVersionId"`
-	BaselineRuntimeHash              string `json:"baselineRuntimeHash"`
-	CandidateRuntimeHash             string `json:"candidateRuntimeHash"`
-	VLESSUUID                        string `json:"vlessUuid"`
-	SharedProcessRestartAcknowledged bool   `json:"sharedProcessRestartAcknowledged"`
-}
+type CredentialRemovalRequest = agents.AgentCredentialRemovalRequest
 
 // RuntimeGeneration is observed from the locally configured service, never
 // supplied by the Manager. InvocationID distinguishes PID reuse and restarts.

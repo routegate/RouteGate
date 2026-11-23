@@ -21,9 +21,15 @@ type dispatchGateFixture struct {
  done func()
 }
 func newDispatchGateFixture(t *testing.T) dispatchGateFixture {
+ return newDispatchGateFixtureWithToken(t, "")
+}
+func newDispatchGateFixtureWithToken(t *testing.T, tokenHash string) dispatchGateFixture {
  t.Helper()
  ctx,pool,in,target,done:=removalPreparationFixture(t)
  t.Cleanup(done)
+ if tokenHash!="" {
+  if _,err:=pool.Exec(ctx,`UPDATE agents SET token_hash=$2 WHERE server_id=$1::uuid`,in.ServerID,tokenHash);err!=nil {t.Fatal(err)}
+ }
  svc:=revocations.NewService(pool)
  prep,err:=svc.Prepare(ctx,in)
  if err!=nil{t.Fatal(err)}

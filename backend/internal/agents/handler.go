@@ -37,6 +37,7 @@ type agentOperationTaskRepository interface {
 }
 
 type Handler struct {
+	removal            RemovalTransport
 	logger             *slog.Logger
 	listRepository     agentListRepository
 	repository         agentAPIRepository
@@ -251,7 +252,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	h.logger.Debug("agent heartbeat accepted", "agent_id", agent.ID, "server_id", agent.ServerID)
 	httpx.WriteJSON(w, http.StatusOK, AgentHeartbeatResponse{
 		RuntimeMutationFencingAccepted: agent.Capabilities.RuntimeMutationFencingEnabled(),
-		OK: true, AgentID: agent.ID, ServerID: agent.ServerID, ServerStatus: activeServerStatus,
+		OK:                             true, AgentID: agent.ID, ServerID: agent.ServerID, ServerStatus: activeServerStatus,
 	})
 }
 
