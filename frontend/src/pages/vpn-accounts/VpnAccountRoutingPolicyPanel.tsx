@@ -11,6 +11,7 @@ import {
   clearVpnAccountNodeGroup,
   clearVpnAccountRoutingProfile,
   getVpnAccountRoutingPolicy,
+  getV2rayNRoutingRules,
   previewVpnAccountAutomaticSelection,
   updateVpnAccountAutomaticSelection,
   type RoutingProfileSource,
@@ -193,6 +194,17 @@ export function VpnAccountRoutingPolicyPanel({ accountId, active = true }: { acc
     mutationFn: () => applyVpnAccountAutomaticSelection(accountId),
     onSuccess: refreshPolicy,
   });
+  const exportRouting = useMutation({
+    mutationFn: () => getV2rayNRoutingRules(accountId),
+    onSuccess: (rules) => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(rules, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'routegate-v2rayn-routing.json';
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
+  });
   const nodeMutation = useMutation({
     mutationFn: async () => {
       if (transferQuery.data?.requiresTransfer && accountQuery.data?.serverId) {
@@ -325,6 +337,15 @@ export function VpnAccountRoutingPolicyPanel({ accountId, active = true }: { acc
                 <small>{t('routingPolicy.source', { source: sourceLabel(policy.routingProfileSource) })}</small>
               </div>
 
+              {policy.effectiveRoutingProfile && (
+                <div className="form-message">
+                  <p>{t('routingPolicy.v2raynSetup')}</p>
+                  <button className="small-button" type="button" disabled={editingDisabled || exportRouting.isPending} onClick={() => exportRouting.mutate()}>
+                    {t('routingPolicy.v2raynDownload')}
+                  </button>
+                  {exportRouting.isError && <p role="alert">{t('routingPolicy.v2raynExportError')}</p>}
+                </div>
+              )}
               {!policy.clientRoutingSupported && <div className="form-message form-message-warning">{t('routingPolicy.clientRoutingUnsupported')}</div>}
               <div className="form-actions">
                 <button className="small-button" type="submit" disabled={editingDisabled}>{routingProfileId ? t('routingPolicy.saveProfile') : t('routingPolicy.clearProfile')}</button>

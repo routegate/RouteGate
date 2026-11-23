@@ -311,6 +311,44 @@ func (h *Handler) GetRoutingPolicy(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, policy)
 }
 
+// ExportV2RayNRouting delivers only routing rules to an authenticated operator.
+func (h *Handler) ExportV2RayNRouting(w http.ResponseWriter, r *http.Request) {
+	repository, ok := h.accounts.(interface {
+		GetRoutingPolicy(context.Context, string) (VPNAccountRoutingPolicy, error)
+		listRoutingProfileRules(context.Context, string) ([]RoutingProfileRule, error)
+	})
+	if !ok {
+		writeRoutingPolicyUnavailable(w)
+		return
+	}
+	ctx := r.Context()
+	policy, err := repository.GetRoutingPolicy(ctx, r.PathValue("id"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeAccountNotFound(w)
+		return
+	}
+	if err != nil {
+		h.databaseError(w, "resolve v2rayN routing policy", err)
+		return
+	}
+	if policy.EffectiveRoutingProfile == nil {
+		httpx.WriteJSON(w, http.StatusNotFound, httpx.Error("routing_profile_not_found", "No routing profile is assigned."))
+		return
+	}
+	rules, err := repository.listRoutingProfileRules(ctx, policy.EffectiveRoutingProfile.ID)
+	if err != nil {
+		h.databaseError(w, "load v2rayN routing rules", err)
+		return
+	}
+	export, ok := renderV2RayNCustomRoutingRules(&RoutingProfile{Rules: rules})
+	if !ok {
+		httpx.WriteJSON(w, http.StatusUnprocessableEntity, httpx.Error("routing_rules_unavailable", "The profile has no rules available for v2rayN."))
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, export)
+}
+
 func (h *Handler) AssignRoutingProfile(w http.ResponseWriter, r *http.Request) {
 	var request AssignAccountRoutingProfileRequest
 	if !decodeRoutingPolicyJSON(w, r, &request) {

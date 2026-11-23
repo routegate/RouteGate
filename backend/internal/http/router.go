@@ -172,6 +172,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) stdht
 	mux.Handle("GET /api/v1/vpn-accounts/{id}/transfer", authn(auth.RequirePermission("vpn_users:read")(stdhttp.HandlerFunc(transfersHandler.Latest))))
 	mux.Handle("POST /api/v1/vpn-accounts/{id}/transfer", authn(auth.RequirePermission("vpn_users:update")(auth.RequirePermission("configs:apply")(auth.RequirePermission("configs:render")(auth.RequirePermission("configs:validate")(stdhttp.HandlerFunc(transfersHandler.Start)))))))
 	mux.Handle("POST /api/v1/vpn-accounts/{id}/transfer/{transferId}", authn(auth.RequirePermission("vpn_users:update")(auth.RequirePermission("configs:apply")(auth.RequirePermission("configs:render")(auth.RequirePermission("configs:validate")(stdhttp.HandlerFunc(transfersHandler.Act)))))))
+	mux.Handle("GET /api/v1/vpn-accounts/{id}/routing-policy/v2rayn", authn(auth.RequirePermission("vpn_users:read")(auth.RequirePermission("routing_profiles:read")(stdhttp.HandlerFunc(vpnAccountsHandler.ExportV2RayNRouting)))))
 	mux.Handle("GET /api/v1/vpn-accounts/{id}/routing-policy", authn(auth.RequirePermission("vpn_users:read")(stdhttp.HandlerFunc(vpnAccountsHandler.GetRoutingPolicy))))
 	mux.Handle("PUT /api/v1/vpn-accounts/{id}/routing-profile", authn(auth.RequirePermission("vpn_users:update")(stdhttp.HandlerFunc(vpnAccountsHandler.AssignRoutingProfile))))
 	mux.Handle("DELETE /api/v1/vpn-accounts/{id}/routing-profile", authn(auth.RequirePermission("vpn_users:update")(stdhttp.HandlerFunc(vpnAccountsHandler.DeleteRoutingProfileAssignment))))

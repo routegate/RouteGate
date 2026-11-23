@@ -1,6 +1,7 @@
 // Controlled UI fixtures: verifies the canonical assignment is not changed by
 // Prepare, and source cleanup always requires an explicit client check.
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { before, after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -19,6 +20,7 @@ for (const width of [390, 1440]) test(`guided transfer retains source and gates 
   const stamp = new Date().toISOString();
   const account = { id: 'account', displayName: 'Canary', status: 'active', serverId: 'source', createdAt: stamp, updatedAt: stamp };
   const nodes = ['source', 'target'].map(id => ({ id, name: id === 'source' ? 'Source node' : 'Target node', deploymentRole: id === 'source' ? 'hybrid' : 'vpn', status: 'active' }));
+  const routingRules = [{ outboundTag: 'direct', domain: ['domain:ozon.ru'], enabled: true }];
   let transfer = null;
   let failedCompletion = false;
   page.on('pageerror', e => errors.push(e.message));
@@ -33,7 +35,8 @@ for (const width of [390, 1440]) test(`guided transfer retains source and gates 
     if (path === '/api/v1/servers') return json({ items: nodes });
     if (path === '/api/v1/vpn-accounts') return json({ items: [account], total: 1, page: 1, pageSize: 50, totalPages: 1 });
     if (path === '/api/v1/vpn-accounts/account') return json(account);
-    if (path.endsWith('/routing-policy')) return json({ routingProfileSource: 'none', currentServerInGroup: false, automaticSelection: false, automaticSelectionPolicy: { enabled: false, allowDegraded: false, cooldownSeconds: 300 }, clientRoutingSupported: true });
+    if (path.endsWith('/routing-policy/v2rayn')) return json(routingRules);
+    if (path.endsWith('/routing-policy')) return json({ effectiveRoutingProfile: { id: 'runet', name: 'Runet' }, routingProfileSource: 'account', currentServerInGroup: false, automaticSelection: false, automaticSelectionPolicy: { enabled: false, allowDegraded: false, cooldownSeconds: 300 }, clientRoutingSupported: true });
     if (path === '/api/v1/routing-profiles' || path === '/api/v1/node-groups' || path.endsWith('/devices')) return json({ items: [] });
     if (path.endsWith('/notes')) return json({ notes: '', updatedAt: stamp });
     if (path.endsWith('/subscription-token')) return json({ hasActiveToken: true });
@@ -66,6 +69,13 @@ for (const width of [390, 1440]) test(`guided transfer retains source and gates 
   });
   try {
     await page.goto(`${origin}/vpn-accounts/account/routing`);
+    if (width === 390) {
+      const downloadEvent = page.waitForEvent('download');
+      await page.getByRole('button', { name: 'Download v2rayN rules' }).click();
+      const download = await downloadEvent;
+      assert.equal(download.suggestedFilename(), 'routegate-v2rayn-routing.json');
+      assert.deepEqual(JSON.parse(await readFile(await download.path(), 'utf8')), routingRules);
+    }
     const placement = page.locator('.vpn-account-routing-workspace > .workspace-section');
     await placement.getByRole('combobox').selectOption('target');
     await placement.getByRole('button', { name: 'Prepare transfer', exact: true }).click();
