@@ -12,9 +12,10 @@ func TestRuntimeMutationFencingConfig(t *testing.T) {
 		text := "manager_url: http://127.0.0.1:8080\n"
 		if enabled {
 			text += "experimental_runtime_mutation_fencing: true\n"
+			text += "experimental_credential_removal: true\n"
 		}
 		cfg, err := Load(writeTestConfig(t, text))
-		if err != nil || cfg.ExperimentalRuntimeMutationFencing != enabled {
+		if err != nil || cfg.ExperimentalRuntimeMutationFencing != enabled || cfg.ExperimentalCredentialRemoval != enabled {
 			t.Fatal(cfg, err)
 		}
 		path := filepath.Join(t.TempDir(), "agent.yaml")
@@ -22,14 +23,15 @@ func TestRuntimeMutationFencingConfig(t *testing.T) {
 			t.Fatal(err)
 		}
 		again, err := Load(path)
-		if err != nil || again.ExperimentalRuntimeMutationFencing != enabled {
+		if err != nil || again.ExperimentalRuntimeMutationFencing != enabled || again.ExperimentalCredentialRemoval != enabled {
 			t.Fatal("lost registration setting", err)
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !enabled && strings.Contains(string(data), "experimental_runtime_mutation_fencing") {
+		if !enabled && (strings.Contains(string(data), "experimental_runtime_mutation_fencing") ||
+			strings.Contains(string(data), "experimental_credential_removal")) {
 			t.Fatal("default configs changed")
 		}
 	}

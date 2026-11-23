@@ -17,23 +17,24 @@ import (
 )
 
 type Runner struct {
-	cfg                config.Config
-	configPath         string
-	client             *client.Client
-	logger             *slog.Logger
-	trafficCollector   traffic.Collector
-	trafficOutbox      *traffic.Outbox
-	lastTrafficReport  time.Time
-	presenceCollector  presence.Collector
-	lastPresenceReport time.Time
-	vpnCoreAdapter     tasks.VPNCoreAdapter
-	wireGuardAdapter   tasks.VPNCoreAdapter
-	hysteria2Adapter   tasks.VPNCoreAdapter
-	shadowsocksAdapter tasks.VPNCoreAdapter
-	mtprotoAdapter     tasks.VPNCoreAdapter
-	runtimeCleaner     runtimecleanup.Cleaner
-	runtimeMutationDir string
+	cfg                         config.Config
+	configPath                  string
+	client                      *client.Client
+	logger                      *slog.Logger
+	trafficCollector            traffic.Collector
+	trafficOutbox               *traffic.Outbox
+	lastTrafficReport           time.Time
+	presenceCollector           presence.Collector
+	lastPresenceReport          time.Time
+	vpnCoreAdapter              tasks.VPNCoreAdapter
+	wireGuardAdapter            tasks.VPNCoreAdapter
+	hysteria2Adapter            tasks.VPNCoreAdapter
+	shadowsocksAdapter          tasks.VPNCoreAdapter
+	mtprotoAdapter              tasks.VPNCoreAdapter
+	runtimeCleaner              runtimecleanup.Cleaner
+	runtimeMutationDir          string
 	runtimeMutationManagerReady bool
+	removalManagerReady         bool
 }
 
 func NewRunner(cfg config.Config, configPath string, logger *slog.Logger) *Runner {
@@ -72,7 +73,7 @@ func NewRunner(cfg config.Config, configPath string, logger *slog.Logger) *Runne
 			cfg.MTGPath,
 			cfg.MTProtoServiceName,
 		),
-		runtimeCleaner: runtimecleanup.New(cfg),
+		runtimeCleaner:     runtimecleanup.New(cfg),
 		runtimeMutationDir: tasks.DefaultRuntimeMutationDir,
 	}
 	if cfg.TrafficCollectionEnabled {
@@ -194,11 +195,13 @@ func (r *Runner) sendHeartbeat(ctx context.Context) error {
 	info.Capabilities["trafficAccounting"] = map[string]any{"enabled": r.cfg.TrafficCollectionEnabled, "source": "sing-box-v2ray-api"}
 	r.prepareRuntimeMutationHeartbeat(&info)
 	r.runtimeMutationManagerReady = false
+	r.removalManagerReady = false
 	res, err := r.client.Heartbeat(ctx, r.cfg.AgentToken, info)
 	if err != nil {
 		return err
 	}
 	r.runtimeMutationManagerReady = res.OK && res.AgentID == r.cfg.AgentID && res.ServerID == r.cfg.ServerID && res.RuntimeMutationFencingAccepted
+	r.removalManagerReady = r.runtimeMutationManagerReady && res.CredentialRemovalAccepted
 	r.logger.Info("heartbeat accepted", "agent_id", res.AgentID, "server_id", res.ServerID, "server_status", res.ServerStatus)
 	return nil
 }
@@ -254,6 +257,15 @@ func (r *Runner) processNextTask(ctx context.Context) error {
 		return err
 	}
 	if task == nil {
+		if r.removalManagerReady && r.credentialRemovalEnabled() {
+			dir := r.runtimeMutationDir
+			if dir == "" {
+				dir = tasks.DefaultRuntimeMutationDir
+			}
+			executor := tasks.NewCredentialRemovalExecutor(r.cfg.ActiveConfigPath, dir, r.cfg.ServerID, r.cfg.AgentID, r.vpnCoreAdapter, r.cfg.ServiceControlEnabled)
+			_, err := r.client.ProcessHeldRemoval(ctx, r.cfg.AgentToken, executor)
+			return err
+		}
 		r.logger.Debug("no agent task available")
 		return nil
 	}

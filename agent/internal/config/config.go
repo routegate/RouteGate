@@ -44,42 +44,43 @@ const DefaultMTProtoServiceName = "routegate-mtproto"
 type Config struct {
 	// Disposable-test-only gate; never enabled by the installer or production defaults.
 	ExperimentalRuntimeMutationFencing bool
-	ManagerURL                       string
-	RegistrationToken                string
-	AgentID                          string
-	ServerID                         string
-	AgentToken                       string
-	HeartbeatIntervalSeconds         int
-	ConfigStagingDir                 string
-	ActiveConfigPath                 string
-	ConfigBackupDir                  string
-	SingBoxPath                      string
-	SingBoxServiceName               string
-	ServiceControlEnabled            bool
-	TrafficCollectionEnabled         bool
-	TrafficCollectionIntervalSeconds int
-	TrafficUsageFilePath             string
-	ClientPresenceEnabled            bool
-	ClientPresenceIntervalSeconds    int
-	ClientPresenceFilePath           string
-	WireGuardStagingDir              string
-	WireGuardActiveConfigPath        string
-	WireGuardBackupDir               string
-	WGQuickPath                      string
-	WGPath                           string
-	WireGuardServiceName             string
-	WireGuardInterface               string
-	Hysteria2StagingDir              string
-	Hysteria2ActiveConfigPath        string
-	Hysteria2BackupDir               string
-	Hysteria2Path                    string
-	Hysteria2ServiceName             string
-	SSPath                           string
-	MTProtoStagingDir                string
-	MTProtoActiveConfigPath          string
-	MTProtoBackupDir                 string
-	MTGPath                          string
-	MTProtoServiceName               string
+	ExperimentalCredentialRemoval      bool
+	ManagerURL                         string
+	RegistrationToken                  string
+	AgentID                            string
+	ServerID                           string
+	AgentToken                         string
+	HeartbeatIntervalSeconds           int
+	ConfigStagingDir                   string
+	ActiveConfigPath                   string
+	ConfigBackupDir                    string
+	SingBoxPath                        string
+	SingBoxServiceName                 string
+	ServiceControlEnabled              bool
+	TrafficCollectionEnabled           bool
+	TrafficCollectionIntervalSeconds   int
+	TrafficUsageFilePath               string
+	ClientPresenceEnabled              bool
+	ClientPresenceIntervalSeconds      int
+	ClientPresenceFilePath             string
+	WireGuardStagingDir                string
+	WireGuardActiveConfigPath          string
+	WireGuardBackupDir                 string
+	WGQuickPath                        string
+	WGPath                             string
+	WireGuardServiceName               string
+	WireGuardInterface                 string
+	Hysteria2StagingDir                string
+	Hysteria2ActiveConfigPath          string
+	Hysteria2BackupDir                 string
+	Hysteria2Path                      string
+	Hysteria2ServiceName               string
+	SSPath                             string
+	MTProtoStagingDir                  string
+	MTProtoActiveConfigPath            string
+	MTProtoBackupDir                   string
+	MTGPath                            string
+	MTProtoServiceName                 string
 }
 
 func Load(path string) (Config, error) {
@@ -102,6 +103,12 @@ func Load(path string) (Config, error) {
 		key = strings.TrimSpace(key)
 		value = trimYAMLScalar(value)
 		switch key {
+		case "experimental_credential_removal":
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return Config{}, errors.New("invalid experimental_credential_removal")
+			}
+			cfg.ExperimentalCredentialRemoval = parsed
 		case "experimental_runtime_mutation_fencing":
 			parsed, err := strconv.ParseBool(value)
 			if err != nil {
@@ -167,14 +174,22 @@ func Load(path string) (Config, error) {
 		case "traffic_usage_file_path":
 			cfg.TrafficUsageFilePath = value
 		case "client_presence_enabled":
-			if value == "" { continue }
+			if value == "" {
+				continue
+			}
 			parsed, err := strconv.ParseBool(value)
-			if err != nil { return Config{}, fmt.Errorf("parse client_presence_enabled: %w", err) }
+			if err != nil {
+				return Config{}, fmt.Errorf("parse client_presence_enabled: %w", err)
+			}
 			cfg.ClientPresenceEnabled = parsed
 		case "client_presence_interval_seconds":
-			if value == "" { continue }
+			if value == "" {
+				continue
+			}
 			parsed, err := strconv.Atoi(value)
-			if err != nil { return Config{}, fmt.Errorf("parse client_presence_interval_seconds: %w", err) }
+			if err != nil {
+				return Config{}, fmt.Errorf("parse client_presence_interval_seconds: %w", err)
+			}
 			cfg.ClientPresenceIntervalSeconds = parsed
 		case "client_presence_file_path":
 			cfg.ClientPresenceFilePath = value
@@ -273,26 +288,66 @@ func Load(path string) (Config, error) {
 	if cfg.TrafficUsageFilePath == "" {
 		cfg.TrafficUsageFilePath = DefaultTrafficUsageFilePath
 	}
-	if cfg.ClientPresenceIntervalSeconds <= 0 { cfg.ClientPresenceIntervalSeconds = DefaultClientPresenceIntervalSeconds }
-	if cfg.ClientPresenceFilePath == "" { cfg.ClientPresenceFilePath = DefaultClientPresenceFilePath }
-	if cfg.WireGuardStagingDir == "" { cfg.WireGuardStagingDir = DefaultWireGuardStagingDir }
-	if cfg.WireGuardActiveConfigPath == "" { cfg.WireGuardActiveConfigPath = DefaultWireGuardActiveConfigPath }
-	if cfg.WireGuardBackupDir == "" { cfg.WireGuardBackupDir = DefaultWireGuardBackupDir }
-	if cfg.WGQuickPath == "" { cfg.WGQuickPath = DefaultWGQuickPath }
-	if cfg.WGPath == "" { cfg.WGPath = DefaultWGPath }
-	if cfg.WireGuardServiceName == "" { cfg.WireGuardServiceName = DefaultWireGuardServiceName }
-	if cfg.WireGuardInterface == "" { cfg.WireGuardInterface = DefaultWireGuardInterface }
-	if cfg.Hysteria2StagingDir == "" { cfg.Hysteria2StagingDir = DefaultHysteria2StagingDir }
-	if cfg.Hysteria2ActiveConfigPath == "" { cfg.Hysteria2ActiveConfigPath = DefaultHysteria2ActiveConfigPath }
-	if cfg.Hysteria2BackupDir == "" { cfg.Hysteria2BackupDir = DefaultHysteria2BackupDir }
-	if cfg.Hysteria2Path == "" { cfg.Hysteria2Path = DefaultHysteria2Path }
-	if cfg.Hysteria2ServiceName == "" { cfg.Hysteria2ServiceName = DefaultHysteria2ServiceName }
-	if cfg.SSPath == "" { cfg.SSPath = DefaultSSPath }
-	if cfg.MTProtoStagingDir == "" { cfg.MTProtoStagingDir = DefaultMTProtoStagingDir }
-	if cfg.MTProtoActiveConfigPath == "" { cfg.MTProtoActiveConfigPath = DefaultMTProtoActiveConfigPath }
-	if cfg.MTProtoBackupDir == "" { cfg.MTProtoBackupDir = DefaultMTProtoBackupDir }
-	if cfg.MTGPath == "" { cfg.MTGPath = DefaultMTGPath }
-	if cfg.MTProtoServiceName == "" { cfg.MTProtoServiceName = DefaultMTProtoServiceName }
+	if cfg.ClientPresenceIntervalSeconds <= 0 {
+		cfg.ClientPresenceIntervalSeconds = DefaultClientPresenceIntervalSeconds
+	}
+	if cfg.ClientPresenceFilePath == "" {
+		cfg.ClientPresenceFilePath = DefaultClientPresenceFilePath
+	}
+	if cfg.WireGuardStagingDir == "" {
+		cfg.WireGuardStagingDir = DefaultWireGuardStagingDir
+	}
+	if cfg.WireGuardActiveConfigPath == "" {
+		cfg.WireGuardActiveConfigPath = DefaultWireGuardActiveConfigPath
+	}
+	if cfg.WireGuardBackupDir == "" {
+		cfg.WireGuardBackupDir = DefaultWireGuardBackupDir
+	}
+	if cfg.WGQuickPath == "" {
+		cfg.WGQuickPath = DefaultWGQuickPath
+	}
+	if cfg.WGPath == "" {
+		cfg.WGPath = DefaultWGPath
+	}
+	if cfg.WireGuardServiceName == "" {
+		cfg.WireGuardServiceName = DefaultWireGuardServiceName
+	}
+	if cfg.WireGuardInterface == "" {
+		cfg.WireGuardInterface = DefaultWireGuardInterface
+	}
+	if cfg.Hysteria2StagingDir == "" {
+		cfg.Hysteria2StagingDir = DefaultHysteria2StagingDir
+	}
+	if cfg.Hysteria2ActiveConfigPath == "" {
+		cfg.Hysteria2ActiveConfigPath = DefaultHysteria2ActiveConfigPath
+	}
+	if cfg.Hysteria2BackupDir == "" {
+		cfg.Hysteria2BackupDir = DefaultHysteria2BackupDir
+	}
+	if cfg.Hysteria2Path == "" {
+		cfg.Hysteria2Path = DefaultHysteria2Path
+	}
+	if cfg.Hysteria2ServiceName == "" {
+		cfg.Hysteria2ServiceName = DefaultHysteria2ServiceName
+	}
+	if cfg.SSPath == "" {
+		cfg.SSPath = DefaultSSPath
+	}
+	if cfg.MTProtoStagingDir == "" {
+		cfg.MTProtoStagingDir = DefaultMTProtoStagingDir
+	}
+	if cfg.MTProtoActiveConfigPath == "" {
+		cfg.MTProtoActiveConfigPath = DefaultMTProtoActiveConfigPath
+	}
+	if cfg.MTProtoBackupDir == "" {
+		cfg.MTProtoBackupDir = DefaultMTProtoBackupDir
+	}
+	if cfg.MTGPath == "" {
+		cfg.MTGPath = DefaultMTGPath
+	}
+	if cfg.MTProtoServiceName == "" {
+		cfg.MTProtoServiceName = DefaultMTProtoServiceName
+	}
 	if cfg.ManagerURL == "" {
 		return Config{}, errors.New("manager_url is required")
 	}
@@ -345,7 +400,9 @@ func (c Config) Save(path string) error {
 		trafficUsageFilePath = DefaultTrafficUsageFilePath
 	}
 	presenceInterval := c.ClientPresenceIntervalSeconds
-	if presenceInterval <= 0 { presenceInterval = DefaultClientPresenceIntervalSeconds }
+	if presenceInterval <= 0 {
+		presenceInterval = DefaultClientPresenceIntervalSeconds
+	}
 	presenceFilePath := defaultString(c.ClientPresenceFilePath, DefaultClientPresenceFilePath)
 	wireGuardStagingDir := defaultString(c.WireGuardStagingDir, DefaultWireGuardStagingDir)
 	wireGuardActiveConfigPath := defaultString(c.WireGuardActiveConfigPath, DefaultWireGuardActiveConfigPath)
@@ -368,6 +425,9 @@ func (c Config) Save(path string) error {
 
 	var output strings.Builder
 	// Preserve explicit test opt-in across registration; omit ordinary defaults.
+	if c.ExperimentalCredentialRemoval {
+		fmt.Fprintln(&output, "experimental_credential_removal: true")
+	}
 	if c.ExperimentalRuntimeMutationFencing {
 		fmt.Fprintln(&output, "experimental_runtime_mutation_fencing: true")
 	}

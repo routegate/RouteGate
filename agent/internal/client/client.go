@@ -89,6 +89,7 @@ type heartbeatRequest struct {
 }
 
 type HeartbeatResponse struct {
+	CredentialRemovalAccepted      bool   `json:"credentialRemovalAccepted"`
 	RuntimeMutationFencingAccepted bool   `json:"runtimeMutationFencingAccepted"`
 	OK                             bool   `json:"ok"`
 	AgentID                        string `json:"agentId"`
