@@ -44,7 +44,6 @@ func WithDurableTaskResult(ctx context.Context, save func(string, []byte) error)
 	return context.WithValue(WithStrictTaskAcknowledgement(ctx), durableTaskResultKey{}, save)
 }
 
-
 // WithStrictTaskAcknowledgement requires positive Manager acceptance for
 // safety-gated tasks. 404 after an uncertain attempt is not confirmation.
 func WithStrictTaskAcknowledgement(ctx context.Context) context.Context {
@@ -90,11 +89,11 @@ type heartbeatRequest struct {
 }
 
 type HeartbeatResponse struct {
-	RuntimeMutationFencingAccepted bool `json:"runtimeMutationFencingAccepted"`
-	OK           bool   `json:"ok"`
-	AgentID      string `json:"agentId"`
-	ServerID     string `json:"serverId"`
-	ServerStatus string `json:"serverStatus"`
+	RuntimeMutationFencingAccepted bool   `json:"runtimeMutationFencingAccepted"`
+	OK                             bool   `json:"ok"`
+	AgentID                        string `json:"agentId"`
+	ServerID                       string `json:"serverId"`
+	ServerStatus                   string `json:"serverStatus"`
 }
 
 type nextTaskResponse struct {
@@ -346,6 +345,10 @@ func (c *Client) ReportClientPresence(ctx context.Context, agentToken string, sn
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path, bearer string, body any, out any) error {
+	return c.doJSONExpect(ctx, method, path, bearer, body, out, 0)
+}
+
+func (c *Client) doJSONExpect(ctx context.Context, method, path, bearer string, body any, out any, expectedStatus int) error {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -370,7 +373,7 @@ func (c *Client) doJSON(ctx context.Context, method, path, bearer string, body a
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || (expectedStatus != 0 && resp.StatusCode != expectedStatus) {
 		// Error text is diagnostic only, so keep it bounded. Successful Manager
 		// responses can contain rendered VPN configs that legitimately exceed
 		// this size and must never be truncated before JSON decoding.
