@@ -226,9 +226,12 @@ def exercise(work, manager):
             "-subj", f"/CN={TARGET}", "-addext", f"subjectAltName=DNS:{TARGET}",
             "-keyout", str(work / "reality.key"), "-out", str(work / "reality.crt"))
         tls_log = stack.enter_context(open(work / "reality-target.log", "wb"))
+        # Match the explicit X25519 target used by the passing Go Reality fixture.
+        # OpenSSL defaults may prefer groups unsupported by Reality camouflage.
         tls = subprocess.Popen(["openssl", "s_server", "-accept", "127.0.0.1:443",
                                 "-cert", str(work / "reality.crt"),
-                                "-key", str(work / "reality.key"), "-tls1_3", "-www"],
+                                "-key", str(work / "reality.key"), "-tls1_3",
+                                "-groups", "X25519", "-www"],
                                stdout=tls_log, stderr=tls_log)
         stack.callback(stop, tls)
         wait_listener(443, tls)
