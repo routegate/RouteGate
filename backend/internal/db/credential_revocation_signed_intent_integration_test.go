@@ -96,7 +96,11 @@ func signedRemovalFixture(t *testing.T) (dispatchGateFixture, revocations.Remova
 
 func signedRemovalFixtureWithToken(t *testing.T, tokenHash string) (dispatchGateFixture, revocations.RemovalDispatchAuthority, revocations.RemovalDispatchDecision, ed25519.PrivateKey) {
 	t.Helper()
-	f := newDispatchGateFixtureWithToken(t, tokenHash)
+	return signedRemovalFixtureFromGate(t, newDispatchGateFixtureWithToken(t, tokenHash))
+}
+
+func signedRemovalFixtureFromGate(t *testing.T, f dispatchGateFixture) (dispatchGateFixture, revocations.RemovalDispatchAuthority, revocations.RemovalDispatchDecision, ed25519.PrivateKey) {
+	t.Helper()
 	pinned, err := f.svc.InspectPreparedRemovalIntegrity(f.ctx, f.operation)
 	if err != nil {
 		t.Fatal(err)
