@@ -66,6 +66,19 @@ class VPNContinuationTests(unittest.TestCase):
         with patch.object(api, "call", return_value={"status": "failed"}):
             self.assertEqual(api.wait_job("/test", expected="failed")["status"], "failed")
 
+    def test_command_failure_exposes_only_fixed_phase_and_exit_code(self):
+        private = "private-token-and-key"
+        failure = subprocess.CompletedProcess([], 97, private.encode(), private.encode())
+        with patch.object(e2e.subprocess, "run", return_value=failure):
+            with self.assertRaisesRegex(RuntimeError, "phase=reality_traffic, exit_code=97") as caught:
+                e2e.run("curl", "--fail", private)
+        self.assertNotIn(private, str(caught.exception))
+        timeout = subprocess.TimeoutExpired([private], 30, output=private, stderr=private)
+        with patch.object(e2e.subprocess, "run", side_effect=timeout):
+            with self.assertRaisesRegex(RuntimeError, "phase=local_command, budget=30s") as caught:
+                e2e.run(private)
+        self.assertNotIn(private, str(caught.exception))
+
     def test_traffic_cannot_bypass_the_socks_proxy(self):
         with patch.object(e2e, "run", return_value=e2e.MARKER) as command:
             e2e.traffic(12345)

@@ -148,8 +148,17 @@ class API:
 
 
 def run(*args):
-    result = subprocess.run(args, capture_output=True, timeout=30, check=False)
-    require(result.returncode == 0, "Local command failed (private diagnostics suppressed)")
+    # Fixed labels only: argv, stdout and stderr can contain credentials.
+    phase = {("openssl", "req"): "tls_fixture",
+             ("systemctl", "show"): "runtime_state",
+             ("sing-box", "check"): "client_config_check",
+             ("curl", "--fail"): "reality_traffic"}.get(tuple(args[:2]), "local_command")
+    try:
+        result = subprocess.run(args, capture_output=True, timeout=30, check=False)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Local command timed out (phase={phase}, budget=30s)") from None
+    require(result.returncode == 0,
+            f"Local command failed (phase={phase}, exit_code={result.returncode}; private diagnostics suppressed)")
     return result.stdout
 
 
