@@ -85,11 +85,11 @@ jobs:
             "$test_dir/agent.test" -test.run '^TestCredentialRemovalManagerPreparedRealityTraffic$' -test.timeout=75s -test.v
           # Reuse the same binaries and disposable VM for live authenticated delivery.
           go test -c -o "$test_dir/backend.test" ./internal/db
-          sudo env ROUTEGATE_TEST_DATABASE_URL="$ROUTEGATE_TEST_DATABASE_URL" \
+          (cd internal/db && sudo env ROUTEGATE_TEST_DATABASE_URL="$ROUTEGATE_TEST_DATABASE_URL" \
             ROUTEGATE_TEST_HELD_ROLE_REHEARSAL=1 ROUTEGATE_TEST_REMOVAL_SYSTEMD=1 \
             ROUTEGATE_TEST_REMOVAL_AGENT_BINARY="$test_dir/agent.test" \
             ROUTEGATE_TEST_SING_BOX="$binary" \
-            "$test_dir/backend.test" -test.run '^TestCredentialRemovalManagerAgentReality$' -test.timeout=120s -test.v
+            "$test_dir/backend.test" -test.run '^TestCredentialRemovalManagerAgentReality$' -test.timeout=120s -test.v)
           # Never upload the private fixture: it contains disposable Reality credentials.
 
       - name: Verify immutable RG-140 job ID binding under real PostgreSQL
