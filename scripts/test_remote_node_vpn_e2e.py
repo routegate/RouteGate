@@ -79,6 +79,11 @@ class VPNContinuationTests(unittest.TestCase):
                 e2e.run(private)
         self.assertNotIn(private, str(caught.exception))
 
+    def test_private_log_classification_never_copies_values(self):
+        self.assertEqual(e2e.private_error_flags(b"private-key verification failed: connection refused"),
+                         "verification,refused")
+        self.assertEqual(e2e.private_error_flags(b"private-token-and-address"), "unclassified")
+
     def test_traffic_cannot_bypass_the_socks_proxy(self):
         with patch.object(e2e, "run", return_value=e2e.MARKER) as command:
             e2e.traffic(12345)

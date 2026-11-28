@@ -9,6 +9,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -162,6 +163,40 @@ def run(*args):
     return result.stdout
 
 
+
+def private_error_flags(data):
+    """Return only fixed categories; never copy text from private logs."""
+    text = data.decode("utf-8", errors="replace").lower()
+    patterns = {"verification": "verif", "certificate": "certificate",
+                "handshake": "handshake", "refused": "connection refused",
+                "reset": "connection reset", "timeout": "timeout",
+                "eof": "eof", "permission": "permission denied",
+                "unreachable": "unreachable", "unsupported": "unsupported",
+                "invalid": "invalid", "missing": "not found"}
+    return ",".join(label for label, needle in patterns.items() if needle in text) or "unclassified"
+
+
+def traffic_diagnostics(work, client):
+    try:
+        version = subprocess.run(["sing-box", "version"], capture_output=True, timeout=5, check=False)
+        match = re.search(rb"sing-box version ([0-9]+\.[0-9]+\.[0-9]+)", version.stdout)
+        runtime_version = match.group(1).decode("ascii") if match else "unknown"
+    except (OSError, subprocess.TimeoutExpired):
+        runtime_version = "unknown"
+    flags = {}
+    for name in ("vpn-client", "reality-target"):
+        try:
+            with (work / (name + ".log")).open("rb") as log:
+                log.seek(0, 2)
+                log.seek(max(0, log.tell() - 65536))
+                flags[name] = private_error_flags(log.read(65536))
+        except OSError:
+            flags[name] = "unavailable"
+    alive = "yes" if client.poll() is None else "no"
+    return (f"sing_box={runtime_version}, client_alive={alive}, "
+            f"client_flags={flags['vpn-client']}, target_flags={flags['reality-target']}")
+
+
 def stop(process):
     if process.poll() is None:
         process.terminate()
@@ -226,12 +261,9 @@ def exercise(work, manager):
             "-subj", f"/CN={TARGET}", "-addext", f"subjectAltName=DNS:{TARGET}",
             "-keyout", str(work / "reality.key"), "-out", str(work / "reality.crt"))
         tls_log = stack.enter_context(open(work / "reality-target.log", "wb"))
-        # Match the explicit X25519 target used by the passing Go Reality fixture.
-        # OpenSSL defaults may prefer groups unsupported by Reality camouflage.
         tls = subprocess.Popen(["openssl", "s_server", "-accept", "127.0.0.1:443",
                                 "-cert", str(work / "reality.crt"),
-                                "-key", str(work / "reality.key"), "-tls1_3",
-                                "-groups", "X25519", "-www"],
+                                "-key", str(work / "reality.key"), "-tls1_3", "-www"],
                                stdout=tls_log, stderr=tls_log)
         stack.callback(stop, tls)
         wait_listener(443, tls)
@@ -301,7 +333,10 @@ def exercise(work, manager):
                                   stdout=client_log, stderr=client_log)
         stack.callback(stop, client)
         wait_listener(10808, client)
-        traffic(origin.server_port)
+        try:
+            traffic(origin.server_port)
+        except RuntimeError as error:
+            raise RuntimeError(f"{error} ({traffic_diagnostics(work, client)})") from None
         before_hash, before_state = active_hash(), service_state()
         print("[remote-vpn-e2e] Real SOCKS -> VLESS/Reality -> origin traffic passed.", flush=True)
 
