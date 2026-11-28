@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "marker": {
+    "schemaVersion": 1,
+    "taskId": "44444444-4444-4444-8444-444444444444",
+    "kind": "vpn_core_service"
+  },
+  "unacknowledgedReceipt": {
+    "schemaVersion": 1,
+    "binding": {
+      "managerUrl": "https://isolated.invalid",
+      "agentId": "33333333-3333-4333-8333-333333333333",
+      "serverId": "22222222-2222-4222-8222-222222222222"
+    },
+    "markerHash": "066409d969214d135f5be04971bb941140f9571418bd351ee311ba23ede68346",
+    "taskId": "44444444-4444-4444-8444-444444444444",
+    "envelope": {
+      "status": "succeeded",
+      "resultPayload": {
+        "kind": "vpn_core_service",
+        "operation": "restart"
+      }
+    },
+    "acknowledged": false,
+    "runtimeWitness": {
+      "schemaVersion": 1,
+      "runtimeHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "generation": {
+        "invocationId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "pid": 311,
+        "startedMonotonic": "700"
+      },
+      "previousGeneration": {
+        "invocationId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pid": 310,
+        "startedMonotonic": "600"
+      },
+      "listenerPort": 443
+    }
+  },
+  "acknowledgedReceipt": {
+    "schemaVersion": 1,
+    "binding": {
+      "managerUrl": "https://isolated.invalid",
+      "agentId": "33333333-3333-4333-8333-333333333333",
+      "serverId": "22222222-2222-4222-8222-222222222222"
+    },
+    "markerHash": "066409d969214d135f5be04971bb941140f9571418bd351ee311ba23ede68346",
+    "taskId": "44444444-4444-4444-8444-444444444444",
+    "envelope": {
+      "status": "succeeded",
+      "resultPayload": {
+        "kind": "vpn_core_service",
+        "operation": "restart"
+      }
+    },
+    "acknowledged": true,
+    "runtimeWitness": {
+      "schemaVersion": 1,
+      "runtimeHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "generation": {
+        "invocationId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "pid": 311,
+        "startedMonotonic": "700"
+      },
+      "previousGeneration": {
+        "invocationId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pid": 310,
+        "startedMonotonic": "600"
+      },
+      "listenerPort": 443
+    }
+  },
+  "expected": {
+    "markerSHA256": "066409d969214d135f5be04971bb941140f9571418bd351ee311ba23ede68346",
+    "unacknowledgedReceiptSHA256": "32b56dd9655925685d114c8c3efe53538f417616dfcd49e91c46dad24ce7cfdc",
+    "acknowledgedReceiptSHA256": "511ed905c5b4aef6e0ed0a6832395fd748b081d6f9eb530db09754dc40987a27",
+    "envelopeSHA256": "ec5aba6937443c0e5f94d8fbfb58be5e798822b1172b281ef7c5f23dda024dd4",
+    "witnessSHA256": "d04d782707026dd170faa9d22a51de21594ea67b0beccd9872d1c657d5c21c58"
+  }
+}

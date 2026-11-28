@@ -30,6 +30,8 @@ ROUTEGATE_RESOLVED_VERSION=""
 ROUTEGATE_BUNDLE_NAME=""
 ROUTEGATE_PUBLIC_IPV4=""
 ROUTEGATE_DB_PASSWORD=""
+ROUTEGATE_RUNTIME_DB_PASSWORD=""
+ROUTEGATE_MIGRATOR_ENV="/etc/routegate/migrator.env"
 ROUTEGATE_ADMIN_PASSWORD=""
 ROUTEGATE_MONITORING_TOKEN=""
 ROUTEGATE_SECRETS_FILE="/var/lib/routegate-installer/secrets.env"
@@ -652,6 +654,7 @@ collect_routegate_conflicts() {
   local path
   for path in \
     /usr/local/bin/routegate-manager \
+    /usr/local/bin/routegate-migrate \
     /usr/local/bin/routegate-agent \
 	/usr/local/bin/hysteria \
     /usr/local/bin/mtg \
@@ -883,9 +886,39 @@ initialize_install_state() {
   install -d -m 0700 "$ROUTEGATE_STATE_DIR"
 }
 
+# Publish a complete secret set before any database credentials are applied.
+# Failure before rename leaves the previously published file intact.
+persist_installer_secrets() (
+  local temporary
+  umask 077
+  temporary=$(mktemp "${ROUTEGATE_SECRETS_FILE}.XXXXXX") || return 1
+  trap 'rm -f -- "$temporary"' EXIT
+  {
+    printf 'DB_PASSWORD=%s\n' "$ROUTEGATE_DB_PASSWORD" || return 1
+    printf 'ADMIN_PASSWORD=%s\n' "$ROUTEGATE_ADMIN_PASSWORD" || return 1
+    if [[ -n "$ROUTEGATE_RUNTIME_DB_PASSWORD" ]]; then
+      printf 'RUNTIME_DB_PASSWORD=%s\n' "$ROUTEGATE_RUNTIME_DB_PASSWORD" || return 1
+    fi
+    if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
+      printf 'MONITORING_TOKEN=%s\n' "$ROUTEGATE_MONITORING_TOKEN" || return 1
+    fi
+  } >"$temporary" || return 1
+  sync -f "$temporary" || return 1
+  mv -f -- "$temporary" "$ROUTEGATE_SECRETS_FILE" || return 1
+  sync -f "$(dirname "$ROUTEGATE_SECRETS_FILE")" || return 1
+)
+
 load_or_create_secrets() {
+  # Never replace preserved credentials when resuming a partial installation.
+  # A missing journal cannot establish which credentials were already applied.
+  if [[ "$ROUTEGATE_RESUME_INSTALL" == "1" && ! -r "$ROUTEGATE_SECRETS_FILE" ]]; then
+    die "Cannot resume without preserved installer secrets; restore secrets.env from a trusted backup before retrying."
+  fi
   if [[ -r "$ROUTEGATE_SECRETS_FILE" ]]; then
     ROUTEGATE_DB_PASSWORD=$(sed -n 's/^DB_PASSWORD=//p' "$ROUTEGATE_SECRETS_FILE" | head -n1)
+    ROUTEGATE_RUNTIME_DB_PASSWORD=$(sed -n 's/^RUNTIME_DB_PASSWORD=//p' "$ROUTEGATE_SECRETS_FILE")
+    [[ -z "$ROUTEGATE_RUNTIME_DB_PASSWORD" || "$ROUTEGATE_RUNTIME_DB_PASSWORD" =~ ^[a-f0-9]{64}$ ]] \
+      || die "Preserved runtime database secret is invalid."
     ROUTEGATE_ADMIN_PASSWORD=$(sed -n 's/^ADMIN_PASSWORD=//p' "$ROUTEGATE_SECRETS_FILE" | head -n1)
     ROUTEGATE_MONITORING_TOKEN=$(sed -n 's/^MONITORING_TOKEN=//p' "$ROUTEGATE_SECRETS_FILE" | head -n1)
     [[ "$ROUTEGATE_DB_PASSWORD" =~ ^[a-f0-9]{64}$ ]] \
@@ -895,7 +928,7 @@ load_or_create_secrets() {
     if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
       if [[ -z "$ROUTEGATE_MONITORING_TOKEN" ]]; then
         ROUTEGATE_MONITORING_TOKEN=$(openssl rand -hex 32)
-        printf 'MONITORING_TOKEN=%s\n' "$ROUTEGATE_MONITORING_TOKEN" >>"$ROUTEGATE_SECRETS_FILE"
+        persist_installer_secrets || die "Cannot persist monitoring credentials."
       fi
       [[ "$ROUTEGATE_MONITORING_TOKEN" =~ ^[a-f0-9]{64}$ ]] \
         || die "Preserved monitoring secret is invalid."
@@ -906,19 +939,12 @@ load_or_create_secrets() {
   fi
 
   ROUTEGATE_DB_PASSWORD=$(openssl rand -hex 32)
+  ROUTEGATE_RUNTIME_DB_PASSWORD=$(openssl rand -hex 32)
   ROUTEGATE_ADMIN_PASSWORD=$(openssl rand -base64 30 | tr -d '\n' | tr '/+' '_-')
   if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
     ROUTEGATE_MONITORING_TOKEN=$(openssl rand -hex 32)
   fi
-  install -m 0600 /dev/null "$ROUTEGATE_SECRETS_FILE"
-  cat >"$ROUTEGATE_SECRETS_FILE" <<EOF_SECRETS
-DB_PASSWORD=${ROUTEGATE_DB_PASSWORD}
-ADMIN_PASSWORD=${ROUTEGATE_ADMIN_PASSWORD}
-EOF_SECRETS
-  if [[ "$ROUTEGATE_INSTALL_PROMETHEUS" == "1" ]]; then
-    printf 'MONITORING_TOKEN=%s\n' "$ROUTEGATE_MONITORING_TOKEN" >>"$ROUTEGATE_SECRETS_FILE"
-  fi
-  chmod 0600 "$ROUTEGATE_SECRETS_FILE"
+  persist_installer_secrets || die "Cannot persist installer credentials."
 }
 
 public_ipv4_candidates() {
@@ -1123,6 +1149,7 @@ extract_bundle() {
   local required
   for required in \
     bin/routegate-manager \
+    bin/routegate-migrate \
     bin/routegate-agent \
     manager/migrations \
     frontend/index.html \
@@ -1169,30 +1196,47 @@ extract_bundle() {
   fi
 }
 
+# Load only the core helper from the verified, extracted release. A subshell
+# keeps updater configuration separate from installer state; ownership policy
+# itself has one implementation for installation, update and recovery.
+secure_manager_migration_tree() (
+  local parent=$1
+  local library="$ROUTEGATE_WORK_DIR/extracted/tools/routegate-update-core.sh"
+  [[ -f "$library" && ! -L "$library" ]] || return 1
+  # shellcheck source=scripts/routegate-update-core.sh
+  source "$library"
+  rg_update_secure_manager_migrations "$parent"
+)
+
 install_files() {
   local source_dir="$ROUTEGATE_WORK_DIR/extracted"
   log "Installing RouteGate binaries, migrations, frontend, and service definitions."
 
   systemctl stop routegate-agent.service routegate-manager.service >/dev/null 2>&1 || true
+  # Missing units are normal on a clean host; an active Manager is not.
+  if systemctl is-active --quiet routegate-manager.service; then
+    die "Cannot stop Manager before installing protected migrations."
+  fi
 
   if ! id routegate >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/routegate-manager --create-home --shell /usr/sbin/nologin routegate
   fi
 
   install -d -m 0755 /etc/routegate
-  install -d -m 0755 -o routegate -g routegate /opt/routegate-manager
+  install -d -m 0755 -o root -g root /opt/routegate-manager
   install -d -m 0755 /var/www/routegate
   install -d -m 0700 /var/lib/routegate-agent
 	install -d -m 0700 /var/lib/routegate-agent/configs /var/lib/routegate-agent/backups /var/lib/routegate-agent/wireguard-configs /var/lib/routegate-agent/wireguard-backups /var/lib/routegate-agent/hysteria2-configs /var/lib/routegate-agent/hysteria2-backups /var/lib/routegate-agent/mtproto-configs /var/lib/routegate-agent/mtproto-backups
   install -d -m 0700 "$ROUTEGATE_STATE_DIR"
 
   install -m 0755 "$source_dir/bin/routegate-manager" /usr/local/bin/routegate-manager
+  install -m 0755 "$source_dir/bin/routegate-migrate" /usr/local/bin/routegate-migrate
   install -m 0755 "$source_dir/bin/routegate-agent" /usr/local/bin/routegate-agent
   install -m 0755 "$source_dir/tools/routegate-recovery" /usr/local/sbin/routegate-recovery
 
   rm -rf /opt/routegate-manager/migrations
   cp -a "$source_dir/manager/migrations" /opt/routegate-manager/migrations
-  chown -R routegate:routegate /opt/routegate-manager
+  secure_manager_migration_tree /opt/routegate-manager || die "Cannot protect Manager migrations."
 
   find /var/www/routegate -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   cp -a "$source_dir/frontend/." /var/www/routegate/
@@ -1233,16 +1277,64 @@ SQL
     || die "PostgreSQL database verification failed."
 }
 
+# Run the matching administrative binary before Manager can serve requests.
+# Keep inherited runtime credentials out of this owner-only initialization.
+initialize_manager_schema() (
+  local db_password=$1
+  [[ "$db_password" =~ ^[a-f0-9]{64}$ ]] || return 1
+  cd /opt/routegate-manager || return 1
+  env -i PATH=/usr/bin:/bin \
+    ROUTEGATE_MIGRATOR_DATABASE_URL="postgres://routegate:${db_password}@127.0.0.1:5432/routegate?sslmode=disable" \
+    /usr/local/bin/routegate-migrate --initialize-schema
+)
+
+# Reuse the matching migrator and its canonical grant policy. Only the local
+# PostgreSQL administrator creates roles; the migration owner needs no CREATEROLE.
+prepare_manager_runtime_login() (
+  [[ -n "$ROUTEGATE_RUNTIME_DB_PASSWORD" ]] || return 0 # preserved legacy install
+  [[ "$ROUTEGATE_RUNTIME_DB_PASSWORD" =~ ^[a-f0-9]{64}$ && "$ROUTEGATE_DB_PASSWORD" =~ ^[a-f0-9]{64}$ ]] || return 1
+  local exists temporary
+  cd /opt/routegate-manager || return 1
+  exists=$(runuser -u postgres -- psql -X -qAt --set=ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_roles WHERE rolname='routegate_runtime'") || return 1
+  case "$exists" in
+    0)
+      printf '%s\n' "$ROUTEGATE_RUNTIME_DB_PASSWORD" | runuser -u postgres -- env -i PATH=/usr/bin:/bin \
+        'ROUTEGATE_MIGRATOR_DATABASE_URL=postgres:///routegate?host=/var/run/postgresql&user=postgres' \
+        /usr/local/bin/routegate-migrate --create-runtime-role routegate_runtime --runtime-password-stdin || return 1
+      ;;
+    1) ;; # Resume by authenticating the preserved secret; never reset/adopt.
+    *) return 1 ;;
+  esac
+  env -i PATH=/usr/bin:/bin \
+    ROUTEGATE_MIGRATOR_DATABASE_URL="postgres://routegate:${ROUTEGATE_DB_PASSWORD}@127.0.0.1:5432/routegate?sslmode=disable" \
+    ROUTEGATE_DATABASE_URL="postgres://routegate_runtime:${ROUTEGATE_RUNTIME_DB_PASSWORD}@127.0.0.1:5432/routegate?sslmode=disable" \
+    /usr/local/bin/routegate-migrate --check-connections || return 1
+  temporary=$(mktemp "${ROUTEGATE_MIGRATOR_ENV}.XXXXXX") || return 1
+  trap 'rm -f -- "$temporary"' EXIT
+  printf 'ROUTEGATE_MIGRATOR_DATABASE_URL="postgres://routegate:%s@127.0.0.1:5432/routegate?sslmode=disable"\n' "$ROUTEGATE_DB_PASSWORD" >"$temporary" || return 1
+  chmod 0600 "$temporary" || return 1
+  sync -f "$temporary" || return 1
+  mv -f -- "$temporary" "$ROUTEGATE_MIGRATOR_ENV" || return 1
+  sync -f "$(dirname "$ROUTEGATE_MIGRATOR_ENV")" || return 1
+)
+
 write_manager_environment() {
   local db_password=$1
   local admin_password=$2
+  local database_role=routegate migration_mode=startup
+  if [[ -n "$ROUTEGATE_RUNTIME_DB_PASSWORD" ]]; then
+    database_role=routegate_runtime
+    db_password=$ROUTEGATE_RUNTIME_DB_PASSWORD
+    migration_mode=external
+  fi
 
   install -m 0600 /dev/null "$ROUTEGATE_MANAGER_ENV"
   cat >"$ROUTEGATE_MANAGER_ENV" <<EOF_MANAGER
 ROUTEGATE_ENV="production"
 ROUTEGATE_HTTP_ADDR="127.0.0.1:8080"
 ROUTEGATE_PUBLIC_URL="https://${ROUTEGATE_DOMAIN}"
-ROUTEGATE_DATABASE_URL="postgres://routegate:${db_password}@127.0.0.1:5432/routegate?sslmode=disable"
+ROUTEGATE_DATABASE_MIGRATION_MODE="${migration_mode}"
+ROUTEGATE_DATABASE_URL="postgres://${database_role}:${db_password}@127.0.0.1:5432/routegate?sslmode=disable"
 ROUTEGATE_LOG_LEVEL="info"
 ROUTEGATE_AUTH_SESSION_TTL_HOURS="24"
 ROUTEGATE_BOOTSTRAP_ADMIN_EMAIL="${ROUTEGATE_ADMIN_EMAIL}"
@@ -1276,7 +1368,7 @@ wait_for_url() {
 }
 
 start_manager() {
-  log "Starting RouteGate Manager and applying database migrations."
+  log "Starting RouteGate Manager after database schema initialization."
   systemctl daemon-reload
   systemctl enable --now routegate-manager >>"$ROUTEGATE_LOG_FILE" 2>&1
   if ! wait_for_url "${ROUTEGATE_LOCAL_API}/api/admin/health" 60 2; then
@@ -1787,14 +1879,19 @@ main() {
   initialize_install_state
   set_install_stage dependencies
   install_dependencies
+  load_or_create_secrets
   set_install_stage bundle
   prepare_bundle
   set_install_stage platform_files
   install_files
-  load_or_create_secrets
 
   set_install_stage postgresql
   configure_postgresql "$ROUTEGATE_DB_PASSWORD"
+  set_install_stage database_schema
+  initialize_manager_schema "$ROUTEGATE_DB_PASSWORD" >>"$ROUTEGATE_LOG_FILE" 2>&1 \
+    || die "Database schema initialization failed; Manager was not started."
+  set_install_stage database_runtime
+  prepare_manager_runtime_login >>"$ROUTEGATE_LOG_FILE" 2>&1 || die "Runtime database authentication failed; Manager was not started."
   set_install_stage manager
   write_manager_environment "$ROUTEGATE_DB_PASSWORD" "$ROUTEGATE_ADMIN_PASSWORD"
   start_manager

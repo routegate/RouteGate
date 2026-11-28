@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -43,7 +45,38 @@ func (a *App) Start(ctx context.Context) error {
 
 	a.pool = pool
 
-	if err := db.Migrate(ctx, pool, "migrations", a.logger); err != nil {
+	// Reject a dangerously owned protected namespace BEFORE attempting
+	// migrations. A second check after migrations catches new exposure.
+	if err := db.CheckHeldDispatchRuntimeIsolation(ctx, pool); err != nil {
+		return err
+	}
+
+	// Default startup mode preserves all existing legacy installations.
+	// The opt-in 'external' mode performs only a read-only migration-history
+	// check, so a least-privileged Manager cannot issue schema DDL.
+	switch strings.ToLower(strings.TrimSpace(a.cfg.DatabaseMigrationMode)) {
+	case "", "startup":
+		if err := db.Migrate(ctx, pool, "migrations", a.logger); err != nil {
+			return err
+		}
+	case "external":
+		// Reuse the reviewed owner check from #647. Schema readiness alone
+		// must never accept an owner-capable runtime login.
+		if err := db.CheckExternalMigrationRuntimeRole(ctx, pool); err != nil {
+			return err
+		}
+		if err := db.RequireAppliedMigrations(ctx, pool, "migrations"); err != nil {
+			return err
+		}
+		if err := db.CheckRuntimeRequiredPrivileges(ctx, pool); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("invalid RouteGate database migration mode")
+	}
+	// Do not serve HTTP or start workers if the future privileged issuance
+	// schema is owned by (or usable through) Manager's normal DB connection.
+	if err := db.CheckHeldDispatchRuntimeIsolation(ctx, pool); err != nil {
 		return err
 	}
 	a.backfillClientSettings(ctx, pool)

@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
@@ -208,5 +209,85 @@ func TestReadPlatformUpdateReconciliationRejectsNonCanonicalInputs(t *testing.T)
 		if _, err := readPlatformUpdateReconciliation(store, tc.taskID, tc.version); err == nil {
 			t.Fatalf("non-canonical input accepted: %+v", tc)
 		}
+	}
+}
+
+func TestReconcileSucceededReceiptNeverClearsOrphanedRuntimeAdmission(t *testing.T) {
+	store := testPlatformUpdateReceiptStore(t)
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	taskID := "550e8400-e29b-41d4-a716-446655440000"
+	if _, err := store.CreatePrepared(taskID, "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := BeginRuntimeMutation(dir, taskID, TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkMutationStarted(taskID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkSucceeded(taskID); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	probed := false
+	result, err := reconcilePlatformUpdateForManager(context.Background(), store, taskID, "v1.2.3",
+		func(context.Context, string) (bool, error) {
+			probed = true
+			return false, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probed {
+		t.Fatal("terminal receipt unexpectedly triggered worker probe")
+	}
+	if result.State != PlatformUpdateReconciliationSucceeded {
+		t.Fatalf("durable terminal success was lost: %+v", result)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("Manager reconciliation silently cleared orphaned admission")
+	}
+	if next, err := BeginRuntimeMutation(dir,
+		"11111111-1111-4111-8111-111111111111", TaskKindConfigApply); err == nil {
+		next.Close()
+		t.Fatal("reconciliation reopened admission without independent recovery")
+	}
+}
+
+func TestReconcileMissingWorkerPreservesStartedUpdateAdmission(t *testing.T) {
+	store := testPlatformUpdateReceiptStore(t)
+	dir := filepath.Join(t.TempDir(), "runtime-mutations")
+	taskID := "550e8400-e29b-41d4-a716-446655440000"
+	if _, err := store.CreatePrepared(taskID, "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := BeginRuntimeMutation(dir, taskID, TaskKindPlatformUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkMutationStarted(taskID); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := reconcilePlatformUpdateForManager(context.Background(), store, taskID, "v1.2.3",
+		func(context.Context, string) (bool, error) { return false, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != PlatformUpdateReconciliationOutcomeUnknown {
+		t.Fatalf("missing worker was not marked outcome_unknown: %+v", result)
+	}
+	if RuntimeMutationIdleForPlatformUpdate(dir) {
+		t.Fatal("outcome_unknown reconciliation cleared orphaned admission")
+	}
+	if next, err := BeginRuntimeMutation(dir,
+		"11111111-1111-4111-8111-111111111111", TaskKindVPNCoreService); err == nil {
+		next.Close()
+		t.Fatal("new service mutation admitted after unknown update outcome")
 	}
 }

@@ -1,0 +1,191 @@
+package db
+
+import (
+	"context"
+	"errors"
+	"os"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/ikaevus/routegate/backend/internal/auth"
+	"github.com/ikaevus/routegate/backend/internal/revocations"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+func TestCredentialRemovalDispatchHumanApproval(t *testing.T) {
+	ctx, pool, in, _, done := removalPreparationFixture(t)
+	defer done()
+	svc := revocations.NewService(pool)
+	prepared, err := svc.Prepare(ctx,in)
+	if err!=nil { t.Fatal(err) }
+	ids, err := svc.ReservePreparedRemovalJobIDs(ctx,prepared.ID)
+	if err!=nil { t.Fatal(err) }
+	var initialVersions,initialJobs int
+	if err=pool.QueryRow(ctx,`SELECT
+	 (SELECT count(*) FROM config_versions),
+	 (SELECT count(*) FROM config_apply_jobs)`).Scan(&initialVersions,&initialJobs);err!=nil {
+		t.Fatal(err)
+	}
+
+	actor := auth.AuthenticatedUser{UserProfile:auth.UserProfile{
+		UserType:"human", Status:"active", Roles:[]string{auth.RoleSuperAdmin}, Permissions:[]string{"system:manage","configs:apply","vpn_users:disable"},
+	}}
+	if err=pool.QueryRow(ctx,`INSERT INTO users(email,display_name,user_type,status)
+	 VALUES('revocation-admin@isolated.invalid','Revocation operator','human','active')
+	 RETURNING id::text`).Scan(&actor.ID); err!=nil { t.Fatal(err) }
+	if err=pool.QueryRow(ctx,`INSERT INTO auth_sessions(user_id,token_hash,expires_at)
+	 VALUES($1::uuid,'rg140-isolated-human',clock_timestamp()+interval '1 hour')
+	 RETURNING id::text`,actor.ID).Scan(&actor.SessionID); err!=nil { t.Fatal(err) }
+	if _,err=pool.Exec(ctx,`INSERT INTO roles(code,name) VALUES('super_admin','Super Admin') ON CONFLICT(code) DO NOTHING;
+	 INSERT INTO permissions(code,name) VALUES('configs:apply','Apply config'),('system:manage','Manage system'),('vpn_users:disable','Disable VPN user') ON CONFLICT(code) DO NOTHING`);err!=nil{t.Fatal(err)}
+	if _,err=pool.Exec(ctx,`INSERT INTO user_roles(user_id,role_id) SELECT $1::uuid,id FROM roles WHERE code='super_admin'`,actor.ID);err!=nil{t.Fatal(err)}
+	if _,err=pool.Exec(ctx,`INSERT INTO role_permissions(role_id,permission_id)
+	 SELECT r.id,p.id FROM roles r,permissions p WHERE r.code='super_admin' AND p.code IN ('configs:apply','system:manage','vpn_users:disable')
+	 ON CONFLICT DO NOTHING`);err!=nil{t.Fatal(err)}
+	authorized:=auth.ContextWithUser(ctx,actor)
+	withoutPermission:=actor
+	withoutPermission.Permissions=nil
+	withoutRole:=actor
+	withoutRole.Roles=[]string{auth.RoleAdmin}
+	inp:=revocations.PreparedRemovalDispatchApprovalInput{OperationID:prepared.ID,ConfirmSharedProcessRestart:true}
+	for _,bad:=range []struct{name string; ctx context.Context; input revocations.PreparedRemovalDispatchApprovalInput}{
+		{"no_context",ctx,inp},
+		{"no_confirmation",authorized,revocations.PreparedRemovalDispatchApprovalInput{OperationID:prepared.ID}},
+		{"invalid_operation",authorized,revocations.PreparedRemovalDispatchApprovalInput{OperationID:"invalid",ConfirmSharedProcessRestart:true}},
+		{"no_permission",auth.ContextWithUser(ctx,withoutPermission),inp},
+		{"no_role",auth.ContextWithUser(ctx,withoutRole),inp},
+	}{
+		t.Run(bad.name,func(t *testing.T){
+			if _,err:=svc.IssuePreparedRemovalDispatchApproval(bad.ctx,bad.input); !errors.Is(err,revocations.ErrPreflight) {
+				t.Fatal("unapproved human dispatch authority created",err)
+			}
+		})
+	}
+	var wg sync.WaitGroup
+	results:=make(chan struct{approval revocations.PreparedRemovalDispatchApproval; err error},2)
+	for i:=0;i<2;i++{
+		wg.Add(1)
+		go func(){
+			defer wg.Done()
+			a,e:=svc.IssuePreparedRemovalDispatchApproval(authorized,inp)
+			results<-struct{approval revocations.PreparedRemovalDispatchApproval;err error}{a,e}
+		}()
+	}
+	wg.Wait()
+	a,b:=<-results,<-results
+	if a.err!=nil||b.err!=nil||a.approval!=b.approval ||
+		a.approval.OperationID!=prepared.ID ||
+		a.approval.CandidateVersionID!=ids.CandidateVersionID ||
+		a.approval.ApplyJobID!=ids.ApplyJobID ||
+		a.approval.AgentGeneration!=ids.AgentGeneration ||
+		a.approval.CandidateHash!=ids.CandidateHash ||
+		a.approval.CandidateRuntimeHash!=ids.CandidateRuntimeHash ||
+		len(a.approval.Nonce)!=64 ||
+		a.approval.ExpiresAt.Sub(a.approval.IssuedAt)>2*time.Minute {
+		t.Fatal("human authority not uniquely bound to original job/candidate",a,b)
+	}
+	var count,versionCount,jobCount int
+	if err=pool.QueryRow(ctx,`SELECT
+	 (SELECT count(*) FROM vpn_credential_removal_dispatch_authorizations),
+	 (SELECT count(*) FROM config_versions),
+	 (SELECT count(*) FROM config_apply_jobs)`).Scan(&count,&versionCount,&jobCount); err!=nil ||
+		count!=1 || versionCount!=initialVersions || jobCount!=initialJobs {
+		t.Fatal("authorization changed executable jobs/versions or duplicated authority",
+			count,versionCount,jobCount,initialVersions,initialJobs,err)
+	}
+	for _,sql:=range []string{
+		`UPDATE vpn_credential_removal_dispatch_authorizations SET expires_at=expires_at+interval '1 minute'`,
+		`DELETE FROM vpn_credential_removal_dispatch_authorizations`,
+	}{
+		if _,err=pool.Exec(ctx,sql);err==nil {t.Fatal("historical approval mutable",sql)}
+		var p *pgconn.PgError
+		if !errors.As(err,&p)||p.Code!="P0153" {t.Fatal("wrong immutable authorization guard",err)}
+	}
+	if _,err=pool.Exec(ctx,`UPDATE auth_sessions SET revoked_at=clock_timestamp()
+	 WHERE id=$1::uuid`,actor.SessionID);err!=nil {t.Fatal(err)}
+	if _,err=svc.IssuePreparedRemovalDispatchApproval(authorized,inp);!errors.Is(err,revocations.ErrPreflight){
+		t.Fatal("revoked human session renewed authority",err)
+	}
+	if _,err=pool.Exec(ctx,`INSERT INTO config_apply_jobs
+	 (server_id,agent_id,config_version_id,action)
+	 VALUES($1::uuid,$2::uuid,$3::uuid,'apply')`,
+		prepared.ServerID,prepared.AgentID,ids.BaselineVersionID);err==nil {
+		t.Fatal("new authorization bypassed normal reserved-node apply guard")
+	}
+	var guard *pgconn.PgError
+	if !errors.As(err,&guard)||guard.Code!="P0141" {t.Fatal("normal Apply guard changed",err)}
+	if _,err=svc.Cancel(ctx,prepared.ID,in.Actor);err!=nil {t.Fatal(err)}
+	if _,err=svc.IssuePreparedRemovalDispatchApproval(authorized,inp);!errors.Is(err,revocations.ErrPreflight) {
+		t.Fatal("cancelled preparation renewed dispatch authority",err)
+	}
+	// Keep persistent human approval history: downgrade must fail closed
+	// without relying on the legacy 175–180 migration family.
+	down, err := os.ReadFile("../../migrations/000169_credential_removal_dispatch_authorizations.down.sql")
+	if err != nil { t.Fatal(err) }
+	if _, err = pool.Exec(ctx,string(down)); err == nil {
+		t.Fatal("historical consent was discarded on downgrade")
+	}
+	if err = pool.QueryRow(ctx,`SELECT count(*) FROM vpn_credential_removal_dispatch_authorizations`).Scan(&count); err != nil || count != 1 {
+		t.Fatal("failed downgrade erased one-use approval record",err)
+	}
+}
+
+ 
+// SQL authorization is an independent safety boundary. Even a writer with
+// direct table INSERT permission must not impersonate a super_admin or skip
+// a privilege which the Go preparation adapter requires.
+func TestCredentialRemovalDirectSQLRejectsLesserHumanApproval(t *testing.T) {
+	for _,tc := range []struct {
+		name,role string
+		perms []string
+	}{
+		{"ordinary_admin_all_permissions","admin",[]string{"system:manage","configs:apply","vpn_users:disable"}},
+		{"super_admin_missing_disable","super_admin",[]string{"system:manage","configs:apply"}},
+		{"super_admin_missing_system","super_admin",[]string{"configs:apply","vpn_users:disable"}},
+	} {
+		t.Run(tc.name,func(t *testing.T){
+			ctx,pool,in,_,done:=removalPreparationFixture(t)
+			defer done()
+			svc:=revocations.NewService(pool)
+			prepared,e:=svc.Prepare(ctx,in)
+			if e!=nil{t.Fatal(e)}
+			ids,e:=svc.ReservePreparedRemovalJobIDs(ctx,prepared.ID)
+			if e!=nil{t.Fatal(e)}
+			var userID,sessionID string
+			if e=pool.QueryRow(ctx,`INSERT INTO users(email,display_name,user_type,status)
+				VALUES($1,'Direct SQL reviewer','human','active') RETURNING id::text`,
+				"review-"+tc.name+"@isolated.invalid").Scan(&userID);e!=nil{t.Fatal(e)}
+			if e=pool.QueryRow(ctx,`INSERT INTO auth_sessions(user_id,token_hash,expires_at)
+				VALUES($1::uuid,$2,clock_timestamp()+interval '1 hour') RETURNING id::text`,
+				userID,"review-"+tc.name).Scan(&sessionID);e!=nil{t.Fatal(e)}
+			if _,e=pool.Exec(ctx,`INSERT INTO roles(code,name)
+				VALUES ($1,$2) ON CONFLICT(code) DO NOTHING`,tc.role,tc.role);e!=nil{t.Fatal(e)}
+			if _,e=pool.Exec(ctx,`INSERT INTO user_roles(user_id,role_id)
+				SELECT $1::uuid,id FROM roles WHERE code=$2 ON CONFLICT DO NOTHING`,userID,tc.role);e!=nil{t.Fatal(e)}
+			for _,permission:=range tc.perms {
+				if _,e=pool.Exec(ctx,`INSERT INTO permissions(code,name) VALUES($1,$1) ON CONFLICT(code) DO NOTHING`,permission);e!=nil{t.Fatal(e)}
+				if _,e=pool.Exec(ctx,`INSERT INTO role_permissions(role_id,permission_id)
+					SELECT r.id,p.id FROM roles r,permissions p WHERE r.code=$1 AND p.code=$2
+					ON CONFLICT DO NOTHING`,tc.role,permission);e!=nil{t.Fatal(e)}
+			}
+			_,e=pool.Exec(ctx,`INSERT INTO vpn_credential_removal_dispatch_authorizations
+				(operation_id,actor_user_id,actor_session_id,nonce,
+				candidate_version_id,apply_job_id,agent_credential_generation,
+				candidate_hash,candidate_runtime_hash,issued_at,expires_at)
+				VALUES($1::uuid,$2::uuid,$3::uuid,repeat('a',64),
+					$4::uuid,$5::uuid,$6,$7,$8,
+					clock_timestamp(),clock_timestamp()+interval '1 minute')`,
+					prepared.ID,userID,sessionID,ids.CandidateVersionID,ids.ApplyJobID,
+					ids.AgentGeneration,ids.CandidateHash,ids.CandidateRuntimeHash)
+			var sqlerr *pgconn.PgError
+			if !errors.As(e,&sqlerr) || sqlerr.Code!="P0153" {
+				t.Fatal("direct SQL forged a human dispatch approval",e)
+			}
+			var n int
+			if e=pool.QueryRow(ctx,`SELECT count(*) FROM vpn_credential_removal_dispatch_authorizations`).Scan(&n);e!=nil||n!=0{
+				t.Fatal("unauthorized approval persisted",e,n)
+			}
+		})
+	}
+}

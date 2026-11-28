@@ -79,6 +79,8 @@ build_architecture() {
       -ldflags "-s -w -X github.com/ikaevus/routegate/backend/internal/buildinfo.Version=${VERSION} -X github.com/ikaevus/routegate/backend/internal/buildinfo.GitCommit=${COMMIT} -X github.com/ikaevus/routegate/backend/internal/buildinfo.BuildDate=${BUILD_DATE} -X github.com/ikaevus/routegate/backend/internal/buildinfo.AgentInstallerSHA256=${AGENT_INSTALLER_SHA256} -X github.com/ikaevus/routegate/backend/internal/buildinfo.AgentBundleBaseURL=${AGENT_BUNDLE_BASE_URL}" \
       -o "$stage_dir/bin/routegate-manager" \
       ./cmd/routegate-manager
+    CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "-s -w" \
+      -o "$stage_dir/bin/routegate-migrate" ./cmd/routegate-migrate
   )
 
   log "Building Agent for linux/${arch}."
@@ -128,7 +130,7 @@ EOF_MANIFEST
     cp "$ROOT_DIR/NOTICE" "$stage_dir/metadata/NOTICE"
   fi
 
-  chmod 0755 "$stage_dir/bin/routegate-manager" "$stage_dir/bin/routegate-agent"
+  chmod 0755 "$stage_dir/bin/routegate-migrate" "$stage_dir/bin/routegate-manager" "$stage_dir/bin/routegate-agent"
   find "$stage_dir" -type d -exec chmod 0755 {} +
   find "$stage_dir" -type f ! -path '*/bin/*' -exec chmod 0644 {} +
   chmod 0755 \

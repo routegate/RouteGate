@@ -7,6 +7,79 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=install.sh
 source "$ROOT_DIR/install.sh"
 
+test_missing_resume_secrets() (
+  ROUTEGATE_RESUME_INSTALL=1
+  ROUTEGATE_SECRETS_FILE="$TEST_TMP/missing-secrets"
+  openssl() { touch "$TEST_TMP/unexpected-generation"; return 1; }
+  if (load_or_create_secrets) >/dev/null 2>&1; then return 1; fi
+  [[ ! -e "$ROUTEGATE_SECRETS_FILE" && ! -e "$TEST_TMP/unexpected-generation" ]]
+)
+
+test_atomic_secret_persistence() (
+  ROUTEGATE_SECRETS_FILE="$TEST_TMP/atomic-secrets"
+  ROUTEGATE_INSTALL_PROMETHEUS=0
+  ROUTEGATE_RESUME_INSTALL=0
+  load_or_create_secrets
+  local original
+  original=$(cat "$ROUTEGATE_SECRETS_FILE")
+  [[ $(stat -c '%a' "$ROUTEGATE_SECRETS_FILE") == 600 ]] || return 1
+  ROUTEGATE_RESUME_INSTALL=1
+  load_or_create_secrets
+  [[ $(cat "$ROUTEGATE_SECRETS_FILE") == "$original" ]] || return 1
+  ROUTEGATE_INSTALL_PROMETHEUS=1
+  # Simulate failed publication; existing credentials must remain usable.
+  if (mv() { return 1; }; load_or_create_secrets) >/dev/null 2>&1; then return 1; fi
+  [[ $(cat "$ROUTEGATE_SECRETS_FILE") == "$original" ]] || return 1
+  [[ $(find "$TEST_TMP" -name 'atomic-secrets.*' | wc -l) == 0 ]] || return 1
+  load_or_create_secrets
+  [[ "$ROUTEGATE_MONITORING_TOKEN" =~ ^[a-f0-9]{64}$ ]] || return 1
+  [[ $(sed '/^MONITORING_TOKEN=/d' "$ROUTEGATE_SECRETS_FILE") == "$original" ]] || return 1
+  [[ $(stat -c '%a' "$ROUTEGATE_SECRETS_FILE") == 600 ]]
+)
+
+test_runtime_login_installation() (
+  ROUTEGATE_DB_PASSWORD=$(printf 'a%.0s' {1..64})
+  ROUTEGATE_RUNTIME_DB_PASSWORD=$(printf 'b%.0s' {1..64})
+  ROUTEGATE_MIGRATOR_ENV="$TEST_TMP/owner.env"
+  # Isolated fixture: later tests retain the original global path.
+  # shellcheck disable=SC2030
+  ROUTEGATE_MANAGER_ENV="$TEST_TMP/runtime.env"
+  ROUTEGATE_INSTALL_PROMETHEUS=0
+  local fixture_exists=0 verify_rc=0 created="$TEST_TMP/role-created"
+  cd() { [[ $1 == /opt/routegate-manager ]]; }
+  runuser() {
+    if [[ ${!#} == --runtime-password-stdin ]]; then
+      local password
+      read -r password
+      [[ "$password" == "$ROUTEGATE_RUNTIME_DB_PASSWORD" ]] || return 1
+      touch "$created"
+    else
+      printf '%s\n' "$fixture_exists"
+    fi
+  }
+  env() {
+    [[ $1 == -i && ${!#} == --check-connections ]] || return 1
+    return "$verify_rc"
+  }
+  prepare_manager_runtime_login || return 1
+  [[ -f "$created" && $(stat -c '%a' "$ROUTEGATE_MIGRATOR_ENV") == 600 ]] || return 1
+  write_manager_environment "$ROUTEGATE_DB_PASSWORD" test-admin
+  grep -q 'ROUTEGATE_DATABASE_MIGRATION_MODE="external"' "$ROUTEGATE_MANAGER_ENV" || return 1
+  grep -q "postgres://routegate_runtime:${ROUTEGATE_RUNTIME_DB_PASSWORD}@" "$ROUTEGATE_MANAGER_ENV" || return 1
+  if grep -q "$ROUTEGATE_DB_PASSWORD" "$ROUTEGATE_MANAGER_ENV"; then return 1; fi
+  rm "$created"
+  fixture_exists=1
+  prepare_manager_runtime_login || return 1
+  [[ ! -e "$created" ]] || return 1
+  verify_rc=1
+  if prepare_manager_runtime_login; then return 1; fi
+  [[ ! -e "$created" ]] || return 1
+  ROUTEGATE_RUNTIME_DB_PASSWORD=""
+  prepare_manager_runtime_login || return 1
+  write_manager_environment "$ROUTEGATE_DB_PASSWORD" test-admin
+  grep -q 'ROUTEGATE_DATABASE_MIGRATION_MODE="startup"' "$ROUTEGATE_MANAGER_ENV"
+)
+
 TESTS_RUN=0
 TESTS_FAILED=0
 TEST_TMP=$(mktemp -d /tmp/routegate-installer-tests.XXXXXX)
@@ -264,6 +337,8 @@ test_success_output() {
 }
 
 test_manager_environment_public_url() {
+  # The preceding fixture changed this only inside its subshell.
+  # shellcheck disable=SC2031
   local original_manager_env="$ROUTEGATE_MANAGER_ENV"
   ROUTEGATE_MANAGER_ENV="$TEST_TMP/manager.env"
   ROUTEGATE_DOMAIN="us.routegate.org"
@@ -521,7 +596,32 @@ test_existing_install_precedes_repository_preflight() {
   assert_true     "completed RouteGate installs are verified before clean-host APT trust checks"     test "$existing_line" -lt "$trust_line"
 }
 
+test_schema_initialization_invocation() (
+  local password
+  printf -v password '%064d' 0
+  cd() { [[ "$1" == /opt/routegate-manager ]]; }
+  env() {
+    [[ "$#" == 5 && "$1" == -i && "$2" == PATH=/usr/bin:/bin &&
+       "$3" == "ROUTEGATE_MIGRATOR_DATABASE_URL=postgres://routegate:${password}@127.0.0.1:5432/routegate?sslmode=disable" &&
+       "$4" == /usr/local/bin/routegate-migrate && "$5" == --initialize-schema ]]
+  }
+  initialize_manager_schema "$password" || return 1
+  env() { return 23; }
+  local rc=0
+  initialize_manager_schema "$password" || rc=$?
+  [[ "$rc" == 23 ]] || return 1
+  env() { return 0; }
+  if initialize_manager_schema invalid; then return 1; fi
+)
+
 printf 'TAP version 13\n'
+assert_true "runtime login initialization and resume preserve credential separation" test_runtime_login_installation
+
+assert_true "secret publication preserves credentials on failure and resume" test_atomic_secret_persistence
+
+assert_true "resume refuses missing secrets without regeneration" test_missing_resume_secrets
+
+assert_true "schema initialization isolates owner environment and propagates failure" test_schema_initialization_invocation
 test_apt_repository_trust_preflight
 test_existing_install_precedes_repository_preflight
 test_validation_helpers

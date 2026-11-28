@@ -370,9 +370,17 @@ PY_DATABASE
   verify_retry_before_registration
   run_generated_bootstrap
   verify_manager_observed_agent
+  # Independent diagnostic client; never replace the installed server runtime.
+  curl --fail --silent --show-error --location --retry 2 --max-time 60 \
+    https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz \
+    --output "$WORK_DIR/reference-client.tar.gz"
+  printf '%s  %s\n' 699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968 "$WORK_DIR/reference-client.tar.gz" | sha256sum --check --status
+  tar -xOf "$WORK_DIR/reference-client.tar.gz" sing-box-1.14.4-linux-amd64/sing-box > "$WORK_DIR/reference-client"
+  chmod 0700 "$WORK_DIR/reference-client"
   sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,ROUTEGATE_E2E_ISOLATED \
     python3 "$ROOT_DIR/scripts/remote-node-vpn-e2e.py" \
-    --work-dir "$WORK_DIR" --manager "http://$MANAGER_ADDR"
+    --work-dir "$WORK_DIR" --manager "http://$MANAGER_ADDR" \
+    --reference-client "$WORK_DIR/reference-client"
 
   log "Remote VPN Node bootstrap E2E passed."
 }

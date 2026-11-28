@@ -40,6 +40,10 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 }
 
 func (r *Repository) GetServerConfigInfo(ctx context.Context, serverID string) (ServerConfigInfo, error) {
+	return r.getServerConfigInfo(ctx, serverID, true)
+}
+
+func (r *Repository) getServerConfigInfo(ctx context.Context, serverID string, ensureCredentials bool) (ServerConfigInfo, error) {
 	info, err := scanServerConfigInfo(r.pool.QueryRow(ctx, `
 		SELECT
 			s.id::text,
@@ -88,7 +92,7 @@ func (r *Repository) GetServerConfigInfo(ctx context.Context, serverID string) (
 	if err != nil {
 		return ServerConfigInfo{}, err
 	}
-	if info.VPNProtocol == "wireguard" {
+	if ensureCredentials && info.VPNProtocol == "wireguard" {
 		if err := wgcredentials.EnsureServerPeerCredentials(ctx, r.pool, serverID); err != nil {
 			return ServerConfigInfo{}, err
 		}

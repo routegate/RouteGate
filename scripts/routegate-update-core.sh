@@ -48,6 +48,24 @@ rg_update_require_root() {
   [[ ${EUID:-$(id -u)} -eq 0 ]] || rg_update_die "host update operations must run as root"
 }
 
+# Shared by installation, update and restore. Call only for a trusted tree
+# while Manager is stopped. Legacy archives and environment overrides must
+# never return migration ownership to the service identity.
+rg_update_secure_manager_migrations() {
+  local parent=$1 migrations unsafe
+  migrations="$parent/migrations"
+  [[ -d "$parent" && ! -L "$parent" && -d "$migrations" && ! -L "$migrations" ]] || return 1
+  unsafe=$(find "$migrations" \( ! -type d -a ! -type f \) -print -quit) || return 1
+  [[ -z "$unsafe" ]] || return 1
+  unsafe=$(find "$migrations" -type f -links +1 -print -quit) || return 1
+  [[ -z "$unsafe" ]] || return 1
+  chown root:root "$parent" || return 1
+  chmod 0755 "$parent" || return 1
+  chown -R root:root "$migrations" || return 1
+  find "$migrations" -type d -exec chmod 0755 {} + || return 1
+  find "$migrations" -type f -exec chmod 0644 {} + || return 1
+}
+
 rg_update_require_commands() {
   local command_name
   for command_name in "$@"; do
@@ -226,6 +244,7 @@ rg_update_verify_and_extract_bundle() {
 
   for required in \
     bin/routegate-manager \
+    bin/routegate-migrate \
     bin/routegate-agent \
     frontend/index.html \
     manager/migrations \
@@ -468,6 +487,88 @@ rg_update_control_plane_preflight() {
   done
 }
 
+# Read environment entries as data, never as shell code.
+rg_update_read_environment_value() {
+  local file=$1 key=$2 value=$3 line name found=0
+  [[ -f "$file" && ! -L "$file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # EnvironmentFile permits whitespace around the assignment name. Do not
+    # mistake an external-mode entry for an absent key and skip verification.
+    [[ "$line" == *=* ]] || continue
+    name=${line%%=*}
+    name="${name#"${name%%[!$' \t']*}"}"
+    name="${name%"${name##*[!$' \t']}"}"
+    if [[ "$name" == "$key" ]]; then
+      ((found == 0)) || return 1
+      found=1
+      value=${line#*=}
+      if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+        value=${value:1:${#value}-2}
+      fi
+    fi
+  done <"$file"
+  [[ "$value" != *$'\r'* && "$value" != *$'\n'* ]] || return 1
+  printf '%s\n' "$value"
+}
+
+rg_update_verify_restored_runtime() (
+  local file=$1 mode url binary directory
+  mode=$(rg_update_read_environment_value "$file" ROUTEGATE_DATABASE_MIGRATION_MODE startup) || return 1
+  case "$mode" in
+    startup) return 0 ;;
+    external) ;;
+    *) return 1 ;;
+  esac
+  url=$(rg_update_read_environment_value "$file" ROUTEGATE_DATABASE_URL "") || return 1
+  [[ -n "$url" ]] || return 1
+  binary=$(rg_update_path /usr/local/bin/routegate-migrate) || return 1
+  directory=$(rg_update_path /opt/routegate-manager) || return 1
+  [[ -f "$binary" && ! -L "$binary" && -x "$binary" ]] || return 1
+  cd "$directory" || return 1
+  # Do not inherit migration-owner or ambient PostgreSQL credentials.
+  env -i PATH=/usr/bin:/bin ROUTEGATE_DATABASE_URL="$url" "$binary" --check-runtime
+)
+
+# Capture absence explicitly so restoring a legacy installation removes the new
+# migrator. A declared-present file must never silently become an absent file.
+rg_update_backup_migrator() {
+  local backup_dir=$1 binary
+  binary=$(rg_update_path /usr/local/bin/routegate-migrate) || return 1
+  if [[ -e "$binary" || -L "$binary" ]]; then
+    [[ -f "$binary" && ! -L "$binary" && -s "$binary" ]] || return 1
+    cp -p "$binary" "$backup_dir/routegate-migrate" || return 1
+    printf 'present\n' >"$backup_dir/migrator.state" || return 1
+  else
+    printf 'absent\n' >"$backup_dir/migrator.state" || return 1
+  fi
+}
+
+rg_update_validate_migrator_backup() {
+  local backup_dir=$1 state=absent
+  if [[ -e "$backup_dir/migrator.state" || -L "$backup_dir/migrator.state" ]]; then
+    [[ -f "$backup_dir/migrator.state" && ! -L "$backup_dir/migrator.state" ]] || return 1
+    state=$(cat "$backup_dir/migrator.state") || return 1
+  fi
+  case "$state" in
+    present) [[ -f "$backup_dir/routegate-migrate" && ! -L "$backup_dir/routegate-migrate" && -s "$backup_dir/routegate-migrate" ]] ;;
+    absent) [[ ! -e "$backup_dir/routegate-migrate" && ! -L "$backup_dir/routegate-migrate" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+rg_update_restore_migrator() {
+  local backup_dir=$1 binary
+  rg_update_validate_migrator_backup "$backup_dir" || return 1
+  binary=$(rg_update_path /usr/local/bin/routegate-migrate) || return 1
+  [[ ! -L "$binary" ]] || return 1
+  if [[ -f "$backup_dir/routegate-migrate" ]]; then
+    install -m 0755 "$backup_dir/routegate-migrate" "$binary" || return 1
+  else
+    # Old backups predate this binary; do not leave a newer migration executable.
+    rm -f -- "$binary" || return 1
+  fi
+}
+
 rg_update_create_backup() {
   local backup_dir=$1
   local db_url=$2
@@ -498,6 +599,7 @@ rg_update_create_backup() {
   manager_env=$(rg_update_path /etc/routegate/manager.env) || return 1
 
   cp -a "$manager_bin" "$backup_dir/routegate-manager" || return 1
+  rg_update_backup_migrator "$backup_dir" || return 1
   cp -a "$agent_bin" "$backup_dir/routegate-agent" || return 1
   cp -a "$manager_unit" "$backup_dir/routegate-manager.service" || return 1
   cp -a "$agent_unit" "$backup_dir/routegate-agent.service" || return 1
@@ -531,11 +633,12 @@ rg_update_apply_platform_files() {
   systemctl stop "$RG_UPDATE_AGENT_SERVICE" || return 1
   systemctl stop "$RG_UPDATE_MANAGER_SERVICE" || return 1
   install -m 0755 "$work_dir/bin/routegate-manager" "$manager_bin" || return 1
+  install -m 0755 "$work_dir/bin/routegate-migrate" "$(rg_update_path /usr/local/bin/routegate-migrate)" || return 1
   install -m 0755 "$work_dir/bin/routegate-agent" "$agent_bin" || return 1
 
   rm -rf "$migrations_dir" || return 1
   cp -a "$work_dir/manager/migrations" "$migrations_dir" || return 1
-  chown -R "$RG_UPDATE_MANAGER_OWNER" "$(dirname "$migrations_dir")" || return 1
+  rg_update_secure_manager_migrations "$(dirname "$migrations_dir")" || return 1
 
   install -d -m 0755 "$frontend_dir" || return 1
   if [[ -e "$bootstrap_dir" || -L "$bootstrap_dir" ]]; then
@@ -627,6 +730,19 @@ rg_update_wait_agent() {
   rg_update_die "agent did not become active within ${attempts}s"
 }
 
+# Restore the security boundary recorded in the same backup as Manager's mode.
+rg_update_restore_database() {
+  local backup_dir=$1 db_url=$2 mode
+  local -a options=(--single-transaction --clean --if-exists)
+  mode=$(rg_update_read_environment_value "$backup_dir/manager.env" ROUTEGATE_DATABASE_MIGRATION_MODE startup) || return 1
+  case "$mode" in
+    startup) options+=(--no-owner --no-privileges) ;;
+    external) ;; # Preserve recorded owners and ACLs; never grant blanket DML.
+    *) rg_update_die "unknown migration mode in database backup"; return 1 ;;
+  esac
+  pg_restore "${options[@]}" --exit-on-error --dbname="$db_url" "$backup_dir/routegate.pgdump"
+}
+
 rg_update_restore_backup() {
   local backup_dir=$1
   local db_url=$2
@@ -664,8 +780,15 @@ rg_update_restore_backup() {
   migrations_parent=$(dirname "$migrations_dir")
   frontend_parent=$(dirname "$frontend_dir")
 
-  systemctl stop "$RG_UPDATE_AGENT_SERVICE" "$RG_UPDATE_MANAGER_SERVICE" >/dev/null 2>&1 || true
+  systemctl stop "$RG_UPDATE_AGENT_SERVICE" "$RG_UPDATE_MANAGER_SERVICE" >/dev/null 2>&1 || {
+    rg_update_die "cannot stop services before restoring privileged inputs"
+    return 1
+  }
 
+  rg_update_validate_migrator_backup "$backup_dir" || {
+    rg_update_die "migrator backup is incomplete or unsafe"
+    return 1
+  }
   RG_UPDATE_DB_RESTORE_RC=0
   if [[ "$restore_database" == "1" ]]; then
     if [[ -z "$db_url" || ! -s "$backup_dir/routegate.pgdump" ]]; then
@@ -673,14 +796,8 @@ rg_update_restore_backup() {
       rollback_rc=1
       printf '%s WARNING: database restore requested but database backup is unavailable\n' "$RG_UPDATE_LOG_PREFIX" >&2
     else
-      pg_restore \
-        --clean \
-        --if-exists \
-        --no-owner \
-        --no-privileges \
-        --exit-on-error \
-        --dbname="$db_url" \
-        "$backup_dir/routegate.pgdump" >/dev/null || restore_rc=$?
+      # Keep the pre-restore database intact if any restore command fails.
+      rg_update_restore_database "$backup_dir" "$db_url" >/dev/null || restore_rc=$?
       RG_UPDATE_DB_RESTORE_RC=$restore_rc
       if ((RG_UPDATE_DB_RESTORE_RC != 0)); then
         rollback_rc=1
@@ -690,13 +807,20 @@ rg_update_restore_backup() {
     fi
   fi
 
+  rg_update_restore_migrator "$backup_dir" || {
+    rg_update_die "cannot restore matching migrator; services remain stopped"
+    return 1
+  }
   install -m 0755 "$backup_dir/routegate-manager" "$manager_bin" || rollback_rc=1
   install -m 0755 "$backup_dir/routegate-agent" "$agent_bin" || rollback_rc=1
 
   rm -rf "$migrations_dir" || rollback_rc=1
   install -d -m 0755 "$migrations_parent" || rollback_rc=1
   tar -xzf "$backup_dir/manager-migrations.tar.gz" -C "$migrations_parent" || rollback_rc=1
-  chown -R "$RG_UPDATE_MANAGER_OWNER" "$migrations_parent" || rollback_rc=1
+  rg_update_secure_manager_migrations "$migrations_parent" || {
+    rg_update_die "cannot protect restored Manager migrations; services remain stopped"
+    return 1
+  }
 
   rm -rf "$frontend_dir" || rollback_rc=1
   install -d -m 0755 "$frontend_parent" || rollback_rc=1
@@ -704,7 +828,11 @@ rg_update_restore_backup() {
 
   install -m 0644 "$backup_dir/routegate-manager.service" "$manager_unit" || rollback_rc=1
   install -m 0644 "$backup_dir/routegate-agent.service" "$agent_unit" || rollback_rc=1
-  install -m 0600 "$backup_dir/manager.env" "$manager_env" || rollback_rc=1
+  install -m 0600 "$backup_dir/manager.env" "$manager_env" || return 1
+  rg_update_verify_restored_runtime "$manager_env" || {
+    rg_update_die "restored runtime verification failed; Manager remains stopped"
+    return 1
+  }
 
   systemctl daemon-reload || rollback_rc=1
   if ! rg_update_wait_manager 45; then

@@ -174,6 +174,21 @@ func (a singBoxVLESSAdapter) IsEnabled(ctx context.Context) (ServiceResult, erro
 	return a.service.IsEnabled(ctx)
 }
 
+func (a singBoxVLESSAdapter) ObserveGeneration(ctx context.Context, activePath string) (RuntimeGeneration, error) {
+	generation, err := a.service.ObserveGeneration(ctx)
+	if err != nil {
+		return RuntimeGeneration{}, ErrCredentialRemoval
+	}
+	if err := verifyRemovalProcessSource(generation.PID, a.validator.binary, activePath); err != nil {
+		return RuntimeGeneration{}, ErrCredentialRemoval
+	}
+	stable, err := a.service.ObserveGeneration(ctx)
+	if err != nil || stable != generation {
+		return RuntimeGeneration{}, ErrCredentialRemoval
+	}
+	return generation, nil
+}
+
 func (a singBoxVLESSAdapter) ExecuteServiceTask(ctx context.Context, task ConfigTask) (ServiceTaskReport, error) {
 	return ExecuteServiceTask(ctx, a.service, task)
 }

@@ -61,6 +61,7 @@ prepare_bundle() {
     "$STAGE/tools"
 
   printf 'manager\n' >"$STAGE/bin/routegate-manager"
+  printf 'migrator\n' >"$STAGE/bin/routegate-migrate"
   printf 'agent\n' >"$STAGE/bin/routegate-agent"
   printf 'html\n' >"$STAGE/frontend/index.html"
   printf 'SELECT 1;\n' >"$STAGE/manager/migrations/${MIGRATION}.up.sql"
