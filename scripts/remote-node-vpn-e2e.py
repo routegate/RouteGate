@@ -312,7 +312,7 @@ def reference_client_probe(work, config, origin_port, binary):
 
 
 def reference_pair_probe(work, config, active, origin_port, binary):
-    """Use an isolated old server to distinguish server-version failures."""
+    """Use an isolated server/client pair to compare runtime and service failures."""
     if binary is None:
         return "not_configured"
     server = json.loads(json.dumps(active))
@@ -438,7 +438,8 @@ def exercise(work, manager, reference_client=None):
             diagnostic = traffic_diagnostics(work, client)
             reference = reference_client_probe(work, config, origin.server_port, reference_client)
             pair = reference_pair_probe(work, config, active_config, origin.server_port, reference_client)
-            raise RuntimeError(f"{error} ({diagnostic}, reference_1_14_4={reference}, reference_pair_1_14_4={pair})") from None
+            installed_pair = reference_pair_probe(work, config, active_config, origin.server_port, "/usr/bin/sing-box")
+            raise RuntimeError(f"{error} ({diagnostic}, reference_1_14_4={reference}, reference_pair_1_14_4={pair}, installed_pair={installed_pair})") from None
         before_hash, before_state = active_hash(), service_state()
         print("[remote-vpn-e2e] Real SOCKS -> VLESS/Reality -> origin traffic passed.", flush=True)
 
