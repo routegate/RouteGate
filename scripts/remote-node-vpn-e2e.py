@@ -172,7 +172,11 @@ def private_error_flags(data):
                 "reset": "connection reset", "timeout": "timeout",
                 "eof": "eof", "permission": "permission denied",
                 "unreachable": "unreachable", "unsupported": "unsupported",
-                "invalid": "invalid", "missing": "not found"}
+                "invalid": "invalid", "missing": "not found",
+                "invalid_reality": "processed invalid connection",
+                "target_dial": "failed to dial dest", "tls_record": "first record",
+                "key_share": "key share", "cipher": "shared cipher",
+                "user": "unknown user", "flow": "flow", "blocked": "reject"}
     return ",".join(label for label, needle in patterns.items() if needle in text) or "unclassified"
 
 
@@ -192,9 +196,17 @@ def traffic_diagnostics(work, client):
                 flags[name] = private_error_flags(log.read(65536))
         except OSError:
             flags[name] = "unavailable"
+    try:
+        journal = subprocess.run(["journalctl", "-u", "sing-box.service", "-n", "30",
+                                  "--no-pager", "--output=cat"],
+                                 capture_output=True, timeout=5, check=False)
+        server_flags = private_error_flags(journal.stdout[-65536:])
+    except (OSError, subprocess.TimeoutExpired):
+        server_flags = "unavailable"
     alive = "yes" if client.poll() is None else "no"
     return (f"sing_box={runtime_version}, client_alive={alive}, "
-            f"client_flags={flags['vpn-client']}, target_flags={flags['reality-target']}")
+            f"client_flags={flags['vpn-client']}, target_flags={flags['reality-target']}, "
+            f"server_flags={server_flags}")
 
 
 def stop(process):
