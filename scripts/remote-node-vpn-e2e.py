@@ -188,25 +188,20 @@ def traffic_diagnostics(work, client):
     except (OSError, subprocess.TimeoutExpired):
         runtime_version = "unknown"
     flags = {}
-    for name in ("vpn-client", "reality-target"):
+    for name, path in {"vpn-client": work / "vpn-client.log",
+                       "reality-target": work / "reality-target.log",
+                       "server": Path("/var/lib/sing-box/routegate-presence.log")}.items():
         try:
-            with (work / (name + ".log")).open("rb") as log:
+            with path.open("rb") as log:
                 log.seek(0, 2)
                 log.seek(max(0, log.tell() - 65536))
                 flags[name] = private_error_flags(log.read(65536))
         except OSError:
             flags[name] = "unavailable"
-    try:
-        journal = subprocess.run(["journalctl", "-u", "sing-box.service", "-n", "30",
-                                  "--no-pager", "--output=cat"],
-                                 capture_output=True, timeout=5, check=False)
-        server_flags = private_error_flags(journal.stdout[-65536:])
-    except (OSError, subprocess.TimeoutExpired):
-        server_flags = "unavailable"
     alive = "yes" if client.poll() is None else "no"
     return (f"sing_box={runtime_version}, client_alive={alive}, "
             f"client_flags={flags['vpn-client']}, target_flags={flags['reality-target']}, "
-            f"server_flags={server_flags}")
+            f"server_flags={flags['server']}")
 
 
 def stop(process):
