@@ -311,6 +311,37 @@ def reference_client_probe(work, config, origin_port, binary):
             stop(process)
 
 
+def reference_pair_probe(work, config, active, origin_port, binary):
+    """Use an isolated old server to distinguish server-version failures."""
+    if binary is None:
+        return "not_configured"
+    server = json.loads(json.dumps(active))
+    peer = json.loads(json.dumps(config))
+    inbounds = server.get("inbounds", [])
+    if len(inbounds) != 1 or inbounds[0].get("type") != "vless":
+        return "unsupported_fixture"
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    inbounds[0]["listen"], inbounds[0]["listen_port"] = "127.0.0.1", port
+    peer["outbounds"][0]["server_port"] = port
+    server.setdefault("log", {})["output"] = str(work / "reference-server-runtime.log")
+    path = work / "reference-server.json"
+    path.write_text(json.dumps(server))
+    process = None
+    try:
+        with (work / "reference-server.log").open("wb") as log:
+            process = subprocess.Popen([str(binary), "run", "-c", str(path)],
+                                       stdout=log, stderr=log)
+            wait_listener(port, process)
+            return reference_client_probe(work, peer, origin_port, binary)
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        return "failed"
+    finally:
+        if process is not None:
+            stop(process)
+
+
 def exercise(work, manager, reference_client=None):
     isolated(manager)
     require(os.geteuid() == 0, "The isolated continuation requires root")
@@ -390,7 +421,8 @@ def exercise(work, manager, reference_client=None):
         config = client_config(link)
         require(config["outbounds"][0]["tls"]["server_name"] == TARGET,
                 "Served Reality name differs from the applied fixture")
-        verify_client_binding(config, json.loads(Path("/etc/sing-box/config.json").read_text()))
+        active_config = json.loads(Path("/etc/sing-box/config.json").read_text())
+        verify_client_binding(config, active_config)
         print("[remote-vpn-e2e] Served client matches applied UUID, flow, SNI, short ID, port and derived Reality public key.", flush=True)
         client_path = work / "vpn-client.json"
         client_path.write_text(json.dumps(config))
@@ -405,7 +437,8 @@ def exercise(work, manager, reference_client=None):
         except RuntimeError as error:
             diagnostic = traffic_diagnostics(work, client)
             reference = reference_client_probe(work, config, origin.server_port, reference_client)
-            raise RuntimeError(f"{error} ({diagnostic}, reference_1_12_8={reference})") from None
+            pair = reference_pair_probe(work, config, active_config, origin.server_port, reference_client)
+            raise RuntimeError(f"{error} ({diagnostic}, reference_1_12_8={reference}, reference_pair_1_12_8={pair})") from None
         before_hash, before_state = active_hash(), service_state()
         print("[remote-vpn-e2e] Real SOCKS -> VLESS/Reality -> origin traffic passed.", flush=True)
 

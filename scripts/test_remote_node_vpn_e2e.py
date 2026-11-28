@@ -126,6 +126,22 @@ class VPNContinuationTests(unittest.TestCase):
                 stopped.assert_called_once()
                 self.assertNotIn("private", result)
 
+    def test_reference_pair_is_loopback_only_and_preserves_originals(self):
+        config = e2e.client_config(LINK)
+        active = {"inbounds": [{"type": "vless", "listen": "::", "listen_port": 8443}]}
+        original = copy.deepcopy((config, active))
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(e2e.subprocess, "Popen", return_value=Mock()), \
+                 patch.object(e2e, "wait_listener"), patch.object(e2e, "stop") as stopped, \
+                 patch.object(e2e, "reference_client_probe", return_value="passed") as probe:
+                result = e2e.reference_pair_probe(Path(directory), config, active, 12345, Path("/reference-client"))
+            server = e2e.json.loads((Path(directory) / "reference-server.json").read_text())
+        self.assertEqual(result, "passed")
+        self.assertEqual((config, active), original)
+        self.assertEqual(server["inbounds"][0]["listen"], "127.0.0.1")
+        self.assertEqual(probe.call_args.args[1]["outbounds"][0]["server_port"], server["inbounds"][0]["listen_port"])
+        stopped.assert_called_once()
+
     def test_traffic_cannot_bypass_the_socks_proxy(self):
         with patch.object(e2e, "run", return_value=e2e.MARKER) as command:
             e2e.traffic(12345)
