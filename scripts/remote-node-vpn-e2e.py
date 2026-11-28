@@ -438,7 +438,7 @@ def exercise(work, manager, reference_client=None):
             diagnostic = traffic_diagnostics(work, client)
             reference = reference_client_probe(work, config, origin.server_port, reference_client)
             pair = reference_pair_probe(work, config, active_config, origin.server_port, reference_client)
-            raise RuntimeError(f"{error} ({diagnostic}, reference_1_12_8={reference}, reference_pair_1_12_8={pair})") from None
+            raise RuntimeError(f"{error} ({diagnostic}, reference_1_14_4={reference}, reference_pair_1_14_4={pair})") from None
         before_hash, before_state = active_hash(), service_state()
         print("[remote-vpn-e2e] Real SOCKS -> VLESS/Reality -> origin traffic passed.", flush=True)
 
