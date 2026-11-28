@@ -4,6 +4,7 @@ Do not print API responses, links, keys, configs, or subprocess diagnostics:
 they contain test credentials. The runner destroys private logs afterwards.
 """
 import argparse
+import base64
 from contextlib import ExitStack
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -65,6 +66,37 @@ def client_config(link):
                                            "short_id": field("sid")}}}],
         "route": {"final": "vpn"},
     }
+
+
+def verify_client_binding(client, active):
+    """Compare private material locally; errors contain only field names."""
+    outbound = client["outbounds"][0]
+    matches = [i for i in active.get("inbounds", [])
+               if i.get("type") == "vless" and i.get("listen_port") == outbound["server_port"]]
+    require(len(matches) == 1, "Applied client binding mismatch: listener")
+    inbound = matches[0]
+    users = [u for u in inbound.get("users", []) if u.get("uuid") == outbound["uuid"]]
+    require(len(users) == 1, "Applied client binding mismatch: UUID")
+    require(users[0].get("flow", "") == outbound.get("flow", ""),
+            "Applied client binding mismatch: flow")
+    tls, peer = inbound.get("tls", {}), outbound["tls"]
+    require(tls.get("enabled") is True and tls.get("server_name") == peer["server_name"],
+            "Applied client binding mismatch: SNI")
+    reality = tls.get("reality", {})
+    require(reality.get("enabled") is True and peer["reality"]["short_id"] in reality.get("short_id", []),
+            "Applied client binding mismatch: short ID")
+    try:
+        private = base64.urlsafe_b64decode(reality["private_key"] + "===")
+        public = base64.urlsafe_b64decode(peer["reality"]["public_key"] + "===")
+        require(len(private) == 32 and len(public) == 32, "Invalid Reality key length")
+        derived = subprocess.run(["openssl", "pkey", "-inform", "DER", "-pubout", "-outform", "DER"],
+                                 input=bytes.fromhex("302e020100300506032b656e04220420") + private,
+                                 capture_output=True, timeout=5, check=False)
+        expected = bytes.fromhex("302a300506032b656e032100") + public
+        require(derived.returncode == 0 and derived.stdout == expected,
+                "Applied client binding mismatch: Reality key pair")
+    except (KeyError, ValueError, OSError, subprocess.TimeoutExpired):
+        raise RuntimeError("Cannot verify applied Reality key pair") from None
 
 
 class API:
@@ -332,6 +364,8 @@ def exercise(work, manager):
         config = client_config(link)
         require(config["outbounds"][0]["tls"]["server_name"] == TARGET,
                 "Served Reality name differs from the applied fixture")
+        verify_client_binding(config, json.loads(Path("/etc/sing-box/config.json").read_text()))
+        print("[remote-vpn-e2e] Served client matches applied UUID, flow, SNI, short ID, port and derived Reality public key.", flush=True)
         client_path = work / "vpn-client.json"
         client_path.write_text(json.dumps(config))
         run("sing-box", "check", "-c", str(client_path))
