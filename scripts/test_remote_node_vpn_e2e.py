@@ -4,8 +4,9 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 REPO = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("vpn_e2e", REPO / "scripts/remote-node-vpn-e2e.py")
@@ -107,6 +108,23 @@ class VPNContinuationTests(unittest.TestCase):
         self.assertEqual(e2e.private_error_flags(b"private-key verification failed: connection refused"),
                          "verification,refused")
         self.assertEqual(e2e.private_error_flags(b"private-token-and-address"), "unclassified")
+
+    def test_reference_probe_preserves_config_and_reports_only_outcome(self):
+        config = e2e.client_config(LINK)
+        original = copy.deepcopy(config)
+        for failed in (False, True):
+            with tempfile.TemporaryDirectory() as directory, self.subTest(failed=failed):
+                with patch.object(e2e.subprocess, "Popen", return_value=Mock()) as launch, \
+                     patch.object(e2e, "wait_listener"), patch.object(e2e, "stop") as stopped, \
+                     patch.object(e2e, "traffic", side_effect=RuntimeError("private-key") if failed else None) as probe:
+                    result = e2e.reference_client_probe(Path(directory), config, 12345, Path("/reference-client"))
+                self.assertEqual(result, "failed" if failed else "passed")
+                self.assertEqual(config, original)
+                self.assertEqual(launch.call_args.args[0][:2], ["/reference-client", "run"])
+                self.assertEqual(probe.call_args.args, (12345,))
+                self.assertGreater(probe.call_args.kwargs["proxy_port"], 0)
+                stopped.assert_called_once()
+                self.assertNotIn("private", result)
 
     def test_traffic_cannot_bypass_the_socks_proxy(self):
         with patch.object(e2e, "run", return_value=e2e.MARKER) as command:

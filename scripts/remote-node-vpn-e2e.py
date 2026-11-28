@@ -278,14 +278,40 @@ class Origin(BaseHTTPRequestHandler):
         pass
 
 
-def traffic(port):
+def traffic(port, proxy_port=10808):
     body = run("curl", "--fail", "--silent", "--show-error", "--max-time", "15",
-               "--noproxy", "", "--socks5-hostname", "127.0.0.1:10808",
+               "--noproxy", "", "--socks5-hostname", f"127.0.0.1:{proxy_port}",
                f"http://127.0.0.1:{port}/through-reality")
     require(body == MARKER, "VPN traffic did not reach the isolated origin")
 
 
-def exercise(work, manager):
+def reference_client_probe(work, config, origin_port, binary):
+    """Diagnostic only: success never converts the original failure to a pass."""
+    if binary is None:
+        return "not_configured"
+    probe = json.loads(json.dumps(config))
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        proxy_port = listener.getsockname()[1]
+    probe["inbounds"][0]["listen_port"] = proxy_port
+    path = work / "reference-client.json"
+    path.write_text(json.dumps(probe))
+    process = None
+    try:
+        with (work / "reference-client.log").open("wb") as log:
+            process = subprocess.Popen([str(binary), "run", "-c", str(path)],
+                                       stdout=log, stderr=log)
+            wait_listener(proxy_port, process)
+            traffic(origin_port, proxy_port=proxy_port)
+        return "passed"
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        return "failed"
+    finally:
+        if process is not None:
+            stop(process)
+
+
+def exercise(work, manager, reference_client=None):
     isolated(manager)
     require(os.geteuid() == 0, "The isolated continuation requires root")
     os.umask(0o077)
@@ -377,7 +403,9 @@ def exercise(work, manager):
         try:
             traffic(origin.server_port)
         except RuntimeError as error:
-            raise RuntimeError(f"{error} ({traffic_diagnostics(work, client)})") from None
+            diagnostic = traffic_diagnostics(work, client)
+            reference = reference_client_probe(work, config, origin.server_port, reference_client)
+            raise RuntimeError(f"{error} ({diagnostic}, reference_1_12_8={reference})") from None
         before_hash, before_state = active_hash(), service_state()
         print("[remote-vpn-e2e] Real SOCKS -> VLESS/Reality -> origin traffic passed.", flush=True)
 
@@ -402,9 +430,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--manager", required=True)
+    parser.add_argument("--reference-client", type=Path)
     args = parser.parse_args()
     try:
-        exercise(args.work_dir, args.manager)
+        exercise(args.work_dir, args.manager, args.reference_client)
     except Exception as error:
         # Never interpolate arbitrary API/subprocess errors that may hold keys.
         print("[remote-vpn-e2e] FAILED: " + (str(error) if isinstance(error, RuntimeError)
